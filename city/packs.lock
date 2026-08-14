@@ -1,0 +1,26 @@
+schema = 1
+
+[packs."https://github.com/gastownhall/gascity-packs/tree/main/compound-engineering"]
+version = "sha:5d2a9d023edbb9ba24fdcff554e89fc3d7da72fe"
+commit = "5d2a9d023edbb9ba24fdcff554e89fc3d7da72fe"
+fetched = "2026-08-14T22:39:05Z"
+
+[packs."https://github.com/gastownhall/gascity-packs/tree/main/discord"]
+version = "sha:5d2a9d023edbb9ba24fdcff554e89fc3d7da72fe"
+commit = "5d2a9d023edbb9ba24fdcff554e89fc3d7da72fe"
+fetched = "2026-08-14T22:39:05Z"
+
+[packs."https://github.com/gastownhall/gascity-packs/tree/main/gascity/roles"]
+version = "sha:5d2a9d023edbb9ba24fdcff554e89fc3d7da72fe"
+commit = "5d2a9d023edbb9ba24fdcff554e89fc3d7da72fe"
+fetched = "2026-08-14T22:39:05Z"
+
+[packs."https://github.com/gastownhall/gascity.git//examples/bd"]
+version = "sha:f6741d94861aa14f0253deffbe9efb1cb3a35d92"
+commit = "f6741d94861aa14f0253deffbe9efb1cb3a35d92"
+fetched = "2026-08-14T22:39:05Z"
+
+[packs."https://github.com/gastownhall/gascity.git//internal/bootstrap/packs/core"]
+version = "sha:f6741d94861aa14f0253deffbe9efb1cb3a35d92"
+commit = "f6741d94861aa14f0253deffbe9efb1cb3a35d92"
+fetched = "2026-08-14T22:39:05Z"

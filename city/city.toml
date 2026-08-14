@@ -1,0 +1,12 @@
+[workspace]
+name = "d2b-gascity"
+
+[defaults.rig.imports.roles]
+source = "https://github.com/gastownhall/gascity-packs/tree/main/gascity/roles"
+version = "sha:5d2a9d023edbb9ba24fdcff554e89fc3d7da72fe"
+
+[[rigs]]
+name = "d2b"
+prefix = "d2b"
+default_branch = "v3"
+suspended_on_start = true
