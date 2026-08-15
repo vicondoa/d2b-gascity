@@ -27,6 +27,11 @@ The `init` mode:
 5. Installs the exact locked imports, clones or accepts a `v3` d2b checkout,
    and runs `gc rig add --start-suspended`.
 
+If initialization, import installation, or rig setup fails after materializing
+the city, bootstrap best-effort stops that city before returning the original
+failure. The final stop on a successful init remains enforcing: a cleanup
+failure is reported as the init failure.
+
 It never calls `gc register`, starts a supervisor, installs a user unit, or
 writes `.gc/site.toml` itself. Gas City creates `.gc/site.toml` during
 `gc rig add`; that file binds the machine-local rig path and is never

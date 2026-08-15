@@ -58,6 +58,13 @@ acp_args = ["run", "--profile", "code-luna", "--tool-policy", "coding"]
 path_check = "d2b-gascity-copilot-provider"
 supports_acp = true
 
+[providers.publication-worker]
+command = "d2b-gascity-publication-worker"
+prompt_mode = "none"
+ready_delay_ms = 0
+path_check = "d2b-gascity-publication-worker"
+supports_acp = false
+
 [[patches.rigs]]
 name = "d2b"
 formula_vars = { base_branch = "v3", base_ref = "origin/v3" }
@@ -277,8 +284,11 @@ session = "acp"
 [[patches.agent]]
 dir = "d2b"
 name = "publisher"
-provider = "copilot-code-luna"
-session = "acp"
+provider = "publication-worker"
+session = "tmux"
+start_command = "d2b-gascity-publication-worker"
+lifecycle = "one_shot"
+max_active_sessions = 1
 
 [[patches.agent]]
 dir = "d2b"

@@ -71,21 +71,17 @@ let
       assertion = absolutePath cfg.credentials.copilotTokenFile;
       message = "services.d2bGasCity.credentials.copilotTokenFile must be absolute.";
     })
-    (lib.optional (cfg.credentials.githubTokenFile != null) {
-      assertion = absolutePath cfg.credentials.githubTokenFile;
-      message = "services.d2bGasCity.credentials.githubTokenFile must be absolute.";
+    (lib.optional (cfg.credentials.githubPublicationTokenFile != null) {
+      assertion = absolutePath cfg.credentials.githubPublicationTokenFile;
+      message = "services.d2bGasCity.credentials.githubPublicationTokenFile must be absolute.";
     })
-    (lib.optional (cfg.credentials.githubPrivateKeyFile != null) {
-      assertion = absolutePath cfg.credentials.githubPrivateKeyFile;
-      message = "services.d2bGasCity.credentials.githubPrivateKeyFile must be absolute.";
+    (lib.optional (cfg.credentials.githubPublicationPolicyFile != null) {
+      assertion = absolutePath cfg.credentials.githubPublicationPolicyFile;
+      message = "services.d2bGasCity.credentials.githubPublicationPolicyFile must be absolute.";
     })
     (lib.optional (cfg.credentials.discordBotTokenFile != null) {
       assertion = absolutePath cfg.credentials.discordBotTokenFile;
       message = "services.d2bGasCity.credentials.discordBotTokenFile must be absolute.";
-    })
-    (lib.optional (cfg.credentials.buildBuddyApiKeyFile != null) {
-      assertion = absolutePath cfg.credentials.buildBuddyApiKeyFile;
-      message = "services.d2bGasCity.credentials.buildBuddyApiKeyFile must be absolute.";
     })
     (lib.optional (
       cfg.dashboard.remote.tinyauthUsersFile != null
@@ -172,28 +168,22 @@ in
         description = "Optional root-owned Copilot credential source.";
       };
 
-      githubTokenFile = mkOption {
+      githubPublicationTokenFile = mkOption {
         type = path;
         default = null;
-        description = "Optional root-owned GitHub token source.";
+        description = "Optional host-local GitHub publication token source.";
       };
 
-      githubPrivateKeyFile = mkOption {
+      githubPublicationPolicyFile = mkOption {
         type = path;
         default = null;
-        description = "Optional root-owned GitHub private-key source.";
+        description = "Optional host-local GitHub publication policy source.";
       };
 
       discordBotTokenFile = mkOption {
         type = path;
         default = null;
         description = "Optional root-owned Discord bot-token source.";
-      };
-
-      buildBuddyApiKeyFile = mkOption {
-        type = path;
-        default = null;
-        description = "Optional root-owned BuildBuddy API-key source.";
       };
     };
 

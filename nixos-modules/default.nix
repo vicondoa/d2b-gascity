@@ -34,14 +34,12 @@ let
   credentials = lib.concatLists [
     (lib.optional (cfg.credentials.copilotTokenFile != null)
       "copilot-token:${cfg.credentials.copilotTokenFile}")
-    (lib.optional (cfg.credentials.githubTokenFile != null)
-      "github-token:${cfg.credentials.githubTokenFile}")
-    (lib.optional (cfg.credentials.githubPrivateKeyFile != null)
-      "github-private-key:${cfg.credentials.githubPrivateKeyFile}")
+    (lib.optional (cfg.credentials.githubPublicationTokenFile != null)
+      "github-publication-token:${cfg.credentials.githubPublicationTokenFile}")
+    (lib.optional (cfg.credentials.githubPublicationPolicyFile != null)
+      "github-publication-policy:${cfg.credentials.githubPublicationPolicyFile}")
     (lib.optional (cfg.credentials.discordBotTokenFile != null)
       "discord-bot-token:${cfg.credentials.discordBotTokenFile}")
-    (lib.optional (cfg.credentials.buildBuddyApiKeyFile != null)
-      "buildbuddy-api-key:${cfg.credentials.buildBuddyApiKeyFile}")
   ];
 
   stateDirectories = [

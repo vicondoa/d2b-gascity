@@ -121,7 +121,10 @@ class PortableConfigTests(unittest.TestCase):
             for path in root.rglob("*"):
                 if path.is_file():
                     relative = path.relative_to(CITY).as_posix()
-                    if relative == "assets/workflows/do-work/prepare-worktree.md":
+                    if relative in {
+                        "assets/workflows/do-work/prepare-worktree.md",
+                        "assets/workflows/build-base/publish.md",
+                    }:
                         continue
                     self.assertIn(path.name, allowed_names, relative)
 

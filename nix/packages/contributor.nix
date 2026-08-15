@@ -24,6 +24,10 @@ let
       "$out/share/d2b-gascity/scripts/copilot-provider.py"
     install -m 0755 ${../../scripts/discord-import.py} \
       "$out/share/d2b-gascity/scripts/discord-import.py"
+    install -m 0755 ${../../scripts/publish-pr.py} \
+      "$out/share/d2b-gascity/scripts/publish-pr.py"
+    install -m 0755 ${../../scripts/publication-worker.py} \
+      "$out/share/d2b-gascity/scripts/publication-worker.py"
   '';
 
   bootstrapWrapper = pkgs.writeShellScriptBin "d2b-gascity-bootstrap" ''
@@ -51,6 +55,28 @@ let
     exec ${pkgs.python3}/bin/python3 \
       "$D2B_GASCITY_ROOT/scripts/discord-import.py" "$@"
   '';
+
+  publishPrWrapper = pkgs.writeShellScriptBin
+    "d2b-gascity-publish-pr" ''
+    export D2B_GASCITY_ROOT="${portableAssets}/share/d2b-gascity"
+    exec ${pkgs.python3}/bin/python3 \
+      "$D2B_GASCITY_ROOT/scripts/publish-pr.py" "$@"
+  '';
+
+  publicationWorkerWrapper = pkgs.writeShellScriptBin
+    "d2b-gascity-publication-worker" ''
+    export D2B_GASCITY_ROOT="${portableAssets}/share/d2b-gascity"
+    exec ${pkgs.python3}/bin/python3 \
+      "$D2B_GASCITY_ROOT/scripts/publication-worker.py" "$@"
+  '';
+
+  publicationWorker = pkgs.symlinkJoin {
+    name = "d2b-gascity-publication-worker";
+    paths = [
+      publicationWorkerWrapper
+      publishPrWrapper
+    ];
+  };
 
   runtimePackages = [
     gascity
@@ -86,6 +112,7 @@ pkgs.symlinkJoin {
     operatorWrapper
     copilotProviderWrapper
     discordImportWrapper
+    publicationWorker
   ];
   passthru = {
     inherit
@@ -103,7 +130,10 @@ pkgs.symlinkJoin {
       bootstrapWrapper
       operatorWrapper
       copilotProviderWrapper
-      discordImportWrapper;
+      discordImportWrapper
+      publishPrWrapper
+      publicationWorkerWrapper
+      publicationWorker;
   };
   meta = {
     description = "Pinned Gas City contributor runtime closure";

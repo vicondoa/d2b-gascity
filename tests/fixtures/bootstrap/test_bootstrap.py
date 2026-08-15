@@ -5,6 +5,7 @@ import hashlib
 import os
 import pathlib
 import shutil
+import socket
 import subprocess
 import sys
 import tempfile
@@ -43,7 +44,12 @@ class BootstrapFixtureTests(unittest.TestCase):
             if not cls.pack_cache.is_dir():
                 raise RuntimeError("U3_PACK_CACHE does not name a directory")
         else:
-            cls.cache_temp = tempfile.TemporaryDirectory(prefix="d2b-gascity-u3-cache-")
+            scratch = ROOT / ".scratch"
+            scratch.mkdir(exist_ok=True)
+            cls.cache_temp = tempfile.TemporaryDirectory(
+                prefix="d2b-gascity-u3-cache-",
+                dir=scratch,
+            )
             cache_root = pathlib.Path(cls.cache_temp.name)
             city = cache_root / "city"
             shutil.copytree(ROOT / "city", city)
@@ -83,6 +89,19 @@ class BootstrapFixtureTests(unittest.TestCase):
         shutil.rmtree(self.base, ignore_errors=True)
         self.base.mkdir(parents=True)
         self.state = self.base / "state"
+        with (
+            socket.socket(socket.AF_INET, socket.SOCK_STREAM) as supervisor_probe,
+            socket.socket(socket.AF_INET, socket.SOCK_STREAM) as dolt_probe,
+        ):
+            supervisor_probe.bind(("127.0.0.1", 0))
+            dolt_probe.bind(("127.0.0.1", 0))
+            self.supervisor_port = int(supervisor_probe.getsockname()[1])
+            self.dolt_port = int(dolt_probe.getsockname()[1])
+        self.state.mkdir()
+        (self.state / "supervisor.toml").write_text(
+            f'[supervisor]\nbind = "127.0.0.1"\nport = {self.supervisor_port}\n',
+            encoding="utf-8",
+        )
         self.city = self.base / "city"
         self.rig = self.base / "rig"
         self.cache = self.base / "pack-cache"
@@ -100,6 +119,7 @@ class BootstrapFixtureTests(unittest.TestCase):
                 "BD_NON_INTERACTIVE": "1",
                 "NO_COLOR": "1",
                 "GC_SUPERVISOR_LOG_TEE": "0",
+                "GC_DOLT_PORT": str(self.dolt_port),
             }
         )
 
@@ -111,6 +131,15 @@ class BootstrapFixtureTests(unittest.TestCase):
             except subprocess.TimeoutExpired:
                 self.supervisor.kill()
                 self.supervisor.wait(timeout=10)
+        if self.city.exists():
+            subprocess.run(
+                [str(self.gc), "stop", "--city", str(self.city), "--force"],
+                env=self.env,
+                cwd=ROOT,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
         shutil.rmtree(self.base, ignore_errors=True)
 
     def _run_bootstrap(self, mode: str, *extra: str) -> subprocess.CompletedProcess[str]:

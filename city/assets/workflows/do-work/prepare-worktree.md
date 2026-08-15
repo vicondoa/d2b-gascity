@@ -22,6 +22,27 @@ setup only. Do not edit source files in the launcher checkout.
    ```
 
    If it exists but is not a worktree for this repository, fail closed.
-5. Persist the absolute worktree path on the source anchor with
-   `gc bd update <source-anchor-id> --set-metadata work_dir=<absolute path>`.
-   Verify `work_dir` before closing with `gc.outcome=pass`.
+5. Refresh and verify the fresh `origin/v3` tip:
+
+   ```bash
+   git -C "$WORKTREE" fetch --prune origin v3
+   BASE_SHA="$(git -C "$WORKTREE" ls-remote origin refs/heads/v3 \
+     | awk 'NF == 2 && $2 == "refs/heads/v3" { print $1 }')"
+   test "$(printf '%s' "$BASE_SHA" | grep -Ec '^[0-9a-f]{40}$')" = 1
+   test "$(git -C "$WORKTREE" rev-parse --verify \
+     refs/remotes/origin/v3^{commit})" = "$BASE_SHA"
+   ```
+
+6. Persist and read back the production source anchor contract in one update:
+
+   ```bash
+   gc bd update "$SOURCE_ANCHOR_ID" \
+     --set-metadata "work_dir=$WORKTREE" \
+     --set-metadata "gc.publication.base_ref=origin/v3" \
+     --set-metadata "gc.publication.base_sha=$BASE_SHA"
+   gc bd show "$SOURCE_ANCHOR_ID" --json --long
+   ```
+
+   Verify the readback contains the absolute `work_dir`,
+   `gc.publication.base_ref=origin/v3`, and the exact fresh
+   `gc.publication.base_sha` before closing with `gc.outcome=pass`.

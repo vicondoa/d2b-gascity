@@ -21,3 +21,14 @@ and this project follows semantic versioning where releases are published.
   import and DM-binding helper with role-based room boundary documentation.
 - Pinned the worktree fixture to the current d2b `origin/v3` revision without
   importing d2b process or repository artifacts.
+- Added a bounded Beads-bound publication helper for d2b `v3`.
+- Added a deterministic trusted publication subprocess with continuation-aware
+  claims, source-anchor binding, and safe publish artifacts.
+- Hardened publication with dedicated systemd-projected credentials, HTTPS-only
+  remotes, disabled hooks and tag following, and scrubbed GitHub child
+  environments.
+- Hardened publication transport with trusted bare Git, immutable source
+  heads, ancestry override rejection, exact GitHub list filters, and
+  retryable post-publication Beads persistence.
+- Added best-effort city cleanup after failed bootstrap setup while preserving
+  the original failure and enforcing cleanup after successful initialization.

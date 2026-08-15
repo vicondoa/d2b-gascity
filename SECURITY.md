@@ -25,9 +25,6 @@ secrets or private deployment data in the report.
 - The d2b rig is the single intended target and uses `v3`. Publication must
   not gain authority to update, merge, force, or bypass protection on that
   branch.
-- Optional external services such as BuildBuddy are separate trust
-  boundaries. Their credentials and private responses must not enter the
-  repository.
 
 ## Protected data
 

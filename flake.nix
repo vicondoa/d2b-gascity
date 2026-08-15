@@ -189,6 +189,8 @@
         beads = beadsFor system;
         dolt = doltFor system;
         "gas-city-contributor" = contributorFor system;
+        "d2b-gascity-publication-worker" =
+          (contributorFor system).passthru.publicationWorker;
       });
 
       devShells = forAllSystems (system:

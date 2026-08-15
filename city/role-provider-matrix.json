@@ -281,14 +281,6 @@
       "session": "acp"
     },
     {
-      "category": "implementation-fix-work",
-      "dir": "d2b",
-      "name": "publisher",
-      "origin": "gascity-roles",
-      "provider": "copilot-code-luna",
-      "session": "acp"
-    },
-    {
       "category": "planning-design-decomposition",
       "dir": "d2b",
       "name": "requirements-planner",
@@ -399,6 +391,17 @@
       "origin": "gascity-roles",
       "provider": "copilot-review",
       "session": "acp"
+    }
+  ],
+  "control_agents": [
+    {
+      "classification": "control/maintenance-subprocess",
+      "dir": "d2b",
+      "lifecycle": "one_shot",
+      "name": "publisher",
+      "provider": "publication-worker",
+      "prompt_mode": "none",
+      "start_command": "d2b-gascity-publication-worker"
     }
   ],
   "categories": {

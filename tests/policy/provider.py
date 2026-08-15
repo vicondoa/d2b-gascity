@@ -9,6 +9,7 @@ import unittest
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 CITY = ROOT / "city" / "city.toml"
 PROVIDER_SCRIPT = ROOT / "scripts" / "copilot-provider.py"
+PUBLICATION_WORKER = ROOT / "scripts" / "publication-worker.py"
 
 EXPECTED = {
     "copilot-planning-sol": ("planning-sol", "planning"),
@@ -23,7 +24,7 @@ class ProviderPolicyTests(unittest.TestCase):
     def test_portable_providers_are_direct_acp_wrappers(self) -> None:
         config = tomllib.loads(CITY.read_text(encoding="utf-8"))
         providers = config.get("providers", {})
-        self.assertEqual(set(providers), set(EXPECTED))
+        self.assertEqual(set(providers), set(EXPECTED) | {"publication-worker"})
         for name, (profile, policy) in EXPECTED.items():
             with self.subTest(provider=name):
                 provider = providers[name]
@@ -53,6 +54,16 @@ class ProviderPolicyTests(unittest.TestCase):
                         policy,
                     ],
                 )
+        self.assertEqual(
+            providers["publication-worker"],
+            {
+                "command": "d2b-gascity-publication-worker",
+                "prompt_mode": "none",
+                "ready_delay_ms": 0,
+                "path_check": "d2b-gascity-publication-worker",
+                "supports_acp": False,
+            },
+        )
 
     def test_tool_policies_are_closed(self) -> None:
         config = tomllib.loads(CITY.read_text(encoding="utf-8"))
@@ -74,6 +85,23 @@ class ProviderPolicyTests(unittest.TestCase):
     def test_wrapper_is_packaged_source_and_executable(self) -> None:
         self.assertTrue(PROVIDER_SCRIPT.is_file())
         self.assertTrue(PROVIDER_SCRIPT.stat().st_mode & stat.S_IXUSR)
+        self.assertTrue(PUBLICATION_WORKER.is_file())
+        self.assertTrue(PUBLICATION_WORKER.stat().st_mode & stat.S_IXUSR)
+
+    def test_publication_worker_is_not_an_acp_provider(self) -> None:
+        config = tomllib.loads(CITY.read_text(encoding="utf-8"))
+        publisher = next(
+            patch
+            for patch in config["patches"]["agent"]
+            if patch["dir"] == "d2b" and patch["name"] == "publisher"
+        )
+        self.assertEqual(
+            publisher["start_command"],
+            "d2b-gascity-publication-worker",
+        )
+        self.assertEqual(publisher["provider"], "publication-worker")
+        self.assertEqual(publisher["session"], "tmux")
+        self.assertEqual(publisher["lifecycle"], "one_shot")
 
     def test_provider_surface_has_no_second_lifecycle_or_transport(self) -> None:
         paths = [

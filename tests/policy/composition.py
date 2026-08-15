@@ -6,6 +6,7 @@ import pathlib
 import re
 import shutil
 import subprocess
+import tempfile
 import tomllib
 import unittest
 import uuid
@@ -34,6 +35,7 @@ class CompositionPolicyTests(unittest.TestCase):
                 ("", "dog"),
                 ("", "control-dispatcher"),
                 ("d2b", "control-dispatcher"),
+                ("d2b", "publisher"),
             }
             normalized = []
             for agent in agents:
@@ -82,23 +84,34 @@ class CompositionPolicyTests(unittest.TestCase):
         })
         self.assertNotIn(("", "dog"), classified)
         self.assertNotIn(("", "control-dispatcher"), classified)
+        self.assertNotIn(("d2b", "publisher"), classified)
 
     def test_every_model_agent_has_exact_acp_patch_and_control_agents_do_not(self) -> None:
         city = tomllib.loads((CITY / "city.toml").read_text(encoding="utf-8"))
         matrix = json.loads(MATRIX.read_text(encoding="utf-8"))
-        patches = {
+        all_patches = {
             (patch["dir"], patch["name"]): patch
             for patch in city.get("patches", {}).get("agent", [])
         }
         expected = {
             (agent["dir"], agent["name"]): agent for agent in matrix["agents"]
         }
+        patches = {
+            identity: patch
+            for identity, patch in all_patches.items()
+            if identity in expected
+        }
         self.assertEqual(set(patches), set(expected))
         for identity, entry in expected.items():
             with self.subTest(agent=identity):
                 self.assertEqual(patches[identity]["provider"], entry["provider"])
                 self.assertEqual(patches[identity]["session"], "acp")
-        for identity in (("", "dog"), ("", "control-dispatcher"), ("d2b", "control-dispatcher")):
+        for identity in (
+            ("", "dog"),
+            ("", "control-dispatcher"),
+            ("d2b", "control-dispatcher"),
+            ("d2b", "publisher"),
+        ):
             self.assertNotIn(identity, patches)
 
         resolved_config = os.environ.get("U6_RESOLVED_CONFIG")
@@ -112,6 +125,85 @@ class CompositionPolicyTests(unittest.TestCase):
                 with self.subTest(resolved_agent=identity):
                     self.assertEqual(resolved[identity]["Provider"], entry["provider"])
                     self.assertEqual(resolved[identity]["Session"], "acp")
+
+    def test_publisher_is_a_deterministic_control_subprocess(self) -> None:
+        city = tomllib.loads((CITY / "city.toml").read_text(encoding="utf-8"))
+        publisher = next(
+            patch
+            for patch in city["patches"]["agent"]
+            if patch["dir"] == "d2b" and patch["name"] == "publisher"
+        )
+        self.assertEqual(
+            publisher,
+            {
+                "dir": "d2b",
+                "name": "publisher",
+                "provider": "publication-worker",
+                "session": "tmux",
+                "start_command": "d2b-gascity-publication-worker",
+                "lifecycle": "one_shot",
+                "max_active_sessions": 1,
+            },
+        )
+        matrix = json.loads(MATRIX.read_text(encoding="utf-8"))
+        self.assertEqual(
+            matrix["control_agents"],
+            [
+                {
+                    "classification": "control/maintenance-subprocess",
+                    "dir": "d2b",
+                    "lifecycle": "one_shot",
+                    "name": "publisher",
+                    "provider": "publication-worker",
+                    "prompt_mode": "none",
+                    "start_command": "d2b-gascity-publication-worker",
+                }
+            ],
+        )
+        fixture = json.loads(AGENT_FIXTURE.read_text(encoding="utf-8"))
+        resolved = next(
+            agent
+            for agent in fixture["agents"]
+            if agent["dir"] == "d2b" and agent["name"] == "publisher"
+        )
+        self.assertFalse(resolved["model_backed"])
+        self.assertEqual(
+            resolved["classification"],
+            "control/maintenance-subprocess",
+        )
+
+        resolved_config = os.environ.get("U6_RESOLVED_CONFIG")
+        if resolved_config:
+            raw = json.loads(pathlib.Path(resolved_config).read_text(encoding="utf-8"))
+            publisher = next(
+                agent
+                for agent in raw["config"]["Agents"]
+                if agent.get("Dir") == "d2b" and agent.get("Name") == "publisher"
+            )
+            self.assertEqual(
+                {
+                    key: publisher[key]
+                    for key in (
+                        "Provider",
+                        "Session",
+                        "StartCommand",
+                        "Lifecycle",
+                        "MaxActiveSessions",
+                    )
+                },
+                {
+                    "Provider": "publication-worker",
+                    "Session": "tmux",
+                    "StartCommand": "d2b-gascity-publication-worker",
+                    "Lifecycle": "one_shot",
+                    "MaxActiveSessions": 1,
+                },
+            )
+            provider = raw["config"]["Providers"]["publication-worker"]
+            self.assertEqual(provider["PromptMode"], "none")
+            self.assertFalse(provider["SupportsACP"])
+            effective_prompt_mode = publisher.get("PromptMode") or provider["PromptMode"]
+            self.assertEqual(effective_prompt_mode, "none")
 
     def test_roles_are_rig_scoped_and_base_branch_is_v3(self) -> None:
         city = tomllib.loads((CITY / "city.toml").read_text(encoding="utf-8"))
@@ -254,8 +346,46 @@ class CompositionPolicyTests(unittest.TestCase):
         )
         self.assertIn("origin/v3", override)
         self.assertIn("git fetch --prune origin v3", override)
+        self.assertIn("gc.publication.base_ref=origin/v3", override)
+        self.assertIn("gc.publication.base_sha", override)
         self.assertNotIn("git remote show origin", override)
         self.assertNotRegex(override, r"origin/(?:HEAD|main|master)")
+
+    def test_resolved_publication_step_reaches_local_asset(self) -> None:
+        gc = shutil.which("gc")
+        self.assertIsNotNone(gc, "gc is required to resolve the pinned Pack graph")
+        with tempfile.TemporaryDirectory(dir=ROOT / ".scratch") as temp:
+            resolved_city = pathlib.Path(temp) / "city"
+            shutil.copytree(CITY, resolved_city)
+            result = subprocess.run(
+                [
+                    gc,
+                    "formula",
+                    "show",
+                    "compound-build",
+                    "--city",
+                    str(resolved_city),
+                    "--json",
+                ],
+                cwd=ROOT,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        resolved = json.loads(result.stdout)
+        publish = next(
+            step for step in resolved["steps"] if step["id"] == "compound-build.publish"
+        )
+        self.assertEqual(publish["metadata"]["gc.run_target"], "gc.publisher")
+        self.assertIn("d2b-gascity-publish-pr", publish["description"])
+        self.assertIn("gc.publication.expected_head_sha", publish["description"])
+        self.assertIn(
+            "gc.publication.worker_marker=d2b-gascity-publication-worker-v1",
+            publish["description"],
+        )
+        self.assertIn("gc.publication.push={{push}}", publish["description"])
+        self.assertIn("gc.publication.open_pr={{open_pr}}", publish["description"])
 
     def test_discord_helper_uses_official_gateway_only_seams(self) -> None:
         helper = (ROOT / "scripts" / "discord-import.py").read_text(encoding="utf-8")

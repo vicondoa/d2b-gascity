@@ -46,7 +46,7 @@ counterparts:
   feasibility, operations, rollback, and plan documentation.
 - `nix/packages/**` and `nix/source-manifest.nix`.
 - `nixos-modules/**` for the standalone module and ingress relay.
-- `operator/buildbuddy/**` and `operator/proxy/**`.
+- `operator/proxy/**`.
 - `scripts/**` for bootstrap, provider, operator, publication, and source
   manifest tooling.
 - `tests/acceptance/**`, `tests/fixtures/**`, `tests/host/**`, `tests/nix/**`,

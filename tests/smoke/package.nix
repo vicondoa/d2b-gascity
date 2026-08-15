@@ -45,7 +45,8 @@ pkgs.runCommand "gas-city-package-smoke" {
   test "${llmAgentsRevision}" = "$expectedLlmAgentsRevision"
 
   for tool in gc bd dolt git gh copilot python3 tinyauth nginx go \
-    d2b-gascity-copilot-provider d2b-gascity-discord-import; do
+    d2b-gascity-copilot-provider d2b-gascity-discord-import \
+    d2b-gascity-publish-pr d2b-gascity-publication-worker; do
     toolPath="${gasCityContributor}/bin/$tool"
     test -x "$toolPath"
     test "$(command -v "$tool")" = "$toolPath"
@@ -59,6 +60,8 @@ pkgs.runCommand "gas-city-package-smoke" {
   test -x "${gasCityContributor}/bin/d2b-gascity-operator"
   test -x "${gasCityContributor}/bin/d2b-gascity-copilot-provider"
   test -x "${gasCityContributor}/bin/d2b-gascity-discord-import"
+  test -x "${gasCityContributor}/bin/d2b-gascity-publish-pr"
+  test -x "${gasCityContributor}/bin/d2b-gascity-publication-worker"
   test -r "${gasCityContributor}/share/d2b-gascity/city/city.toml"
   test -r "${gasCityContributor}/share/d2b-gascity/city/pack.toml"
   test -r "${gasCityContributor}/share/d2b-gascity/city/packs.lock"
@@ -68,6 +71,8 @@ pkgs.runCommand "gas-city-package-smoke" {
   test -x "${gasCityContributor}/share/d2b-gascity/scripts/operator.py"
   test -x "${gasCityContributor}/share/d2b-gascity/scripts/copilot-provider.py"
   test -x "${gasCityContributor}/share/d2b-gascity/scripts/discord-import.py"
+  test -x "${gasCityContributor}/share/d2b-gascity/scripts/publish-pr.py"
+  test -x "${gasCityContributor}/share/d2b-gascity/scripts/publication-worker.py"
   test ! -e "${gasCityContributor}/share/d2b-gascity/dashboard"
 
   gcVersion="$(${gasCityContributor}/bin/gc version --long)"

@@ -39,7 +39,8 @@ let
       package = testPackage;
       operators.users = [ "alice" ];
       credentials.copilotTokenFile = "/run/secrets/copilot";
-      credentials.githubPrivateKeyFile = "/run/secrets/github-key";
+      credentials.githubPublicationTokenFile = "/run/secrets/github-publication-token";
+      credentials.githubPublicationPolicyFile = "/run/secrets/github-publication-policy";
     };
   };
 
@@ -256,7 +257,10 @@ in
       main.BindReadOnlyPaths;
     assert builtins.elem "copilot-token:/run/secrets/copilot" main.LoadCredential;
     assert builtins.elem
-      "github-private-key:/run/secrets/github-key"
+      "github-publication-token:/run/secrets/github-publication-token"
+      main.LoadCredential;
+    assert builtins.elem
+      "github-publication-policy:/run/secrets/github-publication-policy"
       main.LoadCredential;
     assert !(lib.hasInfix "GC_DOLT_PORT=" (stringValue main.Environment));
     assert !(lib.hasInfix "allowed_origins" coreSupervisorText);

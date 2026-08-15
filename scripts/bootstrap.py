@@ -126,6 +126,25 @@ def _run(
     return result
 
 
+def _best_effort_stop(
+    gc: pathlib.Path,
+    city: pathlib.Path,
+    *,
+    env: Mapping[str, str],
+) -> None:
+    try:
+        subprocess.run(
+            [gc, "stop", "--city", city, "--force"],
+            env=dict(env),
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=30,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+
+
 def _read_toml(path: pathlib.Path, label: str) -> dict:
     try:
         return tomllib.loads(path.read_text())
@@ -321,6 +340,7 @@ def _city_env(state_root: pathlib.Path) -> dict[str, str]:
             "DOLT_ROOT_PATH": str(state_root / "dolt"),
             "GIT_CONFIG_GLOBAL": str(state_root / "gitconfig"),
             "GIT_CONFIG_NOSYSTEM": "1",
+            "GIT_NO_REPLACE_OBJECTS": "1",
             "GIT_TERMINAL_PROMPT": "0",
             "BD_NON_INTERACTIVE": "1",
             "NO_COLOR": "1",
@@ -612,48 +632,57 @@ def _init(args: argparse.Namespace) -> int:
     _configure_dolt_identity(args, env)
     _seed_pack_cache(args.pack_cache, args.state_root)
     _materialize_portable(args.portable_source, args.city, portable_files)
+    try:
+        _run(
+            [
+                args.gc,
+                "init",
+                "--file",
+                args.city / "city.toml",
+                "--preserve-existing",
+                "--no-start",
+                "--skip-provider-readiness",
+                "--name",
+                "d2b-gascity",
+                args.city,
+            ],
+            env=env,
+            label="gc init --file --preserve-existing --no-start",
+        )
+        _run(
+            [args.gc, "import", "install", "--city", args.city],
+            env=env,
+            label="gc import install",
+        )
+        _prepare_rig(args, env)
+        _run(
+            [
+                args.gc,
+                "rig",
+                "add",
+                args.rig,
+                "--city",
+                args.city,
+                "--name",
+                RIG_NAME,
+                "--prefix",
+                RIG_NAME,
+                "--default-branch",
+                "v3",
+                "--start-suspended",
+            ],
+            env=env,
+            label="gc rig add",
+        )
+        _site_binding(args.city, args.rig)
+    except BootstrapError:
+        _best_effort_stop(args.gc, args.city, env=env)
+        raise
     _run(
-        [
-            args.gc,
-            "init",
-            "--file",
-            args.city / "city.toml",
-            "--preserve-existing",
-            "--no-start",
-            "--skip-provider-readiness",
-            "--name",
-            "d2b-gascity",
-            args.city,
-        ],
+        [args.gc, "stop", "--city", args.city, "--force"],
         env=env,
-        label="gc init --file --preserve-existing --no-start",
+        label="gc stop --city --force",
     )
-    _run(
-        [args.gc, "import", "install", "--city", args.city],
-        env=env,
-        label="gc import install",
-    )
-    _prepare_rig(args, env)
-    _run(
-        [
-            args.gc,
-            "rig",
-            "add",
-            args.rig,
-            "--city",
-            args.city,
-            "--name",
-            RIG_NAME,
-            "--prefix",
-            RIG_NAME,
-            "--default-branch",
-            "v3",
-            "--start-suspended",
-        ],
-        env=env,
-        label="gc rig add",
-    )
-    _site_binding(args.city, args.rig)
     print(
         json.dumps(
             {
