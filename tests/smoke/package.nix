@@ -45,12 +45,15 @@ pkgs.runCommand "gas-city-package-smoke" {
   test "${llmAgentsRevision}" = "$expectedLlmAgentsRevision"
 
   for tool in gc bd dolt git gh copilot python3 tinyauth nginx go \
+    openssl unshare ip \
     d2b-gascity-copilot-provider d2b-gascity-discord-import \
     d2b-gascity-publish-pr d2b-gascity-publication-worker; do
     toolPath="${gasCityContributor}/bin/$tool"
     test -x "$toolPath"
     test "$(command -v "$tool")" = "$toolPath"
   done
+  unshare --version >/dev/null
+  ip -Version >/dev/null
 
   test -r "${gasCityContributor}/etc/ssl/certs/ca-bundle.crt"
   test ! -e "${gasCityContributor}/etc/nginx"

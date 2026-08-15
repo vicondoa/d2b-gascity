@@ -32,3 +32,15 @@ and this project follows semantic versioning where releases are published.
   retryable post-publication Beads persistence.
 - Added best-effort city cleanup after failed bootstrap setup while preserving
   the original failure and enforcing cleanup after successful initialization.
+- Added the fixed-loopback, split-host TinyAuth and Nginx contract for the
+  embedded supervisor dashboard, with an exact HTTPS/OpenResty fixture,
+  CookieJar session coverage, source admission and Origin/Referer guards,
+  route/grant negatives, restart/SSE checks, and a static accessibility
+  heuristic.
+
+### Changed
+
+- Hardened auth Origin matching, decoupled relay and TinyAuth stopping,
+  isolated the ingress fixture's fixed supervisor port in an unprivileged
+  network namespace, and tightened rotation, SSE restart, cookie-secret
+  scanning, and cleanup proofs.

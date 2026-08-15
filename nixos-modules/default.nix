@@ -11,6 +11,7 @@ let
   xdgStateRoot = "${stateRoot}/state";
   cacheRoot = "${stateRoot}/cache";
   runtimeRoot = "/run/d2b-gascity";
+  supervisorPort = 8372;
   effectivePackage = if cfg.package == null then pkgs.hello else cfg.package;
   packagePath = toString effectivePackage;
 
@@ -28,7 +29,7 @@ let
   supervisorConfigText = ''
     [supervisor]
     bind = "127.0.0.1"
-    port = ${toString cfg.supervisor.port}${supervisorHost}
+    port = ${toString supervisorPort}${supervisorHost}
   '';
 
   credentials = lib.concatLists [
@@ -86,7 +87,7 @@ ${remoteInputRules}
 
       chain output {
         type filter hook output priority 0; policy accept;
-        oifname "lo" tcp dport ${toString cfg.supervisor.port} meta skuid != { 41080${lib.optionalString cfg.dashboard.remote.enable ", 41081"} } drop
+        oifname "lo" tcp dport ${toString supervisorPort} meta skuid != { 41080${lib.optionalString cfg.dashboard.remote.enable ", 41081"} } drop
 ${remoteOutputRules}
 ${lib.optionalString (cfg.dolt.fixedPort != null)
   ''        oifname "lo" tcp dport ${toString cfg.dolt.fixedPort} meta skuid != 41080 drop

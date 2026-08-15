@@ -88,8 +88,11 @@ let
     pkgs.gh
     pkgs.python3
     pkgs.cacert
+    pkgs.openssl
     tinyauth
     nginx
+    pkgs.util-linux
+    pkgs.iproute2
   ];
 
   runtimeEnvironment = pkgs.buildEnv {

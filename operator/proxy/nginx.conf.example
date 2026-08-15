@@ -1,0 +1,230 @@
+# Nginx 1.30.2 generic same-host relay example.
+# Replace the RFC 5737 address and CIDR with host-local deployment values.
+# The external TLS/OpenResty host forwards the two HTTPS authorities to these
+# private listeners. TLS certificates are intentionally not included here.
+
+worker_processes 1;
+pid nginx.pid;
+error_log stderr warn;
+
+events {
+    worker_connections 256;
+}
+
+http {
+    access_log off;
+
+    geo $gc_source_admitted {
+        default 0;
+        192.0.2.0/24 1;
+    }
+
+    map $http_upgrade $gc_connection_upgrade {
+        default upgrade;
+        "" close;
+    }
+    map $request_uri $gc_forwarded_uri {
+        default $request_uri;
+        ~^(?<gc_path>[^?]+)\?(?<gc_query>.*)$ $gc_path%3F$gc_query;
+    }
+    map $uri $gc_login_limit_key {
+        default "";
+        /api/user/login $binary_remote_addr;
+    }
+    map $http_origin $gc_dashboard_origin_ok {
+        default 0;
+        "https://gascity.example.test" 1;
+    }
+    map $http_origin $gc_dashboard_origin_present {
+        default 1;
+        "" 0;
+    }
+    map $http_sec_fetch_site $gc_dashboard_fetch_ok {
+        default 0;
+        same-origin 1;
+    }
+    map $request_method $gc_unsafe_method {
+        default 0;
+        POST 1;
+        PUT 1;
+        PATCH 1;
+        DELETE 1;
+    }
+    map "$gc_unsafe_method:$gc_dashboard_origin_ok:$gc_dashboard_fetch_ok" $gc_mutation_denied {
+        default 0;
+        ~^1:0 1;
+        ~^1:1:0 1;
+    }
+    map $http_origin $gc_auth_bad_origin {
+        default 1;
+        "" 0;
+        "https://auth.gascity.example.test" 0;
+    }
+    map $http_referer $gc_auth_bad_referer {
+        default 1;
+        "" 0;
+        ~^https://auth\.gascity\.example\.test(/|\?|$) 0;
+    }
+    map $http_origin $gc_auth_origin_present {
+        default 1;
+        "" 0;
+    }
+    map $http_referer $gc_auth_referer_present {
+        default 1;
+        "" 0;
+    }
+    map "$gc_unsafe_method:$gc_auth_origin_present:$gc_auth_bad_origin:$gc_auth_referer_present:$gc_auth_bad_referer" $gc_auth_mutation_denied {
+        default 0;
+        ~^1:1:1 1;
+        ~^1:0:0:0 1;
+        ~^1:0:0:1:1 1;
+    }
+    limit_req_zone $gc_login_limit_key zone=gc_login:10m rate=5r/m;
+    limit_req_status 429;
+
+    server {
+        listen 192.0.2.10:8374 default_server;
+        server_name _;
+        if ($gc_source_admitted = 0) { return 403; }
+        allow 192.0.2.0/24;
+        deny all;
+        return 421;
+    }
+
+    server {
+        listen 192.0.2.10:8374;
+        server_name auth.gascity.example.test;
+        allow 192.0.2.0/24;
+        deny all;
+        if ($gc_source_admitted = 0) { return 403; }
+        if ($http_host != "auth.gascity.example.test") { return 421; }
+        if ($gc_auth_mutation_denied = 1) { return 403; }
+
+        location / {
+            limit_req zone=gc_login burst=10 nodelay;
+            proxy_pass http://127.0.0.1:8375;
+            proxy_http_version 1.1;
+            proxy_pass_request_body on;
+            proxy_set_header Host auth.gascity.example.test;
+            proxy_set_header Origin $http_origin;
+            proxy_set_header Referer $http_referer;
+            proxy_set_header Cookie $http_cookie;
+            proxy_set_header X-Forwarded-Host auth.gascity.example.test;
+            proxy_set_header X-Forwarded-Port 443;
+            proxy_set_header X-Forwarded-Proto https;
+            proxy_set_header X-Forwarded-For $remote_addr;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-Uri $gc_forwarded_uri;
+            proxy_set_header X-Original-URI $gc_forwarded_uri;
+            proxy_set_header Authorization "";
+            proxy_set_header Remote-User "";
+            proxy_set_header X-Remote-User "";
+            proxy_set_header X-Auth-Request-User "";
+            proxy_set_header X-Forwarded-User "";
+            proxy_set_header X-Original-User "";
+            proxy_set_header Upgrade $http_upgrade;
+            proxy_set_header Connection $gc_connection_upgrade;
+            proxy_request_buffering off;
+            proxy_buffering off;
+            proxy_cache off;
+            proxy_connect_timeout 2s;
+            proxy_read_timeout 30s;
+            proxy_send_timeout 30s;
+            proxy_next_upstream off;
+        }
+    }
+
+    server {
+        listen 192.0.2.10:8373 default_server;
+        server_name _;
+        if ($gc_source_admitted = 0) { return 403; }
+        allow 192.0.2.0/24;
+        deny all;
+        return 421;
+    }
+
+    server {
+        listen 192.0.2.10:8373;
+        server_name gascity.example.test;
+        allow 192.0.2.0/24;
+        deny all;
+        if ($gc_source_admitted = 0) { return 403; }
+        if ($http_host != "gascity.example.test") { return 421; }
+        if ($gc_mutation_denied = 1) { return 403; }
+
+        location = /_gascity_tinyauth {
+            internal;
+            proxy_pass http://127.0.0.1:8375/api/auth/nginx;
+            proxy_http_version 1.1;
+            proxy_pass_request_body off;
+            proxy_set_header Content-Length "";
+            proxy_set_header Host auth.gascity.example.test;
+            proxy_set_header Origin $http_origin;
+            proxy_set_header Referer $http_referer;
+            proxy_set_header Cookie $http_cookie;
+            proxy_set_header X-Forwarded-Host gascity.example.test;
+            proxy_set_header X-Forwarded-Port 443;
+            proxy_set_header X-Forwarded-Proto https;
+            proxy_set_header X-Forwarded-For $remote_addr;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-Uri $gc_forwarded_uri;
+            proxy_set_header X-Original-URI $gc_forwarded_uri;
+            proxy_set_header Authorization "";
+            proxy_set_header Remote-User "";
+            proxy_set_header X-Remote-User "";
+            proxy_set_header X-Auth-Request-User "";
+            proxy_set_header X-Forwarded-User "";
+            proxy_buffering off;
+            proxy_cache off;
+            proxy_connect_timeout 2s;
+            proxy_read_timeout 3s;
+            proxy_send_timeout 3s;
+            proxy_next_upstream off;
+        }
+
+        location / {
+            auth_request /_gascity_tinyauth;
+            auth_request_set $gascity_login_location $upstream_http_x_tinyauth_location;
+            auth_request_set $gascity_set_cookie $upstream_http_set_cookie;
+            add_header Set-Cookie $gascity_set_cookie always;
+            error_page 401 = @gascity_login;
+
+            proxy_pass http://127.0.0.1:8372;
+            proxy_http_version 1.1;
+            proxy_pass_request_body on;
+            proxy_set_header Host $http_host;
+            proxy_set_header Origin $http_origin;
+            proxy_set_header Referer $http_referer;
+            proxy_set_header Sec-Fetch-Site $http_sec_fetch_site;
+            proxy_set_header X-GC-Request $http_x_gc_request;
+            proxy_set_header Last-Event-ID $http_last_event_id;
+            proxy_set_header Cookie $http_cookie;
+            proxy_set_header X-Forwarded-Host gascity.example.test;
+            proxy_set_header X-Forwarded-Port 443;
+            proxy_set_header X-Forwarded-Proto https;
+            proxy_set_header X-Forwarded-For $remote_addr;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header Authorization "";
+            proxy_set_header Remote-User "";
+            proxy_set_header X-Remote-User "";
+            proxy_set_header X-Auth-Request-User "";
+            proxy_set_header X-User "";
+            proxy_set_header X-Authenticated-User "";
+            proxy_set_header X-Forwarded-User "";
+            proxy_set_header X-Original-User "";
+            proxy_set_header Upgrade $http_upgrade;
+            proxy_set_header Connection $gc_connection_upgrade;
+            proxy_buffering off;
+            proxy_request_buffering off;
+            proxy_read_timeout 3600s;
+            proxy_send_timeout 3600s;
+            proxy_next_upstream off;
+            add_header X-Accel-Buffering no always;
+        }
+
+        location @gascity_login {
+            add_header Set-Cookie $gascity_set_cookie always;
+            return 302 $gascity_login_location;
+        }
+    }
+}

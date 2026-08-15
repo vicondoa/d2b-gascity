@@ -47,11 +47,11 @@ the configured operator group.
 
 ## Supervisor configuration
 
-The supervisor always binds to `127.0.0.1`. The port defaults to `8372` and
-is an option value. Remote dashboard mode requires a host-supplied hostname,
-which is emitted as the sole `allowed_hosts` entry. The generated file never
-sets `allowed_origins`, `allow_mutations`, `write_auth_*`, or `read_auth_*`.
-There is no non-loopback supervisor option.
+The supervisor always binds to the fixed `127.0.0.1:8372` listener. Remote
+dashboard mode requires a host-supplied hostname, which is emitted as the sole
+`allowed_hosts` entry. The generated file never sets `allowed_origins`,
+`allow_mutations`, `write_auth_*`, or `read_auth_*`. There is no non-loopback
+supervisor option.
 
 Managed Dolt uses upstream dynamic allocation by default. A fixed
 `dolt.fixedPort` is optional; when selected, it must be distinct from every
@@ -129,7 +129,10 @@ sessions in persistent SQLite state under
 therefore does not discard otherwise-valid sessions.
 
 The relay and TinyAuth units have separate unprivileged identities and are
-not `PartOf` the Gas City service. They cannot launch or restart Gas City.
+not `PartOf` the Gas City service. The relay `Wants` TinyAuth and orders after
+it rather than requiring it, so a stopped TinyAuth rotation leaves the relay
+running and fail-closed; restarting TinyAuth restores auth without a relay
+restart. They cannot launch or restart Gas City.
 Nginx exposes one auth server and one dashboard server on the relay address.
 The auth server proxies all TinyAuth root-relative routes, assets, and API
 requests to the raw loopback port. The dashboard server authenticates every
@@ -143,16 +146,20 @@ headers and synthesizes canonical `X-Forwarded-Proto=https`,
 City does not authorize from those headers.
 
 Unsafe dashboard methods require the exact `https://<hostname>` Origin and
-`Sec-Fetch-Site: same-origin`. Unsafe TinyAuth methods require the exact
-`https://<authHostname>` Origin or a matching Referer. Missing native
-`X-GC-Request` is passed through so Gas City can apply its own rejection.
+`Sec-Fetch-Site: same-origin`. Unsafe TinyAuth methods mirror the production Origin/Referer guard:
+an unsafe request with a bad Origin is denied, a request with neither
+Origin nor Referer is denied, and a request with no Origin plus a bad Referer
+is denied. Missing native `X-GC-Request` is passed through so Gas City can
+apply its own rejection.
 
 Both relay listener ports are admitted only on the configured interface and
-trusted external proxy CIDRs. A loopback owner policy permits the supervisor
-port to be reached by the Gas City identity and relay identity only. TinyAuth's
-raw loopback port accepts connections only from the relay identity. The
-shared Gas City identity remains a deliberate trust boundary because upstream
-children legitimately use the supervisor API.
+trusted external proxy CIDRs. Nginx evaluates a source-admission `geo` map in
+rewrite phase before Host handling and retains `allow`/`deny` as defense in
+depth. A loopback owner policy permits the supervisor port to be reached by
+the Gas City identity and relay identity only. TinyAuth's raw loopback port
+accepts connections only from the relay identity. The shared Gas City identity
+remains a deliberate trust boundary because upstream children legitimately use
+the supervisor API.
 
 TinyAuth users are loaded through systemd `LoadCredential`. Credential values
 are never serialized into unit environment text. The exact TinyAuth and Nginx

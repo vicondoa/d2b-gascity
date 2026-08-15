@@ -50,9 +50,19 @@ let
 
   resolvedTinyAuth = resolvedPackage cfg.dashboard.remote.tinyauthPackage "tinyauth";
   resolvedNginx = resolvedPackage cfg.dashboard.remote.nginxPackage "nginx";
+  dashboardHostnameLabels =
+    if cfg.dashboard.remote.hostname == null then
+      [ ]
+    else
+      lib.splitString "." cfg.dashboard.remote.hostname;
+  authHostnameLabels =
+    if cfg.dashboard.remote.authHostname == null then
+      [ ]
+    else
+      lib.splitString "." cfg.dashboard.remote.authHostname;
 
   configuredPorts =
-    [ cfg.supervisor.port ]
+    [ 8372 ]
     ++ lib.optionals cfg.dashboard.remote.enable [
       cfg.dashboard.remote.relayPort
       cfg.dashboard.remote.authPort
@@ -109,12 +119,6 @@ in
       type = types.str;
       default = "/var/lib/d2b-gascity/config/provider-selection.json";
       description = "Machine-local Copilot readiness selection written before startup.";
-    };
-
-    supervisor.port = mkOption {
-      type = port;
-      default = 8372;
-      description = "Loopback-only embedded supervisor and dashboard port.";
     };
 
     dolt.fixedPort = mkOption {
@@ -297,6 +301,14 @@ in
               ".${cfg.dashboard.remote.hostname}"
               cfg.dashboard.remote.authHostname;
           message = "dashboard.remote.authHostname must be a subdomain of dashboard.remote.hostname.";
+        }
+        {
+          assertion =
+            authHostnameLabels != [ ]
+            && lib.length authHostnameLabels
+              == lib.length dashboardHostnameLabels + 1
+            && lib.drop 1 authHostnameLabels == dashboardHostnameLabels;
+          message = "dashboard.remote.authHostname must be exactly one additional label below dashboard.remote.hostname.";
         }
         {
           assertion = cfg.dashboard.remote.trustedExternalProxyCidrs != [ ];

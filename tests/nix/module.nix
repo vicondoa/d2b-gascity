@@ -93,6 +93,7 @@ let
   relay = remote.systemd.services.d2b-gascity-relay.serviceConfig;
   tinyauth = remote.systemd.services.d2b-gascity-tinyauth.serviceConfig;
   relayText = remote.environment.etc."d2b-gascity/relay.conf".text;
+  relayFlat = lib.replaceStrings [ "\n" ] [ " " ] relayText;
   tinyauthText = remote.environment.etc."d2b-gascity/tinyauth.yml".text;
   remoteSupervisorText =
     remote.environment.etc."d2b-gascity/supervisor.toml".text;
@@ -105,14 +106,6 @@ let
       enable = true;
       package = testPackage;
       dashboard.remote.enable = true;
-    };
-  }).config;
-
-  invalidPort = (mkEval {
-    services.d2bGasCity = {
-      enable = true;
-      package = testPackage;
-      dolt.fixedPort = 8372;
     };
   }).config;
 
@@ -153,6 +146,20 @@ let
         enable = true;
         hostname = "gascity.example.test";
         authHostname = "auth.example.test";
+        trustedExternalProxyCidrs = [ "127.0.0.1/32" ];
+        tinyauthUsersFile = "/run/secrets/gascity-users";
+      };
+    };
+  }).config;
+
+  invalidNestedAuth = (mkEval {
+    services.d2bGasCity = {
+      enable = true;
+      package = testPackage;
+      dashboard.remote = {
+        enable = true;
+        hostname = "gascity.example.test";
+        authHostname = "auth.ops.gascity.example.test";
         trustedExternalProxyCidrs = [ "127.0.0.1/32" ];
         tinyauthUsersFile = "/run/secrets/gascity-users";
       };
@@ -267,7 +274,9 @@ in
     assert !(lib.hasInfix "allow_mutations" coreSupervisorText);
     assert !(lib.hasInfix "write_auth_" coreSupervisorText);
     assert !(lib.hasInfix "read_auth_" coreSupervisorText);
-    assert !(core.services.d2bGasCity.supervisor ? bind);
+    assert !(core.services.d2bGasCity ? supervisor);
+    assert lib.hasInfix "bind = \"127.0.0.1\"" coreSupervisorText;
+    assert lib.hasInfix "port = 8372" coreSupervisorText;
     true;
 
   "without-copilot" = assert (noCopilotMain.ExecStartPre or [ ]) == [ ];
@@ -298,8 +307,12 @@ in
     assert tinyauth.MemoryMax == "512M";
     assert relay.CPUQuota == "50%";
     assert relay.TasksMax == 128;
+    assert !(lib.hasInfix "d2b-gascity-tinyauth.service"
+      (stringValue (relayUnit.requires or [ ])));
     assert lib.hasInfix "d2b-gascity-tinyauth.service"
-      (stringValue (relayUnit.requires or [ ]));
+      (stringValue (relayUnit.wants or [ ]));
+    assert lib.hasInfix "d2b-gascity-tinyauth.service"
+      (stringValue (relayUnit.after or [ ]));
     assert !(lib.hasInfix "d2b-gascity.service"
       (stringValue (relayUnit.requires or [ ])));
     assert !(lib.hasInfix "d2b-gascity.service"
@@ -310,6 +323,10 @@ in
     assert lib.hasInfix "server_name gascity.example.test" relayText;
     assert lib.hasInfix "127.0.0.1:8375" relayText;
     assert lib.hasInfix "auth_request /_d2b_tinyauth" relayText;
+    assert lib.hasInfix "proxy_pass http://127.0.0.1:8372;" relayText;
+    assert lib.hasInfix "proxy_pass_request_body on" relayText;
+    assert lib.hasInfix "limit_req_status 429" relayText;
+    assert lib.hasInfix "map $request_uri $d2b_forwarded_uri" relayText;
     assert lib.hasInfix "proxy_set_header Host $http_host" relayText;
     assert lib.hasInfix "proxy_set_header Host auth.gascity.example.test" relayText;
     assert lib.hasInfix
@@ -338,10 +355,19 @@ in
     assert lib.hasInfix "return 302 $tinyauth_location" relayText;
     assert lib.hasInfix "d2b_dashboard_mutation_denied" relayText;
     assert lib.hasInfix "d2b_auth_mutation_denied" relayText;
+    assert lib.hasInfix "geo $d2b_source_admitted" relayText;
+    assert lib.hasInfix "if ($d2b_source_admitted = 0) { return 403; }"
+      relayText;
+    assert lib.hasInfix "d2b_auth_bad_origin" relayText;
+    assert lib.hasInfix "d2b_auth_bad_referer" relayText;
+    assert builtins.match
+      ".*map \\$http_origin \\$d2b_auth_bad_origin \\{[[:space:]]+default 1;[[:space:]]+\"\" 0;[[:space:]]+\"https://auth\\.gascity\\.example\\.test\" 0;.*"
+      relayFlat != null;
     assert !(lib.hasInfix "$scheme" relayText);
     assert !(lib.hasInfix "$server_port" relayText);
     assert lib.hasInfix "proxy_buffering off" relayText;
     assert lib.hasInfix "allow 127.0.0.1/32;" relayText;
+    assert lib.hasInfix "deny all;" relayText;
     assert builtins.elem 8373
       remote.networking.firewall.interfaces.lo.allowedTCPPorts;
     assert builtins.elem 8374
@@ -352,6 +378,7 @@ in
     assert lib.hasInfix
       "allowed_hosts = [\"gascity.example.test\"]"
       remoteSupervisorText;
+    assert lib.hasInfix "port = 8372" remoteSupervisorText;
     assert lib.hasInfix "appurl: https://auth.gascity.example.test" tinyauthText;
     assert lib.hasInfix "subdomainsenabled: true" tinyauthText;
     assert lib.hasInfix "driver: sqlite" tinyauthText;
@@ -384,9 +411,6 @@ in
     assert hasFailedAssertion "tinyauthUsersFile" invalidRemote.assertions;
     true;
 
-  "invalid-port" = assert hasFailedAssertion "ports" invalidPort.assertions;
-    true;
-
   "invalid-remote-host" = assert hasFailedAssertion
     "must be distinct"
     invalidRemoteHost.assertions;
@@ -395,6 +419,11 @@ in
   "invalid-auth-scope" = assert hasFailedAssertion
     "must be a subdomain"
     invalidAuthScope.assertions;
+    true;
+
+  "invalid-nested-auth" = assert hasFailedAssertion
+    "exactly one additional label"
+    invalidNestedAuth.assertions;
     true;
 
   "invalid-remote-port" = assert hasFailedAssertion

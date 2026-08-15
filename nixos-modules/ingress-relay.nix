@@ -26,6 +26,9 @@ let
   nginxAllows = lib.concatMapStringsSep "\n"
     (cidr: "        allow ${cidr};")
     remote.trustedExternalProxyCidrs;
+  nginxSourceAdmission = lib.concatMapStringsSep "\n"
+    (cidr: "        ${cidr} 1;")
+    remote.trustedExternalProxyCidrs;
   authHostnameRegex = lib.escapeRegex remote.authHostname;
   tinyAuthCredentialPath =
     "/run/credentials/d2b-gascity-tinyauth.service/users";
@@ -43,6 +46,7 @@ let
       sessionexpiry: 3600
       sessionmaxlifetime: 86400
       loginmaxretries: 3
+      logintimeout: 300
       trustedproxies: 127.0.0.1/32
     database:
       driver: sqlite
@@ -63,6 +67,10 @@ let
     http {
       access_log off;
 
+      geo $d2b_source_admitted {
+        default 0;
+${nginxSourceAdmission}
+      }
       map $http_upgrade $d2b_connection_upgrade {
         default upgrade;
         "" close;
@@ -78,6 +86,14 @@ let
         default 0;
         "https://${remote.hostname}" 1;
       }
+      map $http_origin $d2b_dashboard_origin_present {
+        default 1;
+        "" 0;
+      }
+      map $request_uri $d2b_forwarded_uri {
+        default $request_uri;
+        ~^(?<d2b_path>[^?]+)\?(?<d2b_query>.*)$ $d2b_path%3F$d2b_query;
+      }
       map $http_sec_fetch_site $d2b_dashboard_fetch_ok {
         default 0;
         same-origin 1;
@@ -87,28 +103,43 @@ let
         ~^1:0 1;
         ~^1:1:0 1;
       }
-      map $http_origin $d2b_auth_origin_ok {
-        default 0;
-        "https://${remote.authHostname}" 1;
+      map $http_origin $d2b_auth_bad_origin {
+        default 1;
+        "" 0;
+        "https://${remote.authHostname}" 0;
       }
-      map $http_referer $d2b_auth_referer_ok {
-        default 0;
-        ~^https://${authHostnameRegex}(/|\?|$) 1;
+      map $http_referer $d2b_auth_bad_referer {
+        default 1;
+        "" 0;
+        ~^https://${authHostnameRegex}(/|\?|$) 0;
       }
-      map "$d2b_unsafe_method:$d2b_auth_origin_ok:$d2b_auth_referer_ok" $d2b_auth_mutation_denied {
+      map $http_origin $d2b_auth_origin_present {
+        default 1;
+        "" 0;
+      }
+      map $http_referer $d2b_auth_referer_present {
+        default 1;
+        "" 0;
+      }
+      map "$d2b_unsafe_method:$d2b_auth_origin_present:$d2b_auth_bad_origin:$d2b_auth_referer_present:$d2b_auth_bad_referer" $d2b_auth_mutation_denied {
         default 0;
-        ~^1:0:0 1;
+        ~^1:1:1 1;
+        ~^1:0:0:0 1;
+        ~^1:0:0:1:1 1;
       }
       map $uri $d2b_tinyauth_login_limit_key {
         default "";
         /api/user/login $binary_remote_addr;
       }
       limit_req_zone $d2b_tinyauth_login_limit_key zone=d2b_tinyauth_login:10m rate=5r/m;
+      limit_req_status 429;
 
       server {
         listen ${relayAddress}:${toString remote.authPort};
         server_name ${remote.authHostname};
 ${nginxAllows}
+        if ($d2b_source_admitted = 0) { return 403; }
+        deny all;
         if ($http_host != "${remote.authHostname}") { return 421; }
         if ($d2b_auth_mutation_denied = 1) { return 403; }
 
@@ -116,15 +147,18 @@ ${nginxAllows}
           limit_req zone=d2b_tinyauth_login burst=10 nodelay;
           proxy_pass http://127.0.0.1:${toString remote.tinyauthPort};
           proxy_http_version 1.1;
+          proxy_pass_request_body on;
           proxy_set_header Host ${remote.authHostname};
+          proxy_set_header Origin $http_origin;
+          proxy_set_header Referer $http_referer;
           proxy_set_header Cookie $http_cookie;
           proxy_set_header X-Forwarded-Host ${remote.authHostname};
           proxy_set_header X-Forwarded-Port 443;
           proxy_set_header X-Forwarded-Proto https;
           proxy_set_header X-Forwarded-For $remote_addr;
           proxy_set_header X-Real-IP $remote_addr;
-          proxy_set_header X-Forwarded-Uri $request_uri;
-          proxy_set_header X-Original-URI $request_uri;
+          proxy_set_header X-Forwarded-Uri $d2b_forwarded_uri;
+          proxy_set_header X-Original-URI $d2b_forwarded_uri;
           proxy_set_header Authorization "";
           proxy_set_header Remote-User "";
           proxy_set_header X-Remote-User "";
@@ -147,6 +181,8 @@ ${nginxAllows}
         listen ${relayAddress}:${toString remote.relayPort};
         server_name ${remote.hostname};
 ${nginxAllows}
+        if ($d2b_source_admitted = 0) { return 403; }
+        deny all;
         if ($http_host != "${remote.hostname}") { return 421; }
         if ($d2b_dashboard_mutation_denied = 1) { return 403; }
 
@@ -157,14 +193,16 @@ ${nginxAllows}
           proxy_pass_request_body off;
           proxy_set_header Content-Length "";
           proxy_set_header Host ${remote.authHostname};
+          proxy_set_header Origin $http_origin;
+          proxy_set_header Referer $http_referer;
           proxy_set_header Cookie $http_cookie;
           proxy_set_header X-Forwarded-Host ${remote.hostname};
           proxy_set_header X-Forwarded-Port 443;
           proxy_set_header X-Forwarded-Proto https;
           proxy_set_header X-Forwarded-For $remote_addr;
           proxy_set_header X-Real-IP $remote_addr;
-          proxy_set_header X-Forwarded-Uri $request_uri;
-          proxy_set_header X-Original-URI $request_uri;
+          proxy_set_header X-Forwarded-Uri $d2b_forwarded_uri;
+          proxy_set_header X-Original-URI $d2b_forwarded_uri;
           proxy_set_header Authorization "";
           proxy_set_header Remote-User "";
           proxy_set_header X-Remote-User "";
@@ -186,10 +224,12 @@ ${nginxAllows}
           add_header Set-Cookie $tinyauth_set_cookie always;
           error_page 401 = @tinyauth_login;
 
-          proxy_pass http://127.0.0.1:${toString cfg.supervisor.port};
+          proxy_pass http://127.0.0.1:8372;
           proxy_http_version 1.1;
+          proxy_pass_request_body on;
           proxy_set_header Host $http_host;
           proxy_set_header Origin $http_origin;
+          proxy_set_header Referer $http_referer;
           proxy_set_header Sec-Fetch-Site $http_sec_fetch_site;
           proxy_set_header X-GC-Request $http_x_gc_request;
           proxy_set_header Last-Event-ID $http_last_event_id;
@@ -317,7 +357,7 @@ in
     systemd.services.d2b-gascity-relay = {
       description = "Gas City authenticated dashboard relay";
       wantedBy = [ "multi-user.target" ];
-      requires = [ "d2b-gascity-tinyauth.service" ];
+      wants = [ "d2b-gascity-tinyauth.service" ];
       after = [ "d2b-gascity-tinyauth.service" ];
       serviceConfig = commonSandbox // {
         User = "d2b-gascity-relay";
