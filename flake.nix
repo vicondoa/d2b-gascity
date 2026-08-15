@@ -134,6 +134,8 @@
           };
         });
 
+      gasCityContributorModule = import ./nixos-modules/default.nix;
+
       contributorFor = system:
         import ./nix/packages/contributor.nix {
           pkgs = nixpkgsFor.${system};
@@ -146,8 +148,45 @@
           nginx = nginxPackageFor system;
           sourceManifest = (sourceManifestFor system).manifest;
         };
+
+      moduleEvalFor = system:
+        let
+          pkgs = nixpkgsFor.${system};
+          contributor = contributorFor system;
+          result = import ./tests/nix/module.nix {
+            inherit pkgs;
+            lib = pkgs.lib;
+            module = gasCityContributorModule;
+            inherit nixpkgs;
+          };
+          relayConfig = pkgs.writeText "d2b-gascity-relay.conf"
+            result._relayConfig;
+          assertionResults = builtins.removeAttrs result [ "_relayConfig" ];
+        in
+        pkgs.runCommand "d2b-gascity-module-eval" {
+          nativeBuildInputs = [ contributor.passthru.nginx ];
+        } ''
+          set -euo pipefail
+          mkdir -p "$TMPDIR/nginx"
+          sed "s#/run/d2b-gascity-relay#$TMPDIR/nginx#g" \
+            ${relayConfig} > "$TMPDIR/relay.conf"
+          nginx -t -e stderr -p "$TMPDIR/nginx" -c "$TMPDIR/relay.conf"
+          printf '%s\n' '${builtins.toJSON assertionResults}' > "$out"
+        '';
+
+      vmCheckFor = system:
+        import ./tests/host/d2b-gascity.nix {
+          pkgs = nixpkgsFor.${system};
+          module = gasCityContributorModule;
+          gasCityContributor = contributorFor system;
+        };
     in
     {
+      nixosModules = {
+        gasCityContributor = gasCityContributorModule;
+        default = gasCityContributorModule;
+      };
+
       packages = forAllSystems (system: {
         gascity = gascityFor system;
         beads = beadsFor system;
@@ -203,6 +242,11 @@
             nginxVersion = (nginxPackageFor system).version;
           };
           source-manifest = sourceManifest.check;
+          d2b-gascity-module = moduleEvalFor system;
         });
+
+      vmChecks = forAllSystems (system: {
+        d2b-gascity = vmCheckFor system;
+      });
     };
 }
