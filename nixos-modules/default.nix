@@ -155,6 +155,9 @@ in
         TimeoutStartSec = "5min";
         TimeoutStopSec = "2min";
         KillMode = "control-group";
+        ExecStartPre = lib.optional
+          (cfg.credentials.copilotTokenFile != null)
+          "${packagePath}/bin/d2b-gascity-copilot-provider readiness --selection-path ${cfg.copilot.providerSelectionFile}";
 
         CPUQuota = cfg.resources.cpuQuota;
         MemoryHigh = cfg.resources.memoryHigh;

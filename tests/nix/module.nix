@@ -46,6 +46,13 @@ let
   core = (mkEval coreConfig).config;
   main = core.systemd.services.d2b-gascity.serviceConfig;
   coreSupervisorText = core.environment.etc."d2b-gascity/supervisor.toml".text;
+  noCopilot = (mkEval {
+    services.d2bGasCity = {
+      enable = true;
+      package = testPackage;
+    };
+  }).config;
+  noCopilotMain = noCopilot.systemd.services.d2b-gascity.serviceConfig;
   coreD2bUnits = builtins.filter
     (name: lib.hasPrefix "d2b-gascity" name)
     (builtins.attrNames core.systemd.services);
@@ -220,6 +227,9 @@ in
     assert main.MemoryMax == "4G";
     assert main.MemorySwapMax == "0";
     assert main.TasksMax == 512;
+    assert main.ExecStartPre == [
+      "${testPackage}/bin/d2b-gascity-copilot-provider readiness --selection-path /var/lib/d2b-gascity/config/provider-selection.json"
+    ];
     assert main.NoNewPrivileges;
     assert main.PrivateTmp;
     assert main.PrivateDevices;
@@ -254,6 +264,9 @@ in
     assert !(lib.hasInfix "write_auth_" coreSupervisorText);
     assert !(lib.hasInfix "read_auth_" coreSupervisorText);
     assert !(core.services.d2bGasCity.supervisor ? bind);
+    true;
+
+  "without-copilot" = assert (noCopilotMain.ExecStartPre or [ ]) == [ ];
     true;
 
   "fixed-port" = assert builtins.elem "GC_DOLT_PORT=8375"

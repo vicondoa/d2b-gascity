@@ -58,6 +58,49 @@ Managed Dolt uses upstream dynamic allocation by default. A fixed
 other listener and receives a matching Gas City owner rule. Dynamic Dolt
 ports are never placed in the firewall.
 
+## Copilot ACP providers
+
+The portable city declares five direct ACP provider names:
+
+- `copilot-planning-sol` uses `gpt-5.6-sol`, `long_context`, and `xhigh`.
+- `copilot-review` uses the machine-local readiness selection.
+- `copilot-review-sol` and `copilot-review-luna` are explicit diagnostic
+  profiles.
+- `copilot-code-luna` uses `gpt-5.6-luna`, `default`, and `max`.
+
+Every provider invokes the packaged
+`d2b-gascity-copilot-provider` wrapper. It is one stateless parent per ACP
+session, starts the exact sibling `copilot` executable directly, inherits
+stdio for normal sessions, and forwards termination signals to the child
+process group. It never creates a provider daemon, transport endpoint, session
+store, retry ledger, or second lifecycle owner.
+
+The wrapper reads only the systemd-projected Copilot credential after checking
+that it is an owner-readable regular file with no symlink or group/other
+access. The child receives only `COPILOT_GITHUB_TOKEN` from the credential
+projection. A private `COPILOT_HOME/settings.json` is created below
+`XDG_RUNTIME_DIR` for each process and removed after the child exits.
+
+The settings file enables the Copilot CLI experimental MXC sandbox, grants the
+current worktree, permits outbound dependency traffic while blocking local
+network access, sandboxes local MCP and LSP processes, disables GitHub and git
+credential injection, and denies credential, service-state, NixOS, SSH, and
+key paths. Built-in file edits remain policy-bound rather than a perfect
+operating-system boundary: imported prompts and supervisor children still
+share the dedicated Gas City identity. This residual same-identity trust is
+mitigated by exact pins, scrubbed child environment, closed tool policies, and
+the no-bypass sandbox setting.
+
+When a Copilot credential is configured, `d2b-gascity.service` runs one
+bounded no-tools readiness sequence before `gc supervisor run`. It probes
+coding Luna first, then review Sol. Only typed Sol `unsupported` or
+`unavailable` results permit a review Luna probe. Authentication, network,
+quota, malformed, timeout, closed, and unknown results keep readiness
+blocked. The result is atomically written owner-only to
+`/var/lib/d2b-gascity/config/provider-selection.json`; no model response or
+credential is persisted. Without a Copilot credential, no readiness command
+is added and the service remains valid.
+
 ## Optional remote dashboard ingress
 
 When `dashboard.remote.enable` is false, no TinyAuth or relay unit, credential,
@@ -132,6 +175,6 @@ families. Writable paths are explicit. No syscall allowlist is imposed: Gas
 City remains responsible for launching its upstream-managed Dolt and child
 processes without a policy that silently breaks them.
 
-Provider credentials, Discord composition, GitHub publication, and ACP
-consumption remain nullable and are deferred to U5 and U6. This unit only
-establishes safe credential projections and the lifecycle boundary.
+Discord composition and GitHub publication remain nullable and are supplied by
+later portable pack composition. The Copilot provider contract is complete
+without adding a separate lifecycle service.

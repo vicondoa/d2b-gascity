@@ -61,6 +61,12 @@ let
     ++ lib.optional (cfg.dolt.fixedPort != null) cfg.dolt.fixedPort;
 
   pathAssertions = lib.concatLists [
+    [
+      {
+        assertion = absolutePath cfg.copilot.providerSelectionFile;
+        message = "services.d2bGasCity.copilot.providerSelectionFile must be absolute.";
+      }
+    ]
     (lib.optional (cfg.credentials.copilotTokenFile != null) {
       assertion = absolutePath cfg.credentials.copilotTokenFile;
       message = "services.d2bGasCity.credentials.copilotTokenFile must be absolute.";
@@ -101,6 +107,12 @@ in
       type = types.nullOr types.package;
       default = null;
       description = "Gas City contributor package containing gc and portable assets.";
+    };
+
+    copilot.providerSelectionFile = mkOption {
+      type = types.str;
+      default = "/var/lib/d2b-gascity/config/provider-selection.json";
+      description = "Machine-local Copilot readiness selection written before startup.";
     };
 
     supervisor.port = mkOption {
