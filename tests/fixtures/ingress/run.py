@@ -186,7 +186,6 @@ def main() -> int:
     scratch_root.chmod(0o700)
     base = scratch_root / f"run-{os.getpid()}-{time.time_ns()}"
     base.mkdir(mode=0o700)
-    roots: set[int] = set()
     processes: list[subprocess.Popen[bytes]] = []
     logs: list[object] = []
     helper: ThreadingHTTPServer | None = None
@@ -235,7 +234,6 @@ def main() -> int:
             start_new_session=True,
         )
         processes.append(process)
-        roots.add(process.pid)
         return process
 
     def direct(path: str, method: str = "GET", headers: dict[str, str] | None = None, body: bytes | None = None):
@@ -527,11 +525,12 @@ log:
         if helper is not None:
             helper.shutdown()
             helper.server_close()
-        all_groups = owned_groups(base, roots)
+        root_pids = {process.pid for process in processes}
+        all_groups = owned_groups(base, root_pids)
         signal_groups(all_groups, signal.SIGTERM)
-        if not wait_groups_gone(base, roots, 5):
-            signal_groups(owned_groups(base, roots), signal.SIGKILL)
-            wait_groups_gone(base, roots, 3)
+        if not wait_groups_gone(base, root_pids, 5):
+            signal_groups(owned_groups(base, root_pids), signal.SIGKILL)
+            wait_groups_gone(base, root_pids, 3)
         for process in processes:
             try:
                 process.wait(timeout=0.2)

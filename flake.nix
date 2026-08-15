@@ -101,9 +101,6 @@
 
       copilotFor = system: llm-agents.packages.${system}.copilot-cli;
       tinyauthFor = system: packageNixpkgsFor.${system}.tinyauth;
-      nginxPackageFor = nginxFor;
-      goPackageFor = goFor;
-
       sourceManifestFor = system:
         (import ./nix/source-manifest.nix {
           pkgs = nixpkgsFor.${system};
@@ -123,13 +120,13 @@
               version = (copilotFor system).version;
             };
             go = {
-              version = (goPackageFor system).version;
+              version = (goFor system).version;
             };
             tinyauth = {
               version = (tinyauthFor system).version;
             };
             nginx = {
-              version = (nginxPackageFor system).version;
+              version = (nginxFor system).version;
             };
           };
         });
@@ -143,9 +140,9 @@
           beads = beadsFor system;
           dolt = doltFor system;
           copilot = copilotFor system;
-          go = goPackageFor system;
+          go = goFor system;
           tinyauth = tinyauthFor system;
-          nginx = nginxPackageFor system;
+          nginx = nginxFor system;
           sourceManifest = (sourceManifestFor system).manifest;
         };
 
@@ -236,10 +233,10 @@
             beadsRevision = (locked "beads").rev;
             llmAgentsRevision = (locked "llm-agents").rev;
             doltVersion = (doltFor system).version;
-            goVersion = (goPackageFor system).version;
+            goVersion = (goFor system).version;
             copilotVersion = (copilotFor system).version;
             tinyauthVersion = (tinyauthFor system).version;
-            nginxVersion = (nginxPackageFor system).version;
+            nginxVersion = (nginxFor system).version;
           };
           source-manifest = sourceManifest.check;
           d2b-gascity-module = moduleEvalFor system;

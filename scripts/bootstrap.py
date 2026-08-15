@@ -26,7 +26,6 @@ DEFAULT_D2B_SOURCE = "https://github.com/vicondoa/d2b.git"
 RIG_NAME = "d2b"
 PORTABLE_FILES = ("city.toml", "pack.toml", "packs.lock")
 PORTABLE_DIRECTORIES = ("agents", "assets", "formulas", "providers")
-PORTABLE_ENTRIES = PORTABLE_FILES + PORTABLE_DIRECTORIES
 REQUIRED_INIT_FLAGS = ("--file", "--preserve-existing", "--no-start")
 
 
@@ -73,11 +72,7 @@ def _arg_runtime_path(value: str, label: str) -> pathlib.Path:
 
 
 def _same_or_below(path: pathlib.Path, parent: pathlib.Path) -> bool:
-    try:
-        path.resolve(strict=False).relative_to(parent.resolve(strict=False))
-    except ValueError:
-        return False
-    return True
+    return path.resolve(strict=False).is_relative_to(parent.resolve(strict=False))
 
 
 def _reject_overlapping_paths(city: pathlib.Path, rig: pathlib.Path) -> None:
@@ -273,8 +268,12 @@ def _copy_file_atomic(source: pathlib.Path, destination: pathlib.Path) -> None:
         raise
 
 
-def _materialize_portable(source: pathlib.Path, destination: pathlib.Path) -> None:
-    files = _validate_portable_source(source)
+def _materialize_portable(
+    source: pathlib.Path,
+    destination: pathlib.Path,
+    files: dict[str, pathlib.Path] | None = None,
+) -> None:
+    files = files or _validate_portable_source(source)
     destination.mkdir(parents=True)
     for relative, path in files.items():
         target = destination / relative
@@ -284,7 +283,7 @@ def _materialize_portable(source: pathlib.Path, destination: pathlib.Path) -> No
             _copy_file_atomic(path, target)
 
 
-def _portable_snapshot(root: pathlib.Path, files: dict[str, pathlib.Path]) -> dict[str, str]:
+def _portable_snapshot(files: dict[str, pathlib.Path]) -> dict[str, str]:
     snapshot: dict[str, str] = {}
     for relative, path in files.items():
         if path.is_dir():
@@ -402,43 +401,37 @@ def _prepare_rig(args: argparse.Namespace, env: Mapping[str, str]) -> None:
             raise BootstrapError("rig path must not be a symlink")
         if not rig.is_dir():
             raise BootstrapError("rig path is not a directory")
-        if not any(rig.iterdir()):
-            source = _safe_source(args.d2b_source)
-            _run(
-                [git, "clone", "--quiet", "--branch", "v3", "--single-branch", source, str(rig)],
+        if any(rig.iterdir()):
+            _run([git, "-C", rig, "rev-parse", "--is-inside-work-tree"], env=env, label="d2b rig check")
+            branch = _run(
+                [git, "-C", rig, "symbolic-ref", "--quiet", "--short", "HEAD"],
                 env=env,
-                label="d2b v3 clone",
+                label="d2b rig branch check",
             )
+            if branch.stdout.strip() != "v3":
+                raise BootstrapError("existing rig must be checked out on v3")
+            remote_v3 = subprocess.run(
+                [
+                    git,
+                    "-C",
+                    os.fspath(rig),
+                    "show-ref",
+                    "--verify",
+                    "--quiet",
+                    "refs/remotes/origin/v3",
+                ],
+                env=dict(env),
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            if remote_v3.returncode != 0:
+                raise BootstrapError("existing rig must provide origin/v3")
             return
-        _run([git, "-C", rig, "rev-parse", "--is-inside-work-tree"], env=env, label="d2b rig check")
-        branch = _run(
-            [git, "-C", rig, "symbolic-ref", "--quiet", "--short", "HEAD"],
-            env=env,
-            label="d2b rig branch check",
-        )
-        if branch.stdout.strip() != "v3":
-            raise BootstrapError("existing rig must be checked out on v3")
-        remote_v3 = subprocess.run(
-            [
-                git,
-                "-C",
-                os.fspath(rig),
-                "show-ref",
-                "--verify",
-                "--quiet",
-                "refs/remotes/origin/v3",
-            ],
-            env=dict(env),
-            text=True,
-            capture_output=True,
-            check=False,
-        )
-        if remote_v3.returncode != 0:
-            raise BootstrapError("existing rig must provide origin/v3")
-        return
+    else:
+        rig.parent.mkdir(parents=True, exist_ok=True)
 
     source = _safe_source(args.d2b_source)
-    rig.parent.mkdir(parents=True, exist_ok=True)
     _run(
         [git, "clone", "--quiet", "--branch", "v3", "--single-branch", source, str(rig)],
         env=env,
@@ -467,15 +460,13 @@ def _validate_city_state(
         raise BootstrapError("city must be a non-symlink directory")
     source_files = _validate_portable_source(DEFAULT_PORTABLE_SOURCE)
     target_files = _portable_file_set(city)
-    if _portable_snapshot(DEFAULT_PORTABLE_SOURCE, source_files) != _portable_snapshot(
-        city, target_files
-    ):
+    if _portable_snapshot(source_files) != _portable_snapshot(target_files):
         raise BootstrapError("city portable files do not match the committed source")
     if require_site:
         _site_binding(city, rig)
 
 
-def _cities_json(gc: pathlib.Path, city: pathlib.Path, env: Mapping[str, str]) -> dict:
+def _cities_json(gc: pathlib.Path, env: Mapping[str, str]) -> dict:
     result = _run(
         [gc, "cities", "list", "--json"],
         env=env,
@@ -526,7 +517,7 @@ def _check(args: argparse.Namespace) -> int:
     if names.count(RIG_NAME) != 1:
         raise BootstrapError("city does not contain exactly one d2b rig")
 
-    cities = _cities_json(args.gc, args.city, env)
+    cities = _cities_json(args.gc, env)
     city_resolved = str(args.city.resolve())
     registered = any(
         pathlib.Path(entry.get("path", "")).resolve() == pathlib.Path(city_resolved)
@@ -569,7 +560,7 @@ def _check(args: argparse.Namespace) -> int:
 def _init(args: argparse.Namespace) -> int:
     env = _city_env(args.state_root)
     _validate_gc_help(args.gc, env)
-    _validate_portable_source(args.portable_source)
+    portable_files = _validate_portable_source(args.portable_source)
     _reject_overlapping_paths(args.city, args.rig)
     if args.city.exists():
         if args.city.is_symlink():
@@ -588,7 +579,7 @@ def _init(args: argparse.Namespace) -> int:
 
     args.city.parent.mkdir(parents=True, exist_ok=True)
     _configure_dolt_identity(args, env)
-    _materialize_portable(args.portable_source, args.city)
+    _materialize_portable(args.portable_source, args.city, portable_files)
     _run(
         [
             args.gc,
@@ -688,8 +679,8 @@ def _portable_update(args: argparse.Namespace) -> int:
         raise BootstrapError("portable update requires an initialized city directory")
     target_files = _portable_file_set(args.city)
 
-    baseline_snapshot = _portable_snapshot(args.baseline_source, baseline_files)
-    target_snapshot = _portable_snapshot(args.city, target_files)
+    baseline_snapshot = _portable_snapshot(baseline_files)
+    target_snapshot = _portable_snapshot(target_files)
     if baseline_snapshot != target_snapshot:
         raise BootstrapError(
             "portable source drift detected; refusing update before changing runtime state"

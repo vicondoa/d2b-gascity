@@ -13,10 +13,8 @@ let
   resolvePackage = override: name:
     if override != null then
       override
-    else if builtins.hasAttr name packagePassthru then
-      builtins.getAttr name packagePassthru
     else
-      pkgs.hello;
+      lib.attrByPath [ name ] pkgs.hello packagePassthru;
 
   tinyauth = resolvePackage remote.tinyauthPackage "tinyauth";
   nginx = resolvePackage remote.nginxPackage "nginx";
@@ -25,8 +23,9 @@ let
       "[${remote.relayAddress}]"
     else
       remote.relayAddress;
-  nginxAllows = lib.concatStringsSep "\n"
-    (map (cidr: "        allow ${cidr};") remote.trustedExternalProxyCidrs);
+  nginxAllows = lib.concatMapStringsSep "\n"
+    (cidr: "        allow ${cidr};")
+    remote.trustedExternalProxyCidrs;
   authHostnameRegex = lib.escapeRegex remote.authHostname;
   tinyAuthCredentialPath =
     "/run/credentials/d2b-gascity-tinyauth.service/users";

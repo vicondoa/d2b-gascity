@@ -34,7 +34,6 @@ class BootstrapFixtureTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.gc = packaged_binary("gc")
-        cls.git = packaged_binary("git") or pathlib.Path("git")
         cls.dolt = packaged_binary("dolt")
         if cls.gc is None or cls.dolt is None:
             raise unittest.SkipTest("packaged gc and dolt are required")

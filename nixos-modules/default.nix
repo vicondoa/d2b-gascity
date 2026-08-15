@@ -56,10 +56,10 @@ let
     "d /var/lib/d2b-gascity/cache 0700 d2b-gascity d2b-gascity -"
   ];
 
-  trustedIPv4 = lib.filter (cidr: !(lib.hasInfix ":" cidr))
+  trustedProxyPartitions = lib.partition (lib.hasInfix ":")
     cfg.dashboard.remote.trustedExternalProxyCidrs;
-  trustedIPv6 = lib.filter (cidr: lib.hasInfix ":" cidr)
-    cfg.dashboard.remote.trustedExternalProxyCidrs;
+  trustedIPv4 = trustedProxyPartitions.wrong;
+  trustedIPv6 = trustedProxyPartitions.right;
   nftSet = values:
     if values == [ ] then
       "0.0.0.0/32"
