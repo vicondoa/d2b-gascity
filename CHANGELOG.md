@@ -16,3 +16,8 @@ and this project follows semantic versioning where releases are published.
 - Added contribution, security, and privacy rules.
 - Added ignore rules for machine-local state, credentials, reports, sockets,
   host overrides, and build outputs.
+- Added the pinned Pack v2 role composition, ACP provider matrix, and
+  origin/v3 worktree provenance checks; added the stopped official Discord
+  import and DM-binding helper with role-based room boundary documentation.
+- Pinned the worktree fixture to the current d2b `origin/v3` revision without
+  importing d2b process or repository artifacts.

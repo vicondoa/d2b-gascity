@@ -175,6 +175,21 @@ families. Writable paths are explicit. No syscall allowlist is imposed: Gas
 City remains responsible for launching its upstream-managed Dolt and child
 processes without a policy that silently breaks them.
 
+The resolved model-backed role graph is kept in
+`city/role-provider-matrix.json`; it is a generated audit surface rather than
+a copy of upstream agent definitions. Core worktree formulas use the d2b rig's
+`base_branch = "v3"` formula variable. The only prompt override is the
+worktree preparation asset recorded in
+`city/worktree-producer-inventory.json`, which replaces remote-default
+discovery with `origin/v3`.
+
 Discord composition and GitHub publication remain nullable and are supplied by
-later portable pack composition. The Copilot provider contract is complete
-without adding a separate lifecycle service.
+portable pack composition. This city configures no external publication edge,
+so any imported Discord processes remain supervisor-internal and the pinned
+pack is used gateway-only without patching its service definitions. The
+stopped operator helper passes non-empty guild,
+channel, and dedicated operator-role allowlists to the official
+`gc discord import-app` command, then binds explicit operator DMs with
+`gc discord bind-dm`. Public Interactions and `sync-commands` remain off by
+omission; no local Discord daemon or service fork is needed. The Copilot
+provider contract is complete without adding a separate lifecycle service.

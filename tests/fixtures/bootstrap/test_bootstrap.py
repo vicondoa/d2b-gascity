@@ -190,8 +190,22 @@ class BootstrapFixtureTests(unittest.TestCase):
         )
         self.assertEqual(config.returncode, 0, config.stderr)
         site = (self.city / ".gc" / "site.toml").read_text()
+        self.assertIn('workspace_name = "d2b-gascity"', site)
         self.assertIn(str(self.rig), site)
         self.assertNotIn(f'path = "{self.rig}"', (self.city / "city.toml").read_text())
+        origin_head = subprocess.run(
+            [
+                "git",
+                "-C",
+                str(self.rig),
+                "symbolic-ref",
+                "refs/remotes/origin/HEAD",
+            ],
+            text=True,
+            capture_output=True,
+            check=True,
+        )
+        self.assertEqual(origin_head.stdout.strip(), "refs/remotes/origin/v3")
 
     def test_repeat_and_partial_init_refuse_before_mutation(self) -> None:
         first = self._run_bootstrap("init", "--d2b-source", str(self.origin))
@@ -288,7 +302,14 @@ class BootstrapFixtureTests(unittest.TestCase):
         initialized = self._run_bootstrap("init", "--d2b-source", str(self.origin))
         self.assertEqual(initialized.returncode, 0, initialized.stderr)
         city_toml = self.city / "city.toml"
-        city_toml.write_text(city_toml.read_text() + "\n# local drift\n")
+        current = city_toml.read_text()
+        drifted = current.replace(
+            'prefix = "d2b"',
+            'prefix = "locally-drifted"',
+            1,
+        )
+        self.assertNotEqual(current, drifted)
+        city_toml.write_text(drifted)
         candidate = self.base / "candidate-city"
         shutil.copytree(ROOT / "city", candidate)
         update = self._run_bootstrap(

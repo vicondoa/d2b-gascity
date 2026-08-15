@@ -22,6 +22,8 @@ let
       "$out/share/d2b-gascity/scripts/operator.py"
     install -m 0755 ${../../scripts/copilot-provider.py} \
       "$out/share/d2b-gascity/scripts/copilot-provider.py"
+    install -m 0755 ${../../scripts/discord-import.py} \
+      "$out/share/d2b-gascity/scripts/discord-import.py"
   '';
 
   bootstrapWrapper = pkgs.writeShellScriptBin "d2b-gascity-bootstrap" ''
@@ -41,6 +43,13 @@ let
     export D2B_GASCITY_ROOT="${portableAssets}/share/d2b-gascity"
     exec ${pkgs.python3}/bin/python3 \
       "$D2B_GASCITY_ROOT/scripts/copilot-provider.py" "$@"
+  '';
+
+  discordImportWrapper = pkgs.writeShellScriptBin
+    "d2b-gascity-discord-import" ''
+    export D2B_GASCITY_ROOT="${portableAssets}/share/d2b-gascity"
+    exec ${pkgs.python3}/bin/python3 \
+      "$D2B_GASCITY_ROOT/scripts/discord-import.py" "$@"
   '';
 
   runtimePackages = [
@@ -76,6 +85,7 @@ pkgs.symlinkJoin {
     bootstrapWrapper
     operatorWrapper
     copilotProviderWrapper
+    discordImportWrapper
   ];
   passthru = {
     inherit
@@ -92,7 +102,8 @@ pkgs.symlinkJoin {
       portableAssets
       bootstrapWrapper
       operatorWrapper
-      copilotProviderWrapper;
+      copilotProviderWrapper
+      discordImportWrapper;
   };
   meta = {
     description = "Pinned Gas City contributor runtime closure";

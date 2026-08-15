@@ -24,7 +24,13 @@ PACK_COMMIT = "5d2a9d023edbb9ba24fdcff554e89fc3d7da72fe"
 GASCITY_COMMIT = "f6741d94861aa14f0253deffbe9efb1cb3a35d92"
 DEFAULT_D2B_SOURCE = "https://github.com/vicondoa/d2b.git"
 RIG_NAME = "d2b"
-PORTABLE_FILES = ("city.toml", "pack.toml", "packs.lock")
+PORTABLE_FILES = (
+    "city.toml",
+    "pack.toml",
+    "packs.lock",
+    "role-provider-matrix.json",
+    "worktree-producer-inventory.json",
+)
 PORTABLE_DIRECTORIES = ("agents", "assets", "formulas", "providers")
 REQUIRED_INIT_FLAGS = ("--file", "--preserve-existing", "--no-start")
 
@@ -179,9 +185,10 @@ def _validate_portable_source(source: pathlib.Path) -> dict[str, pathlib.Path]:
             _validate_private_text(relative, path.read_text())
 
     city = _read_toml(source / "city.toml", "portable city.toml")
-    workspace = city.get("workspace", {})
-    if workspace.get("name") != "d2b-gascity":
-        raise BootstrapError("portable city workspace must be d2b-gascity")
+    if "workspace" in city:
+        raise BootstrapError(
+            "portable city must not define machine-local workspace identity"
+        )
     rigs = city.get("rigs", [])
     if len(rigs) != 1 or rigs[0].get("name") != RIG_NAME:
         raise BootstrapError("portable city must define exactly one d2b rig")
@@ -190,7 +197,7 @@ def _validate_portable_source(source: pathlib.Path) -> dict[str, pathlib.Path]:
         raise BootstrapError("portable city must not contain a rig path")
     if rig.get("prefix") != RIG_NAME or rig.get("default_branch") != "v3":
         raise BootstrapError("portable d2b rig must use prefix d2b and branch v3")
-    roles = city.get("defaults", {}).get("rig", {}).get("imports", {}).get("roles", {})
+    roles = rig.get("imports", {}).get("roles", {})
     if roles != {
         "source": "https://github.com/gastownhall/gascity-packs/tree/main/gascity/roles",
         "version": f"sha:{PACK_COMMIT}",
@@ -289,16 +296,15 @@ def _portable_snapshot(files: dict[str, pathlib.Path]) -> dict[str, str]:
         if path.is_dir():
             continue
         if path.suffix == ".toml":
-            comments = [
-                line.strip()
-                for line in path.read_text().splitlines()
-                if line.lstrip().startswith("#")
-            ]
+            parsed = _read_toml(path, relative)
+            if relative == "city.toml":
+                parsed.pop("workspace", None)
+            if relative == "packs.lock":
+                for pack in parsed.get("packs", {}).values():
+                    if isinstance(pack, dict):
+                        pack.pop("fetched", None)
             snapshot[relative] = json.dumps(
-                {
-                    "comments": comments,
-                    "toml": _read_toml(path, relative),
-                },
+                parsed,
                 sort_keys=True,
                 separators=(",", ":"),
             )
@@ -427,6 +433,11 @@ def _prepare_rig(args: argparse.Namespace, env: Mapping[str, str]) -> None:
             )
             if remote_v3.returncode != 0:
                 raise BootstrapError("existing rig must provide origin/v3")
+            _run(
+                [git, "-C", rig, "remote", "set-head", "origin", "v3"],
+                env=env,
+                label="d2b origin HEAD pin",
+            )
             return
     else:
         rig.parent.mkdir(parents=True, exist_ok=True)
@@ -437,6 +448,11 @@ def _prepare_rig(args: argparse.Namespace, env: Mapping[str, str]) -> None:
         env=env,
         label="d2b v3 clone",
     )
+    _run(
+        [git, "-C", rig, "remote", "set-head", "origin", "v3"],
+        env=env,
+        label="d2b origin HEAD pin",
+    )
 
 
 def _site_binding(city: pathlib.Path, rig: pathlib.Path) -> None:
@@ -444,6 +460,8 @@ def _site_binding(city: pathlib.Path, rig: pathlib.Path) -> None:
     if not site_path.is_file() or site_path.is_symlink():
         raise BootstrapError("gc rig add did not create machine-local .gc/site.toml")
     site = _read_toml(site_path, "machine-local site.toml")
+    if site.get("workspace_name") != "d2b-gascity":
+        raise BootstrapError("machine-local site workspace must be d2b-gascity")
     entries = site.get("rig", [])
     matching = [entry for entry in entries if entry.get("name") == RIG_NAME]
     if len(matching) != 1 or pathlib.Path(matching[0].get("path", "")).resolve() != rig.resolve():
@@ -460,8 +478,21 @@ def _validate_city_state(
         raise BootstrapError("city must be a non-symlink directory")
     source_files = _validate_portable_source(DEFAULT_PORTABLE_SOURCE)
     target_files = _portable_file_set(city)
-    if _portable_snapshot(source_files) != _portable_snapshot(target_files):
-        raise BootstrapError("city portable files do not match the committed source")
+    target_city = _read_toml(target_files["city.toml"], "runtime city.toml")
+    if target_city.get("workspace", {}) not in ({}, {"name": "d2b-gascity"}):
+        raise BootstrapError("runtime city workspace identity is invalid")
+    source_snapshot = _portable_snapshot(source_files)
+    target_snapshot = _portable_snapshot(target_files)
+    if source_snapshot != target_snapshot:
+        changed = sorted(
+            path
+            for path in set(source_snapshot) | set(target_snapshot)
+            if source_snapshot.get(path) != target_snapshot.get(path)
+        )
+        raise BootstrapError(
+            "city portable files do not match the committed source: "
+            + ", ".join(changed)
+        )
     if require_site:
         _site_binding(city, rig)
 
@@ -579,6 +610,7 @@ def _init(args: argparse.Namespace) -> int:
 
     args.city.parent.mkdir(parents=True, exist_ok=True)
     _configure_dolt_identity(args, env)
+    _seed_pack_cache(args.pack_cache, args.state_root)
     _materialize_portable(args.portable_source, args.city, portable_files)
     _run(
         [
@@ -596,7 +628,6 @@ def _init(args: argparse.Namespace) -> int:
         env=env,
         label="gc init --file --preserve-existing --no-start",
     )
-    _seed_pack_cache(args.pack_cache, args.state_root)
     _run(
         [args.gc, "import", "install", "--city", args.city],
         env=env,

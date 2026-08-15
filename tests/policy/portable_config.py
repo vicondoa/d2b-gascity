@@ -16,12 +16,18 @@ GASCITY_COMMIT = "f6741d94861aa14f0253deffbe9efb1cb3a35d92"
 
 class PortableConfigTests(unittest.TestCase):
     def test_portable_files_exist(self) -> None:
-        for relative in ("city.toml", "pack.toml", "packs.lock"):
+        for relative in (
+            "city.toml",
+            "pack.toml",
+            "packs.lock",
+            "role-provider-matrix.json",
+            "worktree-producer-inventory.json",
+        ):
             self.assertTrue((CITY / relative).is_file(), relative)
 
     def test_city_has_one_pathless_d2b_rig(self) -> None:
         config = tomllib.loads((CITY / "city.toml").read_text())
-        self.assertEqual(config["workspace"]["name"], "d2b-gascity")
+        self.assertNotIn("workspace", config)
         rigs = config.get("rigs", [])
         self.assertEqual(len(rigs), 1)
         self.assertEqual(rigs[0]["name"], "d2b")
@@ -29,7 +35,7 @@ class PortableConfigTests(unittest.TestCase):
         self.assertEqual(rigs[0]["default_branch"], "v3")
         self.assertNotIn("path", rigs[0])
 
-        roles = config["defaults"]["rig"]["imports"]["roles"]
+        roles = config["rigs"][0]["imports"]["roles"]
         self.assertEqual(
             roles["source"],
             "https://github.com/gastownhall/gascity-packs/tree/main/gascity/roles",
@@ -114,7 +120,10 @@ class PortableConfigTests(unittest.TestCase):
             self.assertTrue(root.is_dir(), directory)
             for path in root.rglob("*"):
                 if path.is_file():
-                    self.assertIn(path.name, allowed_names, path.relative_to(CITY))
+                    relative = path.relative_to(CITY).as_posix()
+                    if relative == "assets/workflows/do-work/prepare-worktree.md":
+                        continue
+                    self.assertIn(path.name, allowed_names, relative)
 
     def test_portable_prose_may_describe_worktrees_and_passwords(self) -> None:
         _validate_private_text(
