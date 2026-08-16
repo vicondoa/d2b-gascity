@@ -191,8 +191,8 @@ def _runner_execution_paths(
     source = runner.read_text(encoding="utf-8")
     policy_glob = _runner_literal(source, "POLICY_TEST_GLOB")
     fixture_glob = _runner_literal(source, "FIXTURE_TEST_GLOB")
-    explicit_acceptance = _runner_literal(source, "ACP_ACCEPTANCE_RELATIVE")
     ingress_acceptance = _runner_literal(source, "INGRESS_FIXTURE_RELATIVE")
+    explicit_acceptance = _runner_acceptance_paths(root)
     policy = {
         path
         for path in paths
@@ -209,7 +209,7 @@ def _runner_execution_paths(
     return {
         "executed policy": policy,
         "executed fixture": fixtures,
-        "explicit hermetic acceptance": {explicit_acceptance},
+        "explicit hermetic acceptance": explicit_acceptance,
         "ingress acceptance": {ingress_acceptance},
         "runner": {"tests/run.py"},
     }

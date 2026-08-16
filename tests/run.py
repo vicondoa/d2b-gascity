@@ -24,8 +24,10 @@ POLICY_TEST_GLOB = "*.py"
 FIXTURE_TEST_GLOB = "test_*.py"
 ACP_ACCEPTANCE_RELATIVE = "tests/acceptance/copilot-acp.py"
 INGRESS_FIXTURE_RELATIVE = "tests/fixtures/ingress/run.py"
+ROLLBACK_ACCEPTANCE_RELATIVE = "tests/acceptance/rollback.py"
 ACP_ACCEPTANCE = ROOT / ACP_ACCEPTANCE_RELATIVE
 INGRESS_FIXTURE = ROOT / INGRESS_FIXTURE_RELATIVE
+ROLLBACK_ACCEPTANCE = ROOT / ROLLBACK_ACCEPTANCE_RELATIVE
 RUNTIME_COMMANDS = frozenset({"policy", "fixtures", "ingress", "workflow", "check"})
 
 
@@ -332,6 +334,11 @@ def _run_python_fixtures(env: dict[str, str]) -> None:
     _run_python_tests("fixtures", env)
 
 
+def _run_rollback(env: dict[str, str]) -> None:
+    print(f"==> rollback {ROLLBACK_ACCEPTANCE.relative_to(ROOT)}", flush=True)
+    _run_command([sys.executable, str(ROLLBACK_ACCEPTANCE)], env=env, timeout=1800)
+
+
 def _run_generated(env: dict[str, str], *, write: bool = False) -> None:
     command = [sys.executable, str(ROOT / "scripts" / "generate_inventory.py")]
     command.append("--write" if write else "--check")
@@ -400,6 +407,8 @@ def run(command: str) -> int:
             _run_python_fixtures(env)
         elif command == "ingress":
             _run_acceptance(env)
+        elif command == "rollback":
+            _run_rollback(env)
         elif command == "generated":
             _run_generated(env)
         elif command == "privacy":
@@ -412,6 +421,7 @@ def run(command: str) -> int:
         elif command == "check":
             _run_python_policy(env)
             _run_python_tests("fixtures", env)
+            _run_rollback(env)
             _run_generated(env)
             _run_privacy(env)
             _run_static(env)
@@ -436,6 +446,7 @@ def main(argv: list[str] | None = None) -> int:
             "policy",
             "fixtures",
             "ingress",
+            "rollback",
             "generated",
             "privacy",
             "workflow",

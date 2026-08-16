@@ -8,8 +8,8 @@ supplies `GC_CONTRIBUTOR_ROOT` and `U3_PACK_CACHE`, runs the ingress proof insid
 its network namespace, removes the exact per-run root, and rejects owned
 process leaks using the exact run identifier.
 
-Use `make check` for the complete graph. The real ACP feasibility script and
-any live or host acceptance require explicit manual commands and are not
-included in the hermetic graph. Nix checks cover only sandbox-safe
-deterministic policy; package-install and namespace fixtures run through Make
-and CI.
+Use `make check` for the complete graph. The separate-root rollback fixture is
+hermetic and runs there; the real ACP feasibility script and any live or host
+acceptance require explicit manual commands and are not included in the
+hermetic graph. Nix checks cover only sandbox-safe deterministic policy;
+package-install and namespace fixtures run through Make and CI.

@@ -7,7 +7,7 @@ RUNNER := $(PYTHON) tests/run.py
 
 .DEFAULT_GOAL := check
 
-.PHONY: check test-python test-policy test-fixtures test-ingress test-generated \
+.PHONY: check test-python test-policy test-fixtures test-rollback test-ingress test-generated \
 	test-privacy test-workflow check-nix test-nix test-vm update-generated \
 	manual-acp-feasibility
 
@@ -15,13 +15,16 @@ check:
 	$(RUNNER) check
 	$(MAKE) check-nix
 
-test-python: test-policy test-fixtures
+test-python: test-policy test-fixtures test-rollback
 
 test-policy:
 	$(RUNNER) policy
 
 test-fixtures:
 	$(RUNNER) fixtures
+
+test-rollback:
+	$(RUNNER) rollback
 
 test-ingress:
 	$(RUNNER) ingress

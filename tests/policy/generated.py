@@ -61,6 +61,8 @@ class GeneratedInventoryPolicyTests(unittest.TestCase):
         }
         self.assertEqual(acceptance["tests/acceptance/copilot-acp.py"]["mode"], "hermetic")
         self.assertTrue(acceptance["tests/acceptance/copilot-acp.py"]["executed"])
+        self.assertEqual(acceptance["tests/acceptance/rollback.py"]["mode"], "hermetic")
+        self.assertTrue(acceptance["tests/acceptance/rollback.py"]["executed"])
         self.assertEqual(
             acceptance["tests/acceptance/copilot-acp-feasibility.py"]["mode"],
             "manual",
@@ -98,7 +100,13 @@ class GeneratedInventoryPolicyTests(unittest.TestCase):
         self.assertEqual(by_role["runner"], {"tests/run.py"})
         self.assertEqual(by_role["generated data"], {"tests/generated/repository-inventory.json"})
         self.assertEqual(by_role["documentation"], {"tests/README.md"})
-        self.assertEqual(by_role["explicit hermetic acceptance"], {"tests/acceptance/copilot-acp.py"})
+        self.assertEqual(
+            by_role["explicit hermetic acceptance"],
+            {
+                "tests/acceptance/copilot-acp.py",
+                "tests/acceptance/rollback.py",
+            },
+        )
         self.assertEqual(
             by_role["ingress acceptance"],
             {"tests/fixtures/ingress/run.py"},

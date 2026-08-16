@@ -39,6 +39,9 @@ and this project follows semantic versioning where releases are published.
   CookieJar session coverage, source admission and Origin/Referer guards,
   route/grant negatives, restart/SSE checks, and a static accessibility
   heuristic.
+- Added a credential-free separate-root rollback fixture and operator
+  contract covering old-new-old-new rehearsal, prototype integrity,
+  retained closures, offline rollback, and the host receipt gate for U12.
 
 ### Changed
 

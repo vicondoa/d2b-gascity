@@ -65,6 +65,7 @@ class RunnerOwnershipPolicyTests(unittest.TestCase):
         commands = {
             "generated": "_run_generated",
             "privacy": "_run_privacy",
+            "rollback": "_run_rollback",
             "static": "_run_static",
             "update-generated": "_run_generated",
         }
