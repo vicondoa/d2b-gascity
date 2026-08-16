@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Bounded, read-only operator helpers for the standalone city."""
+"""Bounded, state-preserving operator helpers for the standalone city."""
 
 from __future__ import annotations
 
@@ -77,7 +77,9 @@ def _validate_request(args: argparse.Namespace) -> int:
 
 
 def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Read-only d2b Gas City operator helpers.")
+    parser = argparse.ArgumentParser(
+        description="State-preserving d2b Gas City operator helpers."
+    )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     status = subparsers.add_parser("status", help="run the explicit-path bootstrap check")
