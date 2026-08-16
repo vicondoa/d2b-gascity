@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import argparse
+import json
 import pathlib
+import subprocess
 import tempfile
 import unittest
 from unittest import mock
@@ -124,6 +126,145 @@ class BootstrapCleanupPolicyTests(unittest.TestCase):
         self.assertIn("DOLT_START_READY_TIMEOUT_MS", source)
         self.assertNotIn("_dolt_schema_race", source)
         self.assertNotIn("_reset_failed_init", source)
+
+    def test_check_observes_supervisor_first_and_stops_initially_stopped_city(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            args = self._args(pathlib.Path(raw))
+            events: list[str] = []
+
+            def run(
+                _argv: list[object],
+                *,
+                env: object,
+                label: str,
+                cwd: pathlib.Path | None = None,
+            ) -> subprocess.CompletedProcess[str]:
+                events.append(label)
+                stdout = (
+                    json.dumps({"rigs": [{"name": "d2b"}]})
+                    if label == "gc rig list"
+                    else ""
+                )
+                if label == "gc stop --city --force":
+                    events.append("stopped")
+                return subprocess.CompletedProcess([], 0, stdout, "")
+
+            def supervisor(_gc: pathlib.Path, _env: object) -> dict[str, object]:
+                events.append("gc supervisor status")
+                return {"running": False}
+
+            with (
+                mock.patch.object(MODULE, "_city_env", return_value={}),
+                mock.patch.object(MODULE, "_supervisor_json", side_effect=supervisor),
+                mock.patch.object(MODULE, "_validate_gc_help", side_effect=lambda *_: events.append("help")),
+                mock.patch.object(MODULE, "_validate_city_state", side_effect=lambda *_: events.append("state")),
+                mock.patch.object(MODULE, "_cities_json", return_value={"cities": []}),
+                mock.patch.object(MODULE, "_run", side_effect=run),
+                mock.patch("builtins.print"),
+            ):
+                self.assertEqual(MODULE._check(args), 0)
+
+            self.assertEqual(events[0], "gc supervisor status")
+            self.assertEqual(events[-1], "stopped")
+
+    def test_successful_check_reports_cleanup_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            args = self._args(pathlib.Path(raw))
+
+            def run(
+                _argv: list[object],
+                *,
+                env: object,
+                label: str,
+                cwd: pathlib.Path | None = None,
+            ) -> subprocess.CompletedProcess[str]:
+                if label == "gc stop --city --force":
+                    raise MODULE.BootstrapError("cleanup-failure")
+                stdout = (
+                    json.dumps({"rigs": [{"name": "d2b"}]})
+                    if label == "gc rig list"
+                    else ""
+                )
+                return subprocess.CompletedProcess([], 0, stdout, "")
+
+            with (
+                mock.patch.object(MODULE, "_city_env", return_value={}),
+                mock.patch.object(MODULE, "_supervisor_json", return_value={"running": False}),
+                mock.patch.object(MODULE, "_validate_gc_help"),
+                mock.patch.object(MODULE, "_validate_city_state"),
+                mock.patch.object(MODULE, "_cities_json", return_value={"cities": []}),
+                mock.patch.object(MODULE, "_run", side_effect=run),
+                mock.patch("builtins.print"),
+            ):
+                with self.assertRaisesRegex(MODULE.BootstrapError, "cleanup-failure"):
+                    MODULE._check(args)
+
+    def test_check_failure_preserves_original_error_when_cleanup_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            args = self._args(pathlib.Path(raw))
+
+            with (
+                mock.patch.object(MODULE, "_city_env", return_value={}),
+                mock.patch.object(MODULE, "_supervisor_json", return_value={"running": False}),
+                mock.patch.object(MODULE, "_validate_gc_help"),
+                mock.patch.object(
+                    MODULE,
+                    "_validate_city_state",
+                    side_effect=MODULE.BootstrapError("original-check-failure"),
+                ),
+                mock.patch.object(
+                    MODULE,
+                    "_best_effort_stop",
+                    side_effect=MODULE.BootstrapError("cleanup-failure"),
+                ) as stop,
+            ):
+                with self.assertRaisesRegex(
+                    MODULE.BootstrapError,
+                    "original-check-failure",
+                ):
+                    MODULE._check(args)
+
+            stop.assert_called_once_with(args.gc, args.city, env=mock.ANY)
+
+    def test_running_delegated_check_does_not_stop_supervisor(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            args = self._args(pathlib.Path(raw))
+            calls: list[str] = []
+
+            def run(
+                _argv: list[object],
+                *,
+                env: object,
+                label: str,
+                cwd: pathlib.Path | None = None,
+            ) -> subprocess.CompletedProcess[str]:
+                calls.append(label)
+                stdout = (
+                    json.dumps({"rigs": [{"name": "d2b"}]})
+                    if label == "gc rig list"
+                    else ""
+                )
+                return subprocess.CompletedProcess([], 0, stdout, "")
+
+            with (
+                mock.patch.object(
+                    MODULE,
+                    "_city_env",
+                    return_value={
+                        "GC_SUPERVISOR_SYSTEMD_SCOPE": "system",
+                        "GC_SUPERVISOR_SYSTEMD_UNIT": "d2b-gascity.service",
+                    },
+                ),
+                mock.patch.object(MODULE, "_supervisor_json", return_value={"running": True, "pid": 42}),
+                mock.patch.object(MODULE, "_validate_gc_help"),
+                mock.patch.object(MODULE, "_validate_city_state"),
+                mock.patch.object(MODULE, "_cities_json", return_value={"cities": []}),
+                mock.patch.object(MODULE, "_run", side_effect=run),
+                mock.patch("builtins.print"),
+            ):
+                self.assertEqual(MODULE._check(args), 0)
+
+            self.assertNotIn("gc stop --city --force", calls)
 
 
 if __name__ == "__main__":

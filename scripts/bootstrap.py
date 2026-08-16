@@ -149,6 +149,29 @@ def _best_effort_stop(
         pass
 
 
+@contextlib.contextmanager
+def _check_lifecycle(
+    gc: pathlib.Path,
+    city: pathlib.Path,
+    *,
+    env: Mapping[str, str],
+    initially_running: bool,
+):
+    try:
+        yield
+    except BaseException:
+        if not initially_running:
+            with contextlib.suppress(Exception):
+                _best_effort_stop(gc, city, env=env)
+        raise
+    if not initially_running:
+        _run(
+            [gc, "stop", "--city", city, "--force"],
+            env=env,
+            label="gc stop --city --force",
+        )
+
+
 def _read_toml(path: pathlib.Path, label: str) -> dict:
     try:
         return tomllib.loads(path.read_text())
@@ -772,67 +795,78 @@ def _supervisor_json(gc: pathlib.Path, env: Mapping[str, str]) -> dict:
 
 def _check(args: argparse.Namespace) -> int:
     env = _city_env(args.state_root)
-    _validate_gc_help(args.gc, env)
-    _validate_city_state(args.city, args.rig)
-    _run(
-        [args.gc, "import", "check", "--city", args.city],
-        env=env,
-        label="gc import check",
-    )
-    _run(
-        [args.gc, "config", "show", "--city", args.city, "--validate"],
-        env=env,
-        label="gc config show --validate",
-    )
-    rigs = _run(
-        [args.gc, "rig", "list", "--city", args.city, "--json"],
-        env=env,
-        label="gc rig list",
-    )
-    try:
-        rig_report = json.loads(rigs.stdout.strip().splitlines()[-1])
-    except (IndexError, json.JSONDecodeError) as exc:
-        raise BootstrapError("gc rig list did not return JSON") from exc
-    names = [entry.get("name") for entry in rig_report.get("rigs", [])]
-    if names.count(RIG_NAME) != 1:
-        raise BootstrapError("city does not contain exactly one d2b rig")
-
-    cities = _cities_json(args.gc, env)
-    city_resolved = str(args.city.resolve())
-    registered = any(
-        pathlib.Path(entry.get("path", "")).resolve() == pathlib.Path(city_resolved)
-        for entry in cities.get("cities", [])
-    )
+    supervisor = _supervisor_json(args.gc, env)
+    initially_running = bool(supervisor.get("running") or supervisor.get("pid"))
     scope = env.get("GC_SUPERVISOR_SYSTEMD_SCOPE", "").strip().lower()
     unit = env.get("GC_SUPERVISOR_SYSTEMD_UNIT", "").strip()
-    if scope == "user":
-        raise BootstrapError("user-scoped supervisor delegation is forbidden")
-    supervisor = _supervisor_json(args.gc, env)
-    running = bool(supervisor.get("running") or supervisor.get("pid"))
-    if running and not unit and not args.fixture_supervisor:
-        raise BootstrapError(
-            "a running supervisor requires GC_SUPERVISOR_SYSTEMD_UNIT or --fixture-supervisor"
+    delegated = bool(args.fixture_supervisor or (unit and scope == "system"))
+    with _check_lifecycle(
+        args.gc,
+        args.city,
+        env=env,
+        initially_running=initially_running,
+    ):
+        if scope == "user":
+            raise BootstrapError("user-scoped supervisor delegation is forbidden")
+        if unit and scope != "system":
+            raise BootstrapError(
+                "GC_SUPERVISOR_SYSTEMD_UNIT requires GC_SUPERVISOR_SYSTEMD_SCOPE=system"
+            )
+        if initially_running and not delegated:
+            raise BootstrapError(
+                "a running supervisor requires GC_SUPERVISOR_SYSTEMD_UNIT or --fixture-supervisor"
+            )
+        _validate_gc_help(args.gc, env)
+        _validate_city_state(args.city, args.rig)
+        _run(
+            [args.gc, "import", "check", "--city", args.city],
+            env=env,
+            label="gc import check",
         )
-    if registered and not unit and not args.fixture_supervisor:
-        raise BootstrapError(
-            "registered city has no system supervisor delegation; use the root service"
+        _run(
+            [args.gc, "config", "show", "--city", args.city, "--validate"],
+            env=env,
+            label="gc config show --validate",
         )
-    report = {
-        "city": str(args.city),
-        "rig": str(args.rig),
-        "registered": registered,
-        "supervisor_running": running,
-        "supervisor_scope": scope or "unset",
-        "supervisor_unit": unit or None,
-        "checks": {
-            "imports": "ok",
-            "config": "ok",
-            "city": "ok",
-            "rig": "ok",
-            "site_binding": "ok",
-            "no_user_supervisor": "ok",
-        },
-    }
+        rigs = _run(
+            [args.gc, "rig", "list", "--city", args.city, "--json"],
+            env=env,
+            label="gc rig list",
+        )
+        try:
+            rig_report = json.loads(rigs.stdout.strip().splitlines()[-1])
+        except (IndexError, json.JSONDecodeError) as exc:
+            raise BootstrapError("gc rig list did not return JSON") from exc
+        names = [entry.get("name") for entry in rig_report.get("rigs", [])]
+        if names.count(RIG_NAME) != 1:
+            raise BootstrapError("city does not contain exactly one d2b rig")
+
+        cities = _cities_json(args.gc, env)
+        city_resolved = str(args.city.resolve())
+        registered = any(
+            pathlib.Path(entry.get("path", "")).resolve() == pathlib.Path(city_resolved)
+            for entry in cities.get("cities", [])
+        )
+        if registered and not delegated:
+            raise BootstrapError(
+                "registered city has no system supervisor delegation; use the root service"
+            )
+        report = {
+            "city": str(args.city),
+            "rig": str(args.rig),
+            "registered": registered,
+            "supervisor_running": initially_running,
+            "supervisor_scope": scope or "unset",
+            "supervisor_unit": unit or None,
+            "checks": {
+                "imports": "ok",
+                "config": "ok",
+                "city": "ok",
+                "rig": "ok",
+                "site_binding": "ok",
+                "no_user_supervisor": "ok",
+            },
+        }
     print(json.dumps(report, sort_keys=True))
     return 0
 

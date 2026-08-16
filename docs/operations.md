@@ -15,7 +15,10 @@ reconciliation using the machine-local site binding. Ordinary start must not
 copy the prototype, rewrite portable files, or create a second user
 supervisor.
 
-The U3 operator check is explicit-path and read-only:
+The U3 operator check is explicit-path and state-preserving. If the supervisor
+was stopped when the check began, a successful check enforces a stopped city
+and a failed check best-effort restores it; a supervisor already running under
+valid system delegation or the fixture guard is left running:
 
 ```text
 python3 scripts/operator.py status \

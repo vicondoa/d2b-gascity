@@ -184,6 +184,70 @@ class BootstrapFixtureTests(unittest.TestCase):
         )
         return result
 
+    def _managed_processes(self) -> list[str]:
+        marker = f"GC_HOME={self.state}".encode()
+        city_marker = str(self.city).encode()
+        processes: list[str] = []
+        proc_root = pathlib.Path("/proc")
+        if not proc_root.is_dir():
+            return processes
+        for entry in proc_root.iterdir():
+            if not entry.name.isdigit():
+                continue
+            try:
+                cmdline = (entry / "cmdline").read_bytes().replace(b"\0", b" ")
+            except (OSError, PermissionError):
+                continue
+            if city_marker in cmdline:
+                processes.append(f"{entry.name}:{cmdline.decode(errors='replace').strip()}")
+                continue
+            if b"gc" not in cmdline and b"dolt" not in cmdline:
+                continue
+            try:
+                environment = (entry / "environ").read_bytes()
+            except (OSError, PermissionError):
+                continue
+            if marker in environment:
+                processes.append(f"{entry.name}:{cmdline.decode(errors='replace').strip()}")
+        return processes
+
+    def _assert_no_managed_processes(self) -> None:
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            processes = self._managed_processes()
+            if not processes:
+                return
+            time.sleep(0.1)
+        self.fail("managed process remained: " + "; ".join(processes))
+
+    def _start_fixture_supervisor(self, *, system_delegated: bool = True) -> None:
+        if system_delegated:
+            self.env.update(
+                {
+                    "GC_SUPERVISOR_SYSTEMD_UNIT": "d2b-gascity.service",
+                    "GC_SUPERVISOR_SYSTEMD_SCOPE": "system",
+                }
+            )
+        self.supervisor = subprocess.Popen(
+            [str(self.gc), "supervisor", "run"],
+            env=self.env,
+            cwd=ROOT,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        for _ in range(50):
+            status = subprocess.run(
+                [str(self.gc), "supervisor", "status", "--json"],
+                env=self.env,
+                cwd=ROOT,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            if status.returncode == 0 and '"running":true' in status.stdout.replace(" ", ""):
+                break
+            time.sleep(0.1)
+
     def _make_fake_d2b_repository(self) -> pathlib.Path:
         work = self.base / "d2b-source"
         subprocess.run(["git", "init", "-q", "-b", "main", str(work)], check=True)
@@ -278,7 +342,7 @@ class BootstrapFixtureTests(unittest.TestCase):
         self.assertNotEqual(failed.returncode, 0)
         self.assertIn("partial", failed.stderr.lower())
 
-    def test_register_requires_delegation_guard_and_check_is_read_only(self) -> None:
+    def test_register_requires_delegation_guard_and_check_is_state_preserving(self) -> None:
         initialized = self._run_bootstrap("init", "--d2b-source", str(self.origin))
         self.assertEqual(initialized.returncode, 0, initialized.stderr)
         before = {
@@ -302,34 +366,42 @@ class BootstrapFixtureTests(unittest.TestCase):
         self.assertEqual(report["city"], str(self.city))
         self.assertFalse(report["registered"])
 
+    def test_stopped_check_leaves_no_managed_child_or_process(self) -> None:
+        initialized = self._run_bootstrap("init", "--d2b-source", str(self.origin))
+        self.assertEqual(initialized.returncode, 0, initialized.stderr)
+
+        checked = self._run_bootstrap("check")
+
+        self.assertEqual(checked.returncode, 0, checked.stderr)
+        supervisor = subprocess.run(
+            [str(self.gc), "supervisor", "status", "--json"],
+            env=self.env,
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(supervisor.returncode, 0, supervisor.stderr)
+        self.assertFalse(json.loads(supervisor.stdout)["running"])
+        self._assert_no_managed_processes()
+
+    def test_fixture_supervisor_remains_running_during_check(self) -> None:
+        initialized = self._run_bootstrap("init", "--d2b-source", str(self.origin))
+        self.assertEqual(initialized.returncode, 0, initialized.stderr)
+        self._start_fixture_supervisor(system_delegated=False)
+
+        checked = self._run_bootstrap("check", "--fixture-supervisor")
+
+        self.assertEqual(checked.returncode, 0, checked.stderr)
+        self.assertIsNone(
+            self.supervisor.poll(),
+            "state-preserving check stopped the fixture supervisor",
+        )
+
     def test_fixture_register_is_idempotent(self) -> None:
         initialized = self._run_bootstrap("init", "--d2b-source", str(self.origin))
         self.assertEqual(initialized.returncode, 0, initialized.stderr)
-        self.env.update(
-            {
-                "GC_SUPERVISOR_SYSTEMD_UNIT": "d2b-gascity.service",
-                "GC_SUPERVISOR_SYSTEMD_SCOPE": "system",
-            }
-        )
-        self.supervisor = subprocess.Popen(
-            [str(self.gc), "supervisor", "run"],
-            env=self.env,
-            cwd=ROOT,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-        for _ in range(50):
-            status = subprocess.run(
-                [str(self.gc), "supervisor", "status", "--json"],
-                env=self.env,
-                cwd=ROOT,
-                text=True,
-                capture_output=True,
-                check=False,
-            )
-            if status.returncode == 0 and '"running":true' in status.stdout.replace(" ", ""):
-                break
-            time.sleep(0.1)
+        self._start_fixture_supervisor()
         first = self._run_bootstrap("register-existing", "--allow-start")
         self.assertEqual(first.returncode, 0, first.stderr)
         second = self._run_bootstrap("register-existing", "--allow-start")

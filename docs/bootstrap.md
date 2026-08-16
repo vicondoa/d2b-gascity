@@ -66,9 +66,12 @@ that a deployment service exists. U3 does not install or start that service.
 
 ## Checks and updates
 
-`check` is read-only. It validates imports, resolved configuration, the
+`check` is state-preserving. It validates imports, resolved configuration, the
 pathless city rig, the machine-local site binding, registration state, and
-the absence of an undelegated user supervisor:
+the absence of an undelegated user supervisor. If the supervisor was stopped
+when the check began, a successful check enforces a stopped city and a failed
+check best-effort restores it; a supervisor already running under valid system
+delegation or the fixture guard is left running:
 
 ```text
 python3 scripts/bootstrap.py check \
