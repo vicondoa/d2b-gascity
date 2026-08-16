@@ -48,6 +48,13 @@ gc lint <city-root>
 gc doctor --city <city-root>
 ```
 
+The pinned Gas City package applies
+`nix/patches/gascity-acp-session-identity.patch`. It is intentionally limited
+to ACP identity sidecars and its focused upstream test; it does not seed
+arbitrary environment values or credentials. The related upstream orphan
+cleanup issue is `gastownhall/gascity#4714`; remove the local patch only after
+upstream includes equivalent ACP identity seeding.
+
 Upstream warnings from a stopped city, unavailable providers, or absent
 supervisor are diagnostic context, not permission to weaken the portable
 contract. Provider-specific readiness and local patches remain placeholders

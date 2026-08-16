@@ -75,6 +75,24 @@ one source record.
 | TinyAuth | [tinyauthapp/tinyauth](https://github.com/tinyauthapp/tinyauth) | `5.1.3` | AGPL-3.0 |
 | Nginx | [nginx/nginx](https://github.com/nginx/nginx) | `1.30.2` | BSD-2-Clause |
 
+## Local Gas City source patch
+
+The Gas City package applies
+`nix/patches/gascity-acp-session-identity.patch` to the pinned
+`f6741d94861aa14f0253deffbe9efb1cb3a35d92` source. The patch changes only the
+ACP provider and its upstream-focused test. Before an ACP control socket can
+be observed, it seeds only non-empty `GC_SESSION_ID`, `GC_INSTANCE_TOKEN`, and
+`GC_RUNTIME_EPOCH` values from the runtime environment into ACP sidecar
+metadata. If startup fails, those sidecars are removed only while the
+startup sentinel still owns the name, so a replacement session's metadata is
+not removed.
+
+Upstream issue
+[`gastownhall/gascity#4714`](https://github.com/gastownhall/gascity/issues/4714)
+is related orphan cleanup, but does not cover this ACP metadata trigger. This
+local patch fixes the ACP metadata trigger and can be removed when upstream
+gains equivalent ACP identity seeding.
+
 The repository [LICENSE](LICENSE) applies to local work. It does not
 override an upstream license, the Copilot CLI terms, or notices that must
 remain with imported material.
