@@ -87,6 +87,10 @@ let
     pkgs.git
     pkgs.gh
     pkgs.python3
+    pkgs.jq
+    pkgs.tmux
+    pkgs.lsof
+    pkgs.procps
     pkgs.cacert
     pkgs.openssl
     tinyauth
