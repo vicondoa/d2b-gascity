@@ -77,9 +77,11 @@ store, retry ledger, or second lifecycle owner.
 
 The wrapper reads only the systemd-projected Copilot credential after checking
 that it is an owner-readable regular file with no symlink or group/other
-access. The child receives only `COPILOT_GITHUB_TOKEN` from the credential
-projection. A private `COPILOT_HOME/settings.json` is created below
-`XDG_RUNTIME_DIR` for each process and removed after the child exits.
+access. Systemd projections may remain root-owned; explicit
+`--credential-file` paths must remain owned by the service identity. The child
+receives only `COPILOT_GITHUB_TOKEN` from the credential projection. A private
+`COPILOT_HOME/settings.json` is created below `XDG_RUNTIME_DIR` for each
+process and removed after the child exits.
 
 The settings file enables the Copilot CLI experimental MXC sandbox, grants the
 current worktree, permits outbound dependency traffic while blocking local

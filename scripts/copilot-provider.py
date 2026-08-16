@@ -209,7 +209,12 @@ def _credential_path(argument: str | None) -> pathlib.Path:
     return root / "copilot-token"
 
 
+def _credential_owner_allowed(owner: int, *, projected: bool) -> bool:
+    return owner == os.geteuid() or (projected and owner == 0)
+
+
 def _read_credential(argument: str | None) -> str:
+    projected = argument is None
     path = _credential_path(argument)
     try:
         info = path.lstat()
@@ -218,7 +223,7 @@ def _read_credential(argument: str | None) -> str:
     if (
         stat.S_ISLNK(info.st_mode)
         or not stat.S_ISREG(info.st_mode)
-        or info.st_uid != os.geteuid()
+        or not _credential_owner_allowed(info.st_uid, projected=projected)
         or info.st_mode & 0o077
         or info.st_mode & 0o111
         or not info.st_mode & 0o400
@@ -236,12 +241,17 @@ def _read_credential(argument: str | None) -> str:
             if (
                 stat.S_ISLNK(opened.st_mode)
                 or not stat.S_ISREG(opened.st_mode)
-                or opened.st_uid != os.geteuid()
+                or not _credential_owner_allowed(
+                    opened.st_uid,
+                    projected=projected,
+                )
                 or opened.st_mode & 0o077
                 or opened.st_mode & 0o111
                 or not opened.st_mode & 0o400
                 or opened.st_size <= 0
                 or opened.st_size > MAX_CREDENTIAL_BYTES
+                or opened.st_dev != info.st_dev
+                or opened.st_ino != info.st_ino
             ):
                 raise ProviderError("credential-invalid")
             data = stream.read(MAX_CREDENTIAL_BYTES + 1)
