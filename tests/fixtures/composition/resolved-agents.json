@@ -361,7 +361,7 @@
       "description": "",
       "dir": "",
       "model_backed": true,
-      "name": "copilot-planning-sol",
+      "name": "copilot-planning-grok",
       "origin": "gascity-roles",
       "scope": ""
     },
@@ -385,7 +385,7 @@
       "description": "",
       "dir": "",
       "model_backed": true,
-      "name": "copilot-review-sol",
+      "name": "copilot-review-grok",
       "origin": "gascity-roles",
       "scope": ""
     },
@@ -401,7 +401,7 @@
       "description": "",
       "dir": "d2b",
       "model_backed": true,
-      "name": "copilot-planning-sol",
+      "name": "copilot-planning-grok",
       "origin": "gascity-roles",
       "scope": ""
     },
@@ -425,7 +425,7 @@
       "description": "",
       "dir": "d2b",
       "model_backed": true,
-      "name": "copilot-review-sol",
+      "name": "copilot-review-grok",
       "origin": "gascity-roles",
       "scope": ""
     }

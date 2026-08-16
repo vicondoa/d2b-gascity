@@ -13,7 +13,8 @@ The evidence revision is
 verifier reads these paths with `git show <revision>:<path>`:
 
 - `nix/gas-city-contributor/pack/scripts/copilot-profile.py`
-  - `PROFILE_SETTINGS` and `PROFILE_EFFORT` define the Sol and Luna profiles.
+  - `PROFILE_SETTINGS` and `PROFILE_EFFORT` define the pinned legacy Sol and
+    Luna profiles.
   - `child_argv` constructs the direct `--acp` command.
   - `_frame`, `_ACPReader`, and `_PROBE_RESPONSE_PHASES` establish NDJSON
     `initialize`, `session/new`, and `session/prompt` handling.
@@ -34,6 +35,10 @@ verifier reads these paths with `git show <revision>:<path>`:
 The standalone U2 closure pins Gas City
 `f6741d94861aa14f0253deffbe9efb1cb3a35d92`, llm-agents.nix
 `387989ee56d550d86d46d9458ad68a55b9e0ca3b`, and Copilot CLI `1.0.79`.
+
+The legacy Sol labels above belong to the immutable external proof revision;
+they are not local provider or profile selections. The local Grok and Luna
+profile contract is covered by `tests/acceptance/copilot-acp.py`.
 
 ## Credential-free verifier
 

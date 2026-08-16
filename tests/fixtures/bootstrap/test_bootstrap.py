@@ -10,6 +10,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import tomllib
 import unittest
 
 
@@ -293,6 +294,53 @@ class BootstrapFixtureTests(unittest.TestCase):
             check=False,
         )
         self.assertEqual(config.returncode, 0, config.stderr)
+        resolved_config = subprocess.run(
+            [str(self.gc), "config", "show", "--city", str(self.city), "--json"],
+            env=self.env,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(resolved_config.returncode, 0, resolved_config.stderr)
+        payload = json.loads(resolved_config.stdout.strip().splitlines()[-1])
+        resolved_agents = {
+            (agent.get("Dir", ""), agent["Name"]): agent
+            for agent in payload["config"]["Agents"]
+        }
+        workspace_provider = payload["config"]["Workspace"]["Provider"]
+        self.assertEqual(workspace_provider, "copilot-review")
+        self.assertEqual(resolved_agents[("", "dog")]["Provider"], "")
+        self.assertEqual(
+            resolved_agents[("", "dog")]["Provider"] or workspace_provider,
+            "copilot-review",
+        )
+        matrix = json.loads(
+            (ROOT / "city" / "role-provider-matrix.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        expected = {
+            (entry["dir"], entry["name"]): entry for entry in matrix["agents"]
+        }
+        resolved_acp = {
+            (agent.get("Dir", ""), agent["Name"])
+            for agent in payload["config"]["Agents"]
+            if agent.get("Session") == "acp"
+        }
+        self.assertEqual(
+            resolved_acp,
+            set(expected),
+        )
+        for identity, entry in expected.items():
+            with self.subTest(resolved_agent=identity):
+                self.assertEqual(
+                    resolved_agents[identity]["Provider"],
+                    entry["provider"],
+                )
+                self.assertEqual(
+                    resolved_agents[identity]["Session"],
+                    entry["session"],
+                )
         site = (self.city / ".gc" / "site.toml").read_text()
         self.assertIn('workspace_name = "d2b-gascity"', site)
         self.assertIn(str(self.rig), site)
@@ -431,6 +479,58 @@ class BootstrapFixtureTests(unittest.TestCase):
         )
         self.assertNotEqual(update.returncode, 0)
         self.assertIn("drift", update.stderr.lower())
+
+    def test_portable_update_migrates_legacy_workspace(self) -> None:
+        initialized = self._run_bootstrap("init", "--d2b-source", str(self.origin))
+        self.assertEqual(initialized.returncode, 0, initialized.stderr)
+
+        legacy = self.base / "legacy-source"
+        shutil.copytree(ROOT / "city", legacy)
+        legacy_city = legacy / "city.toml"
+        legacy_text = legacy_city.read_text(encoding="utf-8").replace(
+            '[workspace]\nprovider = "copilot-review"\n\n',
+            "",
+            1,
+        )
+        legacy_city.write_text(legacy_text, encoding="utf-8")
+        self.assertNotIn("workspace", tomllib.loads(legacy_text))
+
+        runtime_city = self.city / "city.toml"
+        runtime_text = runtime_city.read_text(encoding="utf-8").replace(
+            '[workspace]\nprovider = "copilot-review"\n\n',
+            '[workspace]\nname = "d2b-gascity"\n\n',
+            1,
+        )
+        runtime_city.write_text(runtime_text, encoding="utf-8")
+        self.assertEqual(
+            tomllib.loads(runtime_text)["workspace"],
+            {"name": "d2b-gascity"},
+        )
+
+        update = self._run_bootstrap(
+            "portable-update",
+            "--baseline-source",
+            str(legacy),
+            "--portable-source",
+            str(ROOT / "city"),
+        )
+        self.assertEqual(update.returncode, 0, update.stderr)
+        self.assertIn("city.toml", json.loads(update.stdout)["updated"])
+        self.assertEqual(
+            tomllib.loads(runtime_city.read_text(encoding="utf-8"))["workspace"],
+            {"provider": "copilot-review"},
+        )
+
+        checked = self._run_bootstrap("check")
+        self.assertEqual(checked.returncode, 0, checked.stderr)
+        config = subprocess.run(
+            [str(self.gc), "config", "show", "--city", str(self.city), "--validate"],
+            env=self.env,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(config.returncode, 0, config.stderr)
 
     def test_symlink_city_target_is_refused(self) -> None:
         actual = self.base / "actual-city"

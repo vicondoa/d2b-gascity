@@ -39,9 +39,10 @@ not replace a staged-file and diff review.
 
 ## Model and workflow rules
 
-- Planning and review use Sol with `xhigh` effort and `long_context`.
+- Planning and primary review use Grok `grok-4.6` with `high` effort and
+  `long_context`.
 - Coding uses Luna with `max` effort.
-- Review fallback to Luna is allowed only when Sol is explicitly unsupported
+- Review fallback to Luna is allowed only when Grok is explicitly unsupported
   or unavailable.
 - This standalone repository does not use Speckit, the d2b panel, d2b
   signoff, d2b wave or delivery sequencing, or d2b pinning-hardening

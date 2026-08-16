@@ -27,15 +27,15 @@ MAX_ACP_LINE_BYTES = 64 * 1024
 DEFAULT_PROBE_TIMEOUT = 10.0
 
 PROFILES: dict[str, dict[str, str]] = {
-    "planning-sol": {
-        "model": "gpt-5.6-sol",
+    "planning-grok": {
+        "model": "grok-4.6",
         "context": "long_context",
-        "effort": "xhigh",
+        "effort": "high",
     },
-    "review-sol": {
-        "model": "gpt-5.6-sol",
+    "review-grok": {
+        "model": "grok-4.6",
         "context": "long_context",
-        "effort": "xhigh",
+        "effort": "high",
     },
     "review-luna": {
         "model": "gpt-5.6-luna",
@@ -54,9 +54,9 @@ TOOL_POLICIES = {
     "coding": "bash,view,search,apply_patch",
 }
 PROFILE_POLICIES = {
-    "planning-sol": "planning",
+    "planning-grok": "planning",
     "review": "review",
-    "review-sol": "review",
+    "review-grok": "review",
     "review-luna": "review",
     "code-luna": "coding",
 }
@@ -321,7 +321,7 @@ def _read_selection(path: pathlib.Path) -> dict[str, Any]:
         value["version"] != 1
         or value["pins"] != PROFILE_PINS
         or value["coding"] != "code-luna"
-        or value["review"] not in {"review-sol", "review-luna"}
+        or value["review"] not in {"review-grok", "review-luna"}
         or value["ready"] is not True
         or value["error_code"] is not None
     ):
@@ -916,18 +916,18 @@ def _readiness(args: argparse.Namespace) -> int:
         if coding_error is not None:
             error_code = coding_error
         else:
-            sol_error = _probe(
-                "review-sol",
+            grok_error = _probe(
+                "review-grok",
                 executable,
                 token,
                 runtime,
                 worktree,
                 args.timeout,
             )
-            if sol_error is None:
+            if grok_error is None:
                 error_code = None
-                review = "review-sol"
-            elif sol_error in {"unsupported", "unavailable"}:
+                review = "review-grok"
+            elif grok_error in {"unsupported", "unavailable"}:
                 fallback_error = _probe(
                     "review-luna",
                     executable,
@@ -942,7 +942,7 @@ def _readiness(args: argparse.Namespace) -> int:
                 else:
                     error_code = fallback_error
             else:
-                error_code = sol_error
+                error_code = grok_error
     except ProviderError as error:
         error_code = error.code
 
@@ -983,7 +983,7 @@ def _parser() -> argparse.ArgumentParser:
     _common_arguments(run)
     run.add_argument(
         "--profile",
-        choices=("planning-sol", "review", "review-sol", "review-luna", "code-luna"),
+        choices=tuple(PROFILE_POLICIES),
         required=True,
     )
     run.add_argument(

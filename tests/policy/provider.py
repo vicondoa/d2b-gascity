@@ -33,9 +33,9 @@ def _load_provider_module():
 PROVIDER = _load_provider_module()
 
 EXPECTED = {
-    "copilot-planning-sol": ("planning-sol", "planning"),
+    "copilot-planning-grok": ("planning-grok", "planning"),
     "copilot-review": ("review", "review"),
-    "copilot-review-sol": ("review-sol", "review"),
+    "copilot-review-grok": ("review-grok", "review"),
     "copilot-review-luna": ("review-luna", "review"),
     "copilot-code-luna": ("code-luna", "coding"),
 }
@@ -309,7 +309,7 @@ class ProviderPolicyTests(unittest.TestCase):
         config = tomllib.loads(CITY.read_text(encoding="utf-8"))
         providers = config["providers"]
         self.assertEqual(
-            providers["copilot-planning-sol"]["acp_args"][-1],
+            providers["copilot-planning-grok"]["acp_args"][-1],
             "planning",
         )
         self.assertEqual(
@@ -321,6 +321,33 @@ class ProviderPolicyTests(unittest.TestCase):
             "coding",
         )
         self.assertNotIn("allow-all", CITY.read_text(encoding="utf-8"))
+
+    def test_profiles_are_grok_and_luna_only(self) -> None:
+        self.assertEqual(
+            PROVIDER.PROFILES,
+            {
+                "planning-grok": {
+                    "model": "grok-4.6",
+                    "context": "long_context",
+                    "effort": "high",
+                },
+                "review-grok": {
+                    "model": "grok-4.6",
+                    "context": "long_context",
+                    "effort": "high",
+                },
+                "review-luna": {
+                    "model": "gpt-5.6-luna",
+                    "context": "long_context",
+                    "effort": "max",
+                },
+                "code-luna": {
+                    "model": "gpt-5.6-luna",
+                    "context": "default",
+                    "effort": "max",
+                },
+            },
+        )
 
     def test_wrapper_is_packaged_source_and_executable(self) -> None:
         self.assertTrue(PROVIDER_SCRIPT.is_file())

@@ -27,7 +27,10 @@ class PortableConfigTests(unittest.TestCase):
 
     def test_city_has_one_pathless_d2b_rig(self) -> None:
         config = tomllib.loads((CITY / "city.toml").read_text())
-        self.assertNotIn("workspace", config)
+        self.assertEqual(
+            config["workspace"],
+            {"provider": "copilot-review"},
+        )
         rigs = config.get("rigs", [])
         self.assertEqual(len(rigs), 1)
         self.assertEqual(rigs[0]["name"], "d2b")

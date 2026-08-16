@@ -29,7 +29,7 @@
       "dir": "d2b",
       "name": "ce-architecture-strategist",
       "origin": "compound-engineering",
-      "provider": "copilot-planning-sol",
+      "provider": "copilot-planning-grok",
       "session": "acp"
     },
     {
@@ -37,7 +37,7 @@
       "dir": "d2b",
       "name": "ce-brainstorm",
       "origin": "compound-engineering",
-      "provider": "copilot-planning-sol",
+      "provider": "copilot-planning-grok",
       "session": "acp"
     },
     {
@@ -141,7 +141,7 @@
       "dir": "d2b",
       "name": "ce-plan",
       "origin": "compound-engineering",
-      "provider": "copilot-planning-sol",
+      "provider": "copilot-planning-grok",
       "session": "acp"
     },
     {
@@ -229,7 +229,7 @@
       "dir": "d2b",
       "name": "design-author",
       "origin": "gascity-roles",
-      "provider": "copilot-planning-sol",
+      "provider": "copilot-planning-grok",
       "session": "acp"
     },
     {
@@ -285,7 +285,7 @@
       "dir": "d2b",
       "name": "requirements-planner",
       "origin": "gascity-roles",
-      "provider": "copilot-planning-sol",
+      "provider": "copilot-planning-grok",
       "session": "acp"
     },
     {
@@ -309,7 +309,7 @@
       "dir": "d2b",
       "name": "task-decomposer",
       "origin": "gascity-roles",
-      "provider": "copilot-planning-sol",
+      "provider": "copilot-planning-grok",
       "session": "acp"
     },
     {
@@ -323,9 +323,9 @@
     {
       "category": "planning-design-decomposition",
       "dir": "",
-      "name": "copilot-planning-sol",
+      "name": "copilot-planning-grok",
       "origin": "gascity-roles",
-      "provider": "copilot-planning-sol",
+      "provider": "copilot-planning-grok",
       "session": "acp"
     },
     {
@@ -341,15 +341,15 @@
       "dir": "",
       "name": "copilot-review-luna",
       "origin": "gascity-roles",
-      "provider": "copilot-review",
+      "provider": "copilot-review-luna",
       "session": "acp"
     },
     {
       "category": "review-synthesis-triage-analysis",
       "dir": "",
-      "name": "copilot-review-sol",
+      "name": "copilot-review-grok",
       "origin": "gascity-roles",
-      "provider": "copilot-review",
+      "provider": "copilot-review-grok",
       "session": "acp"
     },
     {
@@ -363,9 +363,9 @@
     {
       "category": "planning-design-decomposition",
       "dir": "d2b",
-      "name": "copilot-planning-sol",
+      "name": "copilot-planning-grok",
       "origin": "gascity-roles",
-      "provider": "copilot-planning-sol",
+      "provider": "copilot-planning-grok",
       "session": "acp"
     },
     {
@@ -381,15 +381,15 @@
       "dir": "d2b",
       "name": "copilot-review-luna",
       "origin": "gascity-roles",
-      "provider": "copilot-review",
+      "provider": "copilot-review-luna",
       "session": "acp"
     },
     {
       "category": "review-synthesis-triage-analysis",
       "dir": "d2b",
-      "name": "copilot-review-sol",
+      "name": "copilot-review-grok",
       "origin": "gascity-roles",
-      "provider": "copilot-review",
+      "provider": "copilot-review-grok",
       "session": "acp"
     }
   ],
@@ -406,7 +406,7 @@
   ],
   "categories": {
     "implementation-fix-work": "copilot-code-luna",
-    "planning-design-decomposition": "copilot-planning-sol",
+    "planning-design-decomposition": "copilot-planning-grok",
     "review-synthesis-triage-analysis": "copilot-review"
   },
   "generated_from": {

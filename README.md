@@ -43,8 +43,11 @@ changing the repository. In particular:
 - Keep each commit to one logical change.
 - Merges are human-owned.
 - Use ASCII hyphens in source, documentation, configuration, and messages.
-- Planning and review use Sol with `xhigh` effort and `long_context`.
+- Planning and primary review use Grok `grok-4.6` with `high` effort and
+  `long_context`.
 - Coding uses Luna with `max` effort.
+- Review falls back to Luna only when Grok is explicitly unsupported or
+  unavailable.
 - Do not introduce Speckit, the d2b panel or signoff system, d2b wave or
   delivery sequencing, or d2b pinning-hardening workflows here.
 

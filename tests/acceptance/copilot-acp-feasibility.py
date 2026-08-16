@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify the already-proven direct ACP path without starting a model."""
+"""Verify the pinned legacy ACP proof without starting a model."""
 from __future__ import annotations
 
 import argparse

@@ -208,13 +208,13 @@ class CopilotAcceptanceTests(unittest.TestCase):
         self.assertIn(str(self.base / "gc"), denied)
         self.assertIn(str(self.base / "config"), denied)
 
-    def test_planning_sol_uses_long_context_and_planning_tools(self) -> None:
-        result = self._run("run", profile="planning-sol", policy="planning")
+    def test_planning_grok_uses_long_context_and_planning_tools(self) -> None:
+        result = self._run("run", profile="planning-grok", policy="planning")
         self.assertEqual(result.returncode, 0, result.stderr)
         event = self._events()[0]
         self.assertEqual(
             event["argv"][event["argv"].index("--model") + 1],
-            "gpt-5.6-sol",
+            "grok-4.6",
         )
         self.assertEqual(
             event["argv"][event["argv"].index("--context") + 1],
@@ -222,29 +222,39 @@ class CopilotAcceptanceTests(unittest.TestCase):
         )
         self.assertEqual(
             event["argv"][event["argv"].index("--effort") + 1],
-            "xhigh",
+            "high",
         )
         self.assertEqual(
             event["argv"][event["argv"].index("--available-tools") + 1],
             "view,search,apply_patch",
         )
 
-    def test_readiness_selects_sol_after_code_and_review_probes(self) -> None:
+    def test_readiness_selects_grok_after_code_and_review_probes(self) -> None:
         selection = self.base / "provider-selection.json"
         result = self._run("readiness", selection=selection)
         self.assertEqual(result.returncode, 0, result.stderr)
         payload = json.loads(result.stdout)
         self.assertEqual(payload, self._selection())
         self.assertEqual(payload["coding"], "code-luna")
-        self.assertEqual(payload["review"], "review-sol")
+        self.assertEqual(payload["review"], "review-grok")
         self.assertEqual(payload["ready"], True)
         self.assertIsNone(payload["error_code"])
-        self.assertEqual([event["settings"]["model"] for event in self._events()], [
+        events = self._events()
+        self.assertEqual([event["settings"]["model"] for event in events], [
             "gpt-5.6-luna",
-            "gpt-5.6-sol",
+            "grok-4.6",
         ])
+        review_event = events[1]
+        self.assertEqual(
+            review_event["argv"][review_event["argv"].index("--context") + 1],
+            "long_context",
+        )
+        self.assertEqual(
+            review_event["argv"][review_event["argv"].index("--effort") + 1],
+            "high",
+        )
 
-    def test_readiness_uses_luna_only_for_sol_unsupported(self) -> None:
+    def test_readiness_uses_luna_only_for_grok_unsupported(self) -> None:
         selection = self.base / "provider-selection.json"
         self.mode_file.write_text("success\nunsupported\nsuccess\n", encoding="ascii")
         result = self._run("readiness", selection=selection)
@@ -254,10 +264,23 @@ class CopilotAcceptanceTests(unittest.TestCase):
         self.assertEqual(payload["ready"], True)
         self.assertEqual(
             [event["settings"]["model"] for event in self._events()],
-            ["gpt-5.6-luna", "gpt-5.6-sol", "gpt-5.6-luna"],
+            ["gpt-5.6-luna", "grok-4.6", "gpt-5.6-luna"],
         )
 
-    def test_sol_auth_network_quota_malformed_timeout_closed_and_unknown_block(self) -> None:
+    def test_readiness_uses_luna_only_for_grok_unavailable(self) -> None:
+        selection = self.base / "provider-selection.json"
+        self.mode_file.write_text("success\nunavailable\nsuccess\n", encoding="ascii")
+        result = self._run("readiness", selection=selection)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        payload = self._selection()
+        self.assertEqual(payload["review"], "review-luna")
+        self.assertEqual(payload["ready"], True)
+        self.assertEqual(
+            [event["settings"]["model"] for event in self._events()],
+            ["gpt-5.6-luna", "grok-4.6", "gpt-5.6-luna"],
+        )
+
+    def test_grok_auth_network_quota_malformed_timeout_closed_and_unknown_block(self) -> None:
         for mode, expected in (
             ("auth", "auth"),
             ("network", "network"),
@@ -321,15 +344,15 @@ class CopilotAcceptanceTests(unittest.TestCase):
                                 "context": "default",
                                 "effort": "max",
                             },
-                            "planning-sol": {
-                                "model": "gpt-5.6-sol",
+                            "planning-grok": {
+                                "model": "grok-4.6",
                                 "context": "long_context",
-                                "effort": "xhigh",
+                                "effort": "high",
                             },
-                            "review-sol": {
-                                "model": "gpt-5.6-sol",
+                            "review-grok": {
+                                "model": "grok-4.6",
                                 "context": "long_context",
-                                "effort": "xhigh",
+                                "effort": "high",
                             },
                             "review-luna": {
                                 "model": "gpt-5.6-luna",

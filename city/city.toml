@@ -4,17 +4,20 @@ prefix = "d2b"
 default_branch = "v3"
 suspended_on_start = true
 
+[workspace]
+provider = "copilot-review"
+
 [rigs.imports.roles]
 source = "https://github.com/gastownhall/gascity-packs/tree/main/gascity/roles"
 version = "sha:5d2a9d023edbb9ba24fdcff554e89fc3d7da72fe"
 
-[providers.copilot-planning-sol]
+[providers.copilot-planning-grok]
 base = "builtin:copilot"
 command = "d2b-gascity-copilot-provider"
 args = ["run"]
 ready_delay_ms = 0
 acp_command = "d2b-gascity-copilot-provider"
-acp_args = ["run", "--profile", "planning-sol", "--tool-policy", "planning"]
+acp_args = ["run", "--profile", "planning-grok", "--tool-policy", "planning"]
 path_check = "d2b-gascity-copilot-provider"
 supports_acp = true
 
@@ -28,13 +31,13 @@ acp_args = ["run", "--profile", "review", "--tool-policy", "review"]
 path_check = "d2b-gascity-copilot-provider"
 supports_acp = true
 
-[providers.copilot-review-sol]
+[providers.copilot-review-grok]
 base = "builtin:copilot"
 command = "d2b-gascity-copilot-provider"
 args = ["run"]
 ready_delay_ms = 0
 acp_command = "d2b-gascity-copilot-provider"
-acp_args = ["run", "--profile", "review-sol", "--tool-policy", "review"]
+acp_args = ["run", "--profile", "review-grok", "--tool-policy", "review"]
 path_check = "d2b-gascity-copilot-provider"
 supports_acp = true
 
@@ -92,13 +95,13 @@ session = "acp"
 [[patches.agent]]
 dir = "d2b"
 name = "ce-architecture-strategist"
-provider = "copilot-planning-sol"
+provider = "copilot-planning-grok"
 session = "acp"
 
 [[patches.agent]]
 dir = "d2b"
 name = "ce-brainstorm"
-provider = "copilot-planning-sol"
+provider = "copilot-planning-grok"
 session = "acp"
 
 [[patches.agent]]
@@ -176,7 +179,7 @@ session = "acp"
 [[patches.agent]]
 dir = "d2b"
 name = "ce-plan"
-provider = "copilot-planning-sol"
+provider = "copilot-planning-grok"
 session = "acp"
 
 [[patches.agent]]
@@ -242,7 +245,7 @@ session = "acp"
 [[patches.agent]]
 dir = "d2b"
 name = "design-author"
-provider = "copilot-planning-sol"
+provider = "copilot-planning-grok"
 session = "acp"
 
 [[patches.agent]]
@@ -293,7 +296,7 @@ max_active_sessions = 1
 [[patches.agent]]
 dir = "d2b"
 name = "requirements-planner"
-provider = "copilot-planning-sol"
+provider = "copilot-planning-grok"
 session = "acp"
 
 [[patches.agent]]
@@ -311,7 +314,7 @@ session = "acp"
 [[patches.agent]]
 dir = "d2b"
 name = "task-decomposer"
-provider = "copilot-planning-sol"
+provider = "copilot-planning-grok"
 session = "acp"
 
 [[patches.agent]]
@@ -322,8 +325,8 @@ session = "acp"
 
 [[patches.agent]]
 dir = ""
-name = "copilot-planning-sol"
-provider = "copilot-planning-sol"
+name = "copilot-planning-grok"
+provider = "copilot-planning-grok"
 session = "acp"
 
 [[patches.agent]]
@@ -335,13 +338,13 @@ session = "acp"
 [[patches.agent]]
 dir = ""
 name = "copilot-review-luna"
-provider = "copilot-review"
+provider = "copilot-review-luna"
 session = "acp"
 
 [[patches.agent]]
 dir = ""
-name = "copilot-review-sol"
-provider = "copilot-review"
+name = "copilot-review-grok"
+provider = "copilot-review-grok"
 session = "acp"
 
 [[patches.agent]]
@@ -352,8 +355,8 @@ session = "acp"
 
 [[patches.agent]]
 dir = "d2b"
-name = "copilot-planning-sol"
-provider = "copilot-planning-sol"
+name = "copilot-planning-grok"
+provider = "copilot-planning-grok"
 session = "acp"
 
 [[patches.agent]]
@@ -365,11 +368,11 @@ session = "acp"
 [[patches.agent]]
 dir = "d2b"
 name = "copilot-review-luna"
-provider = "copilot-review"
+provider = "copilot-review-luna"
 session = "acp"
 
 [[patches.agent]]
 dir = "d2b"
-name = "copilot-review-sol"
-provider = "copilot-review"
+name = "copilot-review-grok"
+provider = "copilot-review-grok"
 session = "acp"

@@ -45,6 +45,10 @@ and this project follows semantic versioning where releases are published.
 
 ### Changed
 
+- Migrated planning and primary review to Grok `grok-4.6` with `long_context`
+  and `high` effort, retained Luna coding and unsupported/unavailable-only
+  review fallback, and supplied the machine-selected review provider as the
+  portable workspace default.
 - Accepted exact `0400` and `0440` modes for systemd-projected Copilot
   credentials while retaining strict explicit credential-file checks.
 - Hardened auth Origin matching, decoupled relay and TinyAuth stopping,

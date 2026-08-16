@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import pathlib
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -126,6 +127,30 @@ class BootstrapCleanupPolicyTests(unittest.TestCase):
         self.assertIn("DOLT_START_READY_TIMEOUT_MS", source)
         self.assertNotIn("_dolt_schema_race", source)
         self.assertNotIn("_reset_failed_init", source)
+
+    def test_legacy_workspace_is_baseline_only(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            legacy = pathlib.Path(raw) / "legacy"
+            shutil.copytree(ROOT / "city", legacy)
+            city = legacy / "city.toml"
+            city.write_text(
+                city.read_text(encoding="utf-8").replace(
+                    '[workspace]\nprovider = "copilot-review"\n\n',
+                    "",
+                    1,
+                ),
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(
+                MODULE.BootstrapError,
+                "copilot-review workspace provider",
+            ):
+                MODULE._validate_portable_source(legacy)
+            MODULE._validate_portable_source(
+                legacy,
+                allow_legacy_baseline=True,
+            )
 
     def test_check_observes_supervisor_first_and_stops_initially_stopped_city(self) -> None:
         with tempfile.TemporaryDirectory() as raw:

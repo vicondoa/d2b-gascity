@@ -222,7 +222,11 @@ def _validate_private_text(relative: str, text: str) -> None:
         raise BootstrapError(f"portable source contains a machine-local path: {relative}")
 
 
-def _validate_portable_source(source: pathlib.Path) -> dict[str, pathlib.Path]:
+def _validate_portable_source(
+    source: pathlib.Path,
+    *,
+    allow_legacy_baseline: bool = False,
+) -> dict[str, pathlib.Path]:
     if not source.is_dir() or source.is_symlink():
         raise BootstrapError("portable source must be a non-symlink directory")
     files = _portable_file_set(source)
@@ -231,9 +235,11 @@ def _validate_portable_source(source: pathlib.Path) -> dict[str, pathlib.Path]:
             _validate_private_text(relative, path.read_text())
 
     city = _read_toml(source / "city.toml", "portable city.toml")
-    if "workspace" in city:
+    if city.get("workspace") != {"provider": "copilot-review"} and not (
+        allow_legacy_baseline and "workspace" not in city
+    ):
         raise BootstrapError(
-            "portable city must not define machine-local workspace identity"
+            "portable city must define only the copilot-review workspace provider"
         )
     rigs = city.get("rigs", [])
     if len(rigs) != 1 or rigs[0].get("name") != RIG_NAME:
@@ -344,7 +350,11 @@ def _portable_snapshot(files: dict[str, pathlib.Path]) -> dict[str, str]:
         if path.suffix == ".toml":
             parsed = _read_toml(path, relative)
             if relative == "city.toml":
-                parsed.pop("workspace", None)
+                workspace = parsed.get("workspace")
+                if isinstance(workspace, dict):
+                    workspace.pop("name", None)
+                    if not workspace:
+                        parsed.pop("workspace", None)
             if relative == "packs.lock":
                 for pack in parsed.get("packs", {}).values():
                     if isinstance(pack, dict):
@@ -751,7 +761,12 @@ def _validate_city_state(
     source_files = _validate_portable_source(DEFAULT_PORTABLE_SOURCE)
     target_files = _portable_file_set(city)
     target_city = _read_toml(target_files["city.toml"], "runtime city.toml")
-    if target_city.get("workspace", {}) not in ({}, {"name": "d2b-gascity"}):
+    if target_city.get("workspace", {}) not in (
+        {},
+        {"name": "d2b-gascity"},
+        {"provider": "copilot-review"},
+        {"name": "d2b-gascity", "provider": "copilot-review"},
+    ):
         raise BootstrapError("runtime city workspace identity is invalid")
     source_snapshot = _portable_snapshot(source_files)
     target_snapshot = _portable_snapshot(target_files)
@@ -1014,7 +1029,10 @@ def _register(args: argparse.Namespace) -> int:
 def _portable_update(args: argparse.Namespace) -> int:
     env = _city_env(args.state_root)
     _validate_gc_help(args.gc, env)
-    baseline_files = _validate_portable_source(args.baseline_source)
+    baseline_files = _validate_portable_source(
+        args.baseline_source,
+        allow_legacy_baseline=True,
+    )
     candidate_files = _validate_portable_source(args.portable_source)
     if not args.city.is_dir() or args.city.is_symlink():
         raise BootstrapError("portable update requires an initialized city directory")

@@ -62,11 +62,15 @@ ports are never placed in the firewall.
 
 The portable city declares five direct ACP provider names:
 
-- `copilot-planning-sol` uses `gpt-5.6-sol`, `long_context`, and `xhigh`.
+- `copilot-planning-grok` uses `grok-4.6`, `long_context`, and `high`.
 - `copilot-review` uses the machine-local readiness selection.
-- `copilot-review-sol` and `copilot-review-luna` are explicit diagnostic
+- `copilot-review-grok` and `copilot-review-luna` are explicit diagnostic
   profiles.
 - `copilot-code-luna` uses `gpt-5.6-luna`, `default`, and `max`.
+
+The portable workspace default is `copilot-review`, so unpatched workspace
+agents such as `bd.dog` receive the machine-selected provider without
+overriding explicit agent patches.
 
 Every provider invokes the packaged
 `d2b-gascity-copilot-provider` wrapper. It is one stateless parent per ACP
@@ -96,7 +100,7 @@ the no-bypass sandbox setting.
 
 When a Copilot credential is configured, `d2b-gascity.service` runs one
 bounded no-tools readiness sequence before `gc supervisor run`. It probes
-coding Luna first, then review Sol. Only typed Sol `unsupported` or
+coding Luna first, then review Grok. Only typed Grok `unsupported` or
 `unavailable` results permit a review Luna probe. Authentication, network,
 quota, malformed, timeout, closed, and unknown results keep readiness
 blocked. The result is atomically written owner-only to

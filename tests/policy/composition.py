@@ -126,6 +126,12 @@ class CompositionPolicyTests(unittest.TestCase):
                     self.assertEqual(resolved[identity]["Provider"], entry["provider"])
                     self.assertEqual(resolved[identity]["Session"], "acp")
 
+    def test_workspace_provider_supplies_fallback(self) -> None:
+        city = tomllib.loads((CITY / "city.toml").read_text(encoding="utf-8"))
+        workspace = city["workspace"]
+        self.assertEqual(workspace["provider"], "copilot-review")
+        self.assertIn(workspace["provider"], city["providers"])
+
     def test_publisher_is_a_deterministic_control_subprocess(self) -> None:
         city = tomllib.loads((CITY / "city.toml").read_text(encoding="utf-8"))
         publisher = next(

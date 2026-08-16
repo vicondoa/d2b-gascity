@@ -61,9 +61,9 @@ host-private values remain manual and must never enter evidence.
 
 ## Model lanes
 
-Planning and review use Sol with `xhigh` effort and `long_context`. Coding
-uses Luna with `max` effort. Luna may review only when Sol is explicitly
-unsupported or unavailable.
+Planning and primary review use Grok `grok-4.6` with `high` effort and
+`long_context`. Coding uses Luna with `max` effort. Luna may review only when
+Grok is explicitly unsupported or unavailable.
 
 ## License
 
