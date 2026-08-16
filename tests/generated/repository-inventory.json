@@ -43,7 +43,6 @@
       "nix/packages/contributor.nix",
       "nix/packages/dolt.nix",
       "nix/packages/gascity.nix",
-      "nix/patches/gascity-acp-session-identity.patch",
       "nix/source-manifest.nix",
       "nixos-modules/default.nix",
       "nixos-modules/ingress-relay.nix",
@@ -88,7 +87,6 @@
       "tests/policy/bootstrap.py",
       "tests/policy/ci.py",
       "tests/policy/composition.py",
-      "tests/policy/gascity_patch.py",
       "tests/policy/generated.py",
       "tests/policy/portable_config.py",
       "tests/policy/privacy.py",
@@ -189,7 +187,6 @@
     "nix/packages/contributor.nix",
     "nix/packages/dolt.nix",
     "nix/packages/gascity.nix",
-    "nix/patches/gascity-acp-session-identity.patch",
     "nix/source-manifest.nix",
     "nixos-modules/default.nix",
     "nixos-modules/ingress-relay.nix",
@@ -318,10 +315,6 @@
       "role": "executed policy"
     },
     {
-      "path": "tests/policy/gascity_patch.py",
-      "role": "executed policy"
-    },
-    {
       "path": "tests/policy/generated.py",
       "role": "executed policy"
     },
@@ -401,7 +394,6 @@
     "tests/policy/bootstrap.py",
     "tests/policy/ci.py",
     "tests/policy/composition.py",
-    "tests/policy/gascity_patch.py",
     "tests/policy/generated.py",
     "tests/policy/portable_config.py",
     "tests/policy/privacy.py",

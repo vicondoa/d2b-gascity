@@ -83,16 +83,6 @@ stdio for normal sessions, and forwards termination signals to the child
 process group. It never creates a provider daemon, transport endpoint, session
 store, retry ledger, or second lifecycle owner.
 
-The pinned Gas City source carries the local
-`nix/patches/gascity-acp-session-identity.patch`. ACP seeds only non-empty
-`GC_SESSION_ID`, `GC_INSTANCE_TOKEN`, and `GC_RUNTIME_EPOCH` sidecars before
-its control socket becomes visible, allowing the reconciler to match a
-slow-handshaking runtime to its pending session. Failed startup removes those
-sidecars only while the startup sentinel still owns the name. This is the ACP
-metadata trigger fix related to upstream issue
-`gastownhall/gascity#4714`, which covers the broader orphan class; remove the
-patch when upstream provides equivalent identity seeding.
-
 The wrapper reads only the systemd-projected Copilot credential after checking
 that it is a regular file with no symlink and exactly `0400` or `0440`
 permissions. Systemd projections may remain root-owned; explicit

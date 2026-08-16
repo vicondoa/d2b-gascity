@@ -62,6 +62,3 @@ and this project follows semantic versioning where releases are published.
   scanning, and cleanup proofs.
 - Moved Gas City firewall programming onto the existing iptables-backed NixOS
   firewall service and atomically replace only `table inet d2b_gascity`.
-- Applied the local ACP session identity patch to the pinned Gas City source,
-  seeding only the three reconciler identity sidecars before ACP startup is
-  visible and cleaning them up safely after failed handshakes.

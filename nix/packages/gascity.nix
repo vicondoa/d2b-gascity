@@ -8,9 +8,6 @@ buildGoModule rec {
   pname = "gascity";
   version = "0-unstable-2026-08-14";
   src = source;
-  patches = [
-    ../patches/gascity-acp-session-identity.patch
-  ];
 
   subPackages = [ "cmd/gc" ];
   vendorHash = "sha256-05Ch0dn0W8OKZaGFq04VQS7QzLkgo//chz0WBjjefrQ=";
@@ -25,7 +22,6 @@ buildGoModule rec {
     pkgs.git
     pkgs.gnumake
     pkgs.jq
-    pkgs.python3
     pkgs.procps
   ];
 
@@ -55,7 +51,6 @@ buildGoModule rec {
       ./internal/formula/... \
       ./internal/pidutil/... \
       ./internal/processgroup/... \
-      ./internal/runtime/acp/... \
       ./internal/runtime/registry/... \
       ./internal/runtime/subprocess/... \
       ./internal/supervisor/... \
