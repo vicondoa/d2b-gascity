@@ -107,7 +107,6 @@ class CompositionPolicyTests(unittest.TestCase):
                 self.assertEqual(patches[identity]["provider"], entry["provider"])
                 self.assertEqual(patches[identity]["session"], "acp")
         for identity in (
-            ("", "dog"),
             ("", "control-dispatcher"),
             ("d2b", "control-dispatcher"),
             ("d2b", "publisher"),
@@ -125,6 +124,54 @@ class CompositionPolicyTests(unittest.TestCase):
                 with self.subTest(resolved_agent=identity):
                     self.assertEqual(resolved[identity]["Provider"], entry["provider"])
                     self.assertEqual(resolved[identity]["Session"], "acp")
+
+    def test_city_scoped_dog_is_an_exact_suspended_only_control_patch(self) -> None:
+        city = tomllib.loads((CITY / "city.toml").read_text(encoding="utf-8"))
+        dog_patches = [
+            patch
+            for patch in city.get("patches", {}).get("agent", [])
+            if patch["dir"] == "" and patch["name"] == "dog"
+        ]
+        self.assertEqual(
+            dog_patches,
+            [{"dir": "", "name": "dog", "suspended": True}],
+        )
+        all_patches = {
+            (patch["dir"], patch["name"]): patch
+            for patch in city.get("patches", {}).get("agent", [])
+        }
+        for identity in (
+            ("", "control-dispatcher"),
+            ("d2b", "control-dispatcher"),
+        ):
+            self.assertNotIn(identity, all_patches)
+
+        fixture = json.loads(AGENT_FIXTURE.read_text(encoding="utf-8"))
+        dog = next(
+            agent
+            for agent in fixture["agents"]
+            if agent["dir"] == "" and agent["name"] == "dog"
+        )
+        self.assertFalse(dog["model_backed"])
+        self.assertEqual(dog["scope"], "city")
+        self.assertTrue(dog["suspended"])
+
+        resolved_config = os.environ.get("U6_RESOLVED_CONFIG")
+        if resolved_config:
+            raw = json.loads(pathlib.Path(resolved_config).read_text(encoding="utf-8"))
+            resolved = {
+                (agent.get("Dir", ""), agent["Name"]): agent
+                for agent in raw["config"]["Agents"]
+            }
+            resolved_dog = resolved[("", "dog")]
+            self.assertTrue(resolved_dog["Suspended"])
+            self.assertEqual(resolved_dog.get("Provider", ""), "")
+            workspace_provider = raw["config"]["Workspace"]["Provider"]
+            self.assertEqual(workspace_provider, "copilot-review")
+            self.assertEqual(
+                resolved_dog.get("Provider", "") or workspace_provider,
+                "copilot-review",
+            )
 
     def test_workspace_provider_supplies_fallback(self) -> None:
         city = tomllib.loads((CITY / "city.toml").read_text(encoding="utf-8"))

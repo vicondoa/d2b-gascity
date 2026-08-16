@@ -309,6 +309,7 @@ class BootstrapFixtureTests(unittest.TestCase):
         }
         workspace_provider = payload["config"]["Workspace"]["Provider"]
         self.assertEqual(workspace_provider, "copilot-review")
+        self.assertTrue(resolved_agents[("", "dog")]["Suspended"])
         self.assertEqual(resolved_agents[("", "dog")]["Provider"], "")
         self.assertEqual(
             resolved_agents[("", "dog")]["Provider"] or workspace_provider,

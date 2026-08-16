@@ -6,7 +6,8 @@
       "model_backed": false,
       "name": "dog",
       "origin": "beads",
-      "scope": "city"
+      "scope": "city",
+      "suspended": true
     },
     {
       "description": "Deterministic compiler-v2 workflow control worker",

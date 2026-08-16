@@ -69,8 +69,12 @@ The portable city declares five direct ACP provider names:
 - `copilot-code-luna` uses `gpt-5.6-luna`, `default`, and `max`.
 
 The portable workspace default is `copilot-review`, so unpatched workspace
-agents such as `bd.dog` receive the machine-selected provider without
-overriding explicit agent patches.
+agents receive the machine-selected provider without overriding explicit
+agent patches. The imported city-scoped `bd.dog` agent is the deliberate
+control exception: its exact patch sets `suspended = true` and leaves
+provider and session unset. This keeps the city and supervisor available
+without background ACP model work while the rig is idle; an explicit
+operator resume uses the workspace fallback provider.
 
 Every provider invokes the packaged
 `d2b-gascity-copilot-provider` wrapper. It is one stateless parent per ACP

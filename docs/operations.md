@@ -56,8 +56,12 @@ until their owning units define them.
 The resolved model-backed role graph is classified in
 `city/role-provider-matrix.json`. The matrix is generated from the pinned
 Pack v2 imports and every classified agent is patched to ACP with one of the
-portable planning, review, or coding providers. Control and maintenance
-agents remain subprocesses; the d2b publisher is the local
+portable planning, review, or coding providers. The imported city-scoped
+`bd.dog` agent is not in that matrix and has only the exact suspended-only
+control patch, so it does not perform background model work while the rig is
+idle. An explicit operator resume leaves its provider unset and therefore
+uses the workspace `copilot-review` fallback. Control and maintenance agents
+remain subprocesses; the d2b publisher is the local
 `d2b-gascity-publication-worker`, not a model-backed role.
 
 Worktree creation is intentionally anchored to `origin/v3`. The core formulas

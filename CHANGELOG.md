@@ -45,6 +45,9 @@ and this project follows semantic versioning where releases are published.
 
 ### Changed
 
+- Set the imported city-scoped `bd.dog` agent suspended by default so an idle
+  rig does not launch background ACP model work; explicit resume retains the
+  portable workspace provider fallback.
 - Migrated planning and primary review to Grok `grok-4.6` with `long_context`
   and `high` effort, retained Luna coding and unsupported/unavailable-only
   review fallback, and supplied the machine-selected review provider as the

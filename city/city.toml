@@ -325,6 +325,11 @@ session = "acp"
 
 [[patches.agent]]
 dir = ""
+name = "dog"
+suspended = true
+
+[[patches.agent]]
+dir = ""
 name = "copilot-planning-grok"
 provider = "copilot-planning-grok"
 session = "acp"
