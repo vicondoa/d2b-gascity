@@ -45,6 +45,8 @@ and this project follows semantic versioning where releases are published.
 
 ### Changed
 
+- Accepted exact `0400` and `0440` modes for systemd-projected Copilot
+  credentials while retaining strict explicit credential-file checks.
 - Hardened auth Origin matching, decoupled relay and TinyAuth stopping,
   isolated the ingress fixture's fixed supervisor port in an unprivileged
   network namespace, and tightened rotation, SSE restart, cookie-secret

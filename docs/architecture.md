@@ -76,9 +76,10 @@ process group. It never creates a provider daemon, transport endpoint, session
 store, retry ledger, or second lifecycle owner.
 
 The wrapper reads only the systemd-projected Copilot credential after checking
-that it is an owner-readable regular file with no symlink or group/other
-access. Systemd projections may remain root-owned; explicit
-`--credential-file` paths must remain owned by the service identity. The child
+that it is a regular file with no symlink and exactly `0400` or `0440`
+permissions. Systemd projections may remain root-owned; explicit
+`--credential-file` paths must remain owned by the service identity and keep
+owner-read access with no group/other access or execute bits. The child
 receives only `COPILOT_GITHUB_TOKEN` from the credential projection. A private
 `COPILOT_HOME/settings.json` is created below `XDG_RUNTIME_DIR` for each
 process and removed after the child exits.

@@ -49,11 +49,12 @@ class ProviderPolicyTests(unittest.TestCase):
         info: os.stat_result,
         *,
         uid: int,
+        mode: int | None = None,
         dev: int | None = None,
         ino: int | None = None,
     ) -> SimpleNamespace:
         return SimpleNamespace(
-            st_mode=info.st_mode,
+            st_mode=info.st_mode if mode is None else stat.S_IFREG | mode,
             st_uid=uid,
             st_size=info.st_size,
             st_dev=info.st_dev if dev is None else dev,
@@ -67,6 +68,8 @@ class ProviderPolicyTests(unittest.TestCase):
         *,
         owner_uid: int,
         opened_uid: int | None = None,
+        lstat_mode: int | None = None,
+        opened_mode: int | None = None,
         opened_dev: int | None = None,
         opened_ino: int | None = None,
     ):
@@ -76,7 +79,11 @@ class ProviderPolicyTests(unittest.TestCase):
         def fake_lstat(candidate: pathlib.Path) -> SimpleNamespace | os.stat_result:
             info = real_lstat(candidate)
             if candidate == path:
-                return self._stat_view(info, uid=owner_uid)
+                return self._stat_view(
+                    info,
+                    uid=owner_uid,
+                    mode=lstat_mode,
+                )
             return info
 
         def fake_fstat(descriptor: int) -> SimpleNamespace:
@@ -84,6 +91,7 @@ class ProviderPolicyTests(unittest.TestCase):
             return self._stat_view(
                 info,
                 uid=owner_uid if opened_uid is None else opened_uid,
+                mode=opened_mode,
                 dev=opened_dev,
                 ino=opened_ino,
             )
@@ -139,22 +147,26 @@ class ProviderPolicyTests(unittest.TestCase):
         ):
             yield
 
-    def test_systemd_projection_accepts_root_owned_credential(self) -> None:
-        with self._temporary_directory() as directory:
-            path = self._write_credential(directory)
-            with self._projected_credential(
-                path,
-                owner_uid=0,
-                opened_uid=0,
-            ):
-                self.assertEqual(
-                    PROVIDER._read_credential(None),
-                    "fixture-token",
-                )
+    def test_systemd_projection_accepts_root_owned_credential_modes(self) -> None:
+        for mode in (0o400, 0o440):
+            with self.subTest(mode=oct(mode)):
+                with self._temporary_directory() as directory:
+                    path = self._write_credential(directory)
+                    path.chmod(mode)
+                    with self._projected_credential(
+                        path,
+                        owner_uid=0,
+                        opened_uid=0,
+                    ):
+                        self.assertEqual(
+                            PROVIDER._read_credential(None),
+                            "fixture-token",
+                        )
 
     def test_systemd_projection_rejects_wrong_owner(self) -> None:
         with self._temporary_directory() as directory:
             path = self._write_credential(directory)
+            path.chmod(0o440)
             with self._projected_credential(path, owner_uid=1234):
                 self._assert_credential_invalid(None)
 
@@ -164,9 +176,51 @@ class ProviderPolicyTests(unittest.TestCase):
             with self._credential_stats(path, owner_uid=0):
                 self._assert_credential_invalid(str(path))
 
+    def test_systemd_projection_rejects_unsafe_modes_at_lstat_and_fstat(self) -> None:
+        for mode in (0o600, 0o640, 0o444, 0o450):
+            with self.subTest(mode=oct(mode)):
+                with self._temporary_directory() as directory:
+                    path = self._write_credential(directory)
+                    path.chmod(0o400)
+                    with self._projected_credential(
+                        path,
+                        owner_uid=0,
+                        opened_uid=0,
+                        lstat_mode=mode,
+                    ):
+                        self._assert_credential_invalid(None)
+                    with self._projected_credential(
+                        path,
+                        owner_uid=0,
+                        opened_uid=0,
+                        lstat_mode=0o400,
+                        opened_mode=mode,
+                    ):
+                        self._assert_credential_invalid(None)
+
+    def test_explicit_credential_rejects_0440_mode(self) -> None:
+        with self._temporary_directory() as directory:
+            path = self._write_credential(directory)
+            path.chmod(0o440)
+            with self._credential_stats(
+                path,
+                owner_uid=self.TEST_EUID,
+                opened_uid=self.TEST_EUID,
+            ):
+                self._assert_credential_invalid(str(path))
+            with self._credential_stats(
+                path,
+                owner_uid=self.TEST_EUID,
+                opened_uid=self.TEST_EUID,
+                lstat_mode=0o400,
+                opened_mode=0o440,
+            ):
+                self._assert_credential_invalid(str(path))
+
     def test_projection_keeps_mode_symlink_and_identity_checks(self) -> None:
         with self._temporary_directory() as directory:
             path = self._write_credential(directory)
+            path.chmod(0o440)
             with self._projected_credential(
                 path,
                 owner_uid=0,
@@ -196,6 +250,7 @@ class ProviderPolicyTests(unittest.TestCase):
 
             path.unlink()
             path = self._write_credential(directory)
+            path.chmod(0o440)
             real_info = path.stat()
             with self._projected_credential(
                 path,

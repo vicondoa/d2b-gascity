@@ -213,6 +213,17 @@ def _credential_owner_allowed(owner: int, *, projected: bool) -> bool:
     return owner == os.geteuid() or (projected and owner == 0)
 
 
+def _credential_mode_allowed(mode: int, *, projected: bool) -> bool:
+    permissions = stat.S_IMODE(mode)
+    if projected:
+        return permissions in (0o400, 0o440)
+    return (
+        not permissions & 0o077
+        and not permissions & 0o111
+        and permissions & 0o400
+    )
+
+
 def _read_credential(argument: str | None) -> str:
     projected = argument is None
     path = _credential_path(argument)
@@ -224,9 +235,7 @@ def _read_credential(argument: str | None) -> str:
         stat.S_ISLNK(info.st_mode)
         or not stat.S_ISREG(info.st_mode)
         or not _credential_owner_allowed(info.st_uid, projected=projected)
-        or info.st_mode & 0o077
-        or info.st_mode & 0o111
-        or not info.st_mode & 0o400
+        or not _credential_mode_allowed(info.st_mode, projected=projected)
         or info.st_size <= 0
         or info.st_size > MAX_CREDENTIAL_BYTES
     ):
@@ -245,9 +254,10 @@ def _read_credential(argument: str | None) -> str:
                     opened.st_uid,
                     projected=projected,
                 )
-                or opened.st_mode & 0o077
-                or opened.st_mode & 0o111
-                or not opened.st_mode & 0o400
+                or not _credential_mode_allowed(
+                    opened.st_mode,
+                    projected=projected,
+                )
                 or opened.st_size <= 0
                 or opened.st_size > MAX_CREDENTIAL_BYTES
                 or opened.st_dev != info.st_dev
