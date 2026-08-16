@@ -260,10 +260,10 @@ def _import_app(
 ) -> None:
     command: list[str] = [
         str(gc),
-        "discord",
-        "import-app",
         "--city",
         str(city),
+        "discord",
+        "import-app",
         "--application-id",
         application_id,
         "--public-key",
@@ -295,10 +295,10 @@ def _bind_dm(
     _run_gc(
         [
             str(gc),
-            "discord",
-            "bind-dm",
             "--city",
             str(city),
+            "discord",
+            "bind-dm",
             user_id,
             session_name,
         ],

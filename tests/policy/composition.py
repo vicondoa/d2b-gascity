@@ -442,6 +442,22 @@ class CompositionPolicyTests(unittest.TestCase):
 
     def test_discord_helper_uses_official_gateway_only_seams(self) -> None:
         helper = (ROOT / "scripts" / "discord-import.py").read_text(encoding="utf-8")
+        self.assertIn(
+            '"--city",\n        str(city),\n        "discord",\n        "import-app"',
+            helper,
+        )
+        self.assertIn(
+            '"--city",\n            str(city),\n            "discord",\n            "bind-dm"',
+            helper,
+        )
+        self.assertNotIn(
+            '"discord",\n        "import-app",\n        "--city"',
+            helper,
+        )
+        self.assertNotIn(
+            '"discord",\n            "bind-dm",\n            "--city"',
+            helper,
+        )
         self.assertIn('"discord",\n        "import-app"', helper)
         self.assertIn('"discord",\n            "bind-dm"', helper)
         self.assertIn('"--bot-token-file"', helper)
