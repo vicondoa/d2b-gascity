@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import copy
+import hashlib
 import json
 import os
 import pathlib
@@ -24,7 +25,13 @@ COPILOT_VERSION = "1.0.79"
 DEFAULT_SELECTION_PATH = "/var/lib/d2b-gascity/config/provider-selection.json"
 MAX_CREDENTIAL_BYTES = 8192
 MAX_ACP_LINE_BYTES = 64 * 1024
+MAX_ACP_IDENTITY_BYTES = 4096
 DEFAULT_PROBE_TIMEOUT = 10.0
+ACP_IDENTITY_KEYS = (
+    "GC_SESSION_ID",
+    "GC_INSTANCE_TOKEN",
+    "GC_RUNTIME_EPOCH",
+)
 
 PROFILES: dict[str, dict[str, str]] = {
     "planning-grok": {
@@ -183,6 +190,98 @@ def _safe_absolute_path(value: str, label: str) -> pathlib.Path:
     if any(part in {".", ".."} for part in path.parts):
         raise ProviderError(f"{label}-invalid")
     return pathlib.Path(value)
+
+
+def _acp_identity_bytes(value: str) -> bytes:
+    try:
+        encoded = value.encode("utf-8")
+    except UnicodeEncodeError as error:
+        raise ProviderError("acp-identity-invalid") from error
+    if (
+        not value
+        or len(encoded) > MAX_ACP_IDENTITY_BYTES
+        or any(
+            ord(character) < 0x20 or ord(character) == 0x7F
+            for character in value
+        )
+    ):
+        raise ProviderError("acp-identity-invalid")
+    return encoded
+
+
+def _acp_meta_directory() -> pathlib.Path:
+    return pathlib.Path(tempfile.gettempdir()) / "gc-acp"
+
+
+def _prepare_acp_meta_directory(path: pathlib.Path) -> None:
+    try:
+        path.mkdir(mode=0o755, parents=True, exist_ok=True)
+        info = path.lstat()
+        if (
+            stat.S_ISLNK(info.st_mode)
+            or not stat.S_ISDIR(info.st_mode)
+            or info.st_uid != os.geteuid()
+            or info.st_mode & 0o022
+        ):
+            raise ProviderError("acp-meta-invalid")
+        os.chmod(path, 0o755)
+    except ProviderError:
+        raise
+    except OSError as error:
+        raise ProviderError("acp-meta-write") from error
+
+
+def _acp_sidecar_name(session_name: bytes, key: str) -> str:
+    session_hash = hashlib.sha256(session_name).hexdigest()
+    key_hash = hashlib.sha256(key.encode("ascii")).hexdigest()
+    return f"m{session_hash}.meta.{key_hash}"
+
+
+def _write_acp_sidecar(
+    directory: pathlib.Path,
+    session_name: bytes,
+    key: str,
+    value: bytes,
+) -> None:
+    target = directory / _acp_sidecar_name(session_name, key)
+    temporary: pathlib.Path | None = None
+    try:
+        descriptor, name = tempfile.mkstemp(prefix=".gc-acp-", dir=directory)
+        temporary = pathlib.Path(name)
+        with os.fdopen(descriptor, "wb", closefd=True) as stream:
+            os.fchmod(stream.fileno(), 0o644)
+            stream.write(value)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, target)
+        temporary = None
+    except OSError as error:
+        raise ProviderError("acp-meta-write") from error
+    finally:
+        if temporary is not None:
+            try:
+                temporary.unlink()
+            except OSError:
+                pass
+
+
+def _seed_acp_identity() -> None:
+    """Bridge the supervisor identity into upstream ACP metadata ownership."""
+    raw_session_name = os.environ.get("GC_SESSION_NAME", "")
+    if not raw_session_name:
+        return
+    session_name = _acp_identity_bytes(raw_session_name)
+    values: list[tuple[str, bytes]] = []
+    for key in ACP_IDENTITY_KEYS:
+        value = os.environ.get(key, "")
+        if value:
+            values.append((key, _acp_identity_bytes(value)))
+    if not values:
+        return
+    directory = _acp_meta_directory()
+    _prepare_acp_meta_directory(directory)
+    for key, value in values:
+        _write_acp_sidecar(directory, session_name, key, value)
 
 
 def _owned_directory(path: pathlib.Path, label: str) -> None:
@@ -635,6 +734,7 @@ def _stop_group(process: subprocess.Popen[Any]) -> None:
 def _run(
     args: argparse.Namespace,
 ) -> int:
+    _seed_acp_identity()
     selection = (
         _selection_path(args.selection_path)
         if args.profile == "review"

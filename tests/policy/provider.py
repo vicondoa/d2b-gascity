@@ -261,6 +261,44 @@ class ProviderPolicyTests(unittest.TestCase):
             ):
                 self._assert_credential_invalid(None)
 
+    def test_acp_identity_rejects_controls_and_oversized_values(self) -> None:
+        cases = (
+            {
+                "GC_SESSION_NAME": "fixture\nsession",
+                "GC_SESSION_ID": "fixture-session-id",
+                "GC_INSTANCE_TOKEN": "fixture-instance-token",
+                "GC_RUNTIME_EPOCH": "fixture-runtime-epoch",
+            },
+            {
+                "GC_SESSION_NAME": "fixture-session",
+                "GC_SESSION_ID": "x" * (PROVIDER.MAX_ACP_IDENTITY_BYTES + 1),
+                "GC_INSTANCE_TOKEN": "fixture-instance-token",
+                "GC_RUNTIME_EPOCH": "fixture-runtime-epoch",
+            },
+        )
+        for identity in cases:
+            with self.subTest(identity=identity):
+                with self._temporary_directory() as directory:
+                    meta_dir = directory / "gc-acp"
+                    environment = {
+                        **identity,
+                        "TMPDIR": str(directory),
+                    }
+                    with (
+                        mock.patch.dict(
+                            PROVIDER.os.environ,
+                            environment,
+                            clear=True,
+                        ),
+                        self.assertRaises(PROVIDER.ProviderError) as context,
+                    ):
+                        PROVIDER._seed_acp_identity()
+                    self.assertEqual(
+                        context.exception.code,
+                        "acp-identity-invalid",
+                    )
+                    self.assertFalse(meta_dir.exists())
+
     def test_portable_providers_are_direct_acp_wrappers(self) -> None:
         config = tomllib.loads(CITY.read_text(encoding="utf-8"))
         providers = config.get("providers", {})

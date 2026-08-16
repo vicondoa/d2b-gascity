@@ -81,6 +81,23 @@ external publication edge, so the imported `discord-interactions` and
 externally reachable. Do not patch those upstream service definitions or add a
 Discord daemon.
 
+### ACP identity sidecars
+
+The Copilot wrapper has a deployment shim for the pinned upstream ACP
+identity contract. A provider `run` seeds only the non-empty
+`GC_SESSION_ID`, `GC_INSTANCE_TOKEN`, and `GC_RUNTIME_EPOCH` values after a
+non-empty `GC_SESSION_NAME`, using the upstream SHA-256 sidecar names. The
+NixOS module sets `TMPDIR=/tmp` in the supervisor's `PrivateTmp` namespace, so
+the wrapper's Python `tempfile.gettempdir()` and upstream Go `os.TempDir()`
+resolve the same private `/tmp/gc-acp` directory.
+
+The wrapper atomically replaces files and does not delete them. Upstream ACP
+`Stop` owns sidecar cleanup, while the next incarnation overwrites stale
+values. This is a local deployment shim rather than an upstream source patch.
+The related orphan behavior is tracked in
+upstream [#4714](https://github.com/gastownhall/gascity/issues/4714). Remove
+the shim after upstream ACP seeds the identity itself.
+
 Use the stopped helper with a root- or systemd-owned credential file:
 
 ```text

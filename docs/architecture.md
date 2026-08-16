@@ -83,6 +83,24 @@ stdio for normal sessions, and forwards termination signals to the child
 process group. It never creates a provider daemon, transport endpoint, session
 store, retry ledger, or second lifecycle owner.
 
+The wrapper contains a narrow deployment shim for the pinned upstream ACP
+identity handoff. At the beginning of `run`, when `GC_SESSION_NAME` is
+non-empty, it writes the non-empty `GC_SESSION_ID`, `GC_INSTANCE_TOKEN`, and
+`GC_RUNTIME_EPOCH` values to the upstream ACP sidecar directory. The file names
+use the upstream SHA-256 session and key hashes, and each file is replaced
+through a flushed temporary file with mode `0644`; the directory is mode
+`0755`. The NixOS service sets `TMPDIR=/tmp` inside the unit's `PrivateTmp`
+namespace, so upstream Go `os.TempDir()` and wrapper Python
+`tempfile.gettempdir()` both resolve to the same `/tmp/gc-acp` directory.
+
+This is a deployment shim, not an upstream Gas City patch. It seeds no other
+environment value or credential, rejects control characters and oversized
+identity values, and never removes identity files. Upstream ACP `Stop` owns
+sidecar cleanup; a later incarnation atomically overwrites stale values. The
+related orphan behavior is tracked upstream in
+[#4714](https://github.com/gastownhall/gascity/issues/4714). Remove this shim
+when upstream ACP seeds identity itself.
+
 The wrapper reads only the systemd-projected Copilot credential after checking
 that it is a regular file with no symlink and exactly `0400` or `0440`
 permissions. Systemd projections may remain root-owned; explicit

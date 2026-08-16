@@ -42,6 +42,9 @@ and this project follows semantic versioning where releases are published.
 - Added a credential-free separate-root rollback fixture and operator
   contract covering old-new-old-new rehearsal, prototype integrity,
   retained closures, offline rollback, and the host receipt gate for U12.
+- Added a stateless ACP identity deployment shim that seeds upstream-compatible
+  session metadata under the service's private `TMPDIR` before slow Copilot
+  handshakes without patching Gas City.
 
 ### Changed
 
@@ -62,3 +65,6 @@ and this project follows semantic versioning where releases are published.
   scanning, and cleanup proofs.
 - Moved Gas City firewall programming onto the existing iptables-backed NixOS
   firewall service and atomically replace only `table inet d2b_gascity`.
+- Kept the pinned Gas City source and package unpatched; the ACP shim is
+  deployment-owned until upstream identity seeding supersedes it. Related
+  orphan behavior is tracked by upstream #4714.

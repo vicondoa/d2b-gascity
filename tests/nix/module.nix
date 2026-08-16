@@ -319,6 +319,9 @@ in
       main.Environment;
     assert builtins.elem "GC_SUPERVISOR_SYSTEMD_SCOPE=system" main.Environment;
     assert builtins.elem
+      "TMPDIR=/tmp"
+      main.Environment;
+    assert builtins.elem
       "/etc/d2b-gascity/supervisor.toml:/var/lib/d2b-gascity/gc/supervisor.toml"
       main.BindReadOnlyPaths;
     assert builtins.elem "copilot-token:/run/secrets/copilot" main.LoadCredential;

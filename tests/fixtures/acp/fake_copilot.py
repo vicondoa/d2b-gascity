@@ -169,6 +169,8 @@ def main() -> int:
         event["protected_action"] = _protected_action_attempt()
     _append_event(event)
 
+    if mode == "delayed":
+        time.sleep(0.5)
     if mode == "timeout":
         time.sleep(60)
         return 0

@@ -3,11 +3,13 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import pathlib
 import shutil
 import signal
+import stat
 import subprocess
 import sys
 import tempfile
@@ -19,12 +21,13 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts" / "copilot-provider.py"
 FAKE_COPILOT = ROOT / "tests" / "fixtures" / "acp" / "fake_copilot.py"
 SCRATCH = pathlib.Path(
-    os.environ.get("D2B_GASCITY_CHECK_RUN_ROOT", tempfile.gettempdir())
+    os.environ.get("D2B_GASCITY_CHECK_RUN_ROOT", ROOT / ".scratch")
 )
 
 
 class CopilotAcceptanceTests(unittest.TestCase):
     def setUp(self) -> None:
+        SCRATCH.mkdir(mode=0o700, parents=True, exist_ok=True)
         self.temp = tempfile.TemporaryDirectory(
             dir=SCRATCH,
             prefix="copilot-acp-",
@@ -35,6 +38,10 @@ class CopilotAcceptanceTests(unittest.TestCase):
         self.runtime = self.base / "runtime"
         self.runtime.mkdir()
         os.chmod(self.runtime, 0o700)
+        self.tmpdir = self.base / "tmp"
+        self.tmpdir.mkdir()
+        os.chmod(self.tmpdir, 0o700)
+        self.acp_meta_dir = self.tmpdir / "gc-acp"
         self.credential = self.base / "copilot-token"
         self.credential.write_text("fixture-token\n", encoding="ascii")
         os.chmod(self.credential, 0o600)
@@ -56,6 +63,7 @@ class CopilotAcceptanceTests(unittest.TestCase):
                 "GC_HOME": str(self.base / "gc"),
                 "XDG_CONFIG_HOME": str(self.base / "config"),
                 "D2B_ACP_CANARY": str(self.canary),
+                "TMPDIR": str(self.tmpdir),
             }
         )
         (self.base / "credentials").mkdir()
@@ -135,6 +143,130 @@ class CopilotAcceptanceTests(unittest.TestCase):
         return json.loads(
             (self.base / "provider-selection.json").read_text(encoding="utf-8")
         )
+
+    @staticmethod
+    def _sidecar_path(
+        directory: pathlib.Path,
+        session_name: str,
+        key: str,
+    ) -> pathlib.Path:
+        session_hash = hashlib.sha256(session_name.encode("utf-8")).hexdigest()
+        key_hash = hashlib.sha256(key.encode("utf-8")).hexdigest()
+        return directory / f"m{session_hash}.meta.{key_hash}"
+
+    def _start_delayed_run(
+        self,
+        environment: dict[str, str],
+    ) -> subprocess.Popen[str]:
+        self.mode_file.write_text("delayed\n", encoding="ascii")
+        self.mode_file.with_suffix(self.mode_file.suffix + ".index").unlink(
+            missing_ok=True
+        )
+        return subprocess.Popen(
+            self._command("run", profile="code-luna", policy="coding"),
+            cwd=self.worktree,
+            env=environment,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+
+    @staticmethod
+    def _stop_run(process: subprocess.Popen[str]) -> None:
+        process.send_signal(signal.SIGTERM)
+        process.wait(timeout=5)
+        if process.stdin is not None:
+            process.stdin.close()
+        if process.stdout is not None:
+            process.stdout.close()
+        if process.stderr is not None:
+            process.stderr.close()
+
+    def test_acp_identity_sidecars_seed_during_delayed_handshake(self) -> None:
+        identity_environment = {
+            **self.env,
+            "GC_SESSION_NAME": "fixture-session-name",
+            "GC_SESSION_ID": "fixture-session-id",
+            "GC_INSTANCE_TOKEN": "fixture-instance-token",
+            "GC_RUNTIME_EPOCH": "fixture-runtime-epoch",
+            "GC_UNRELATED": "must-not-be-seeded",
+        }
+        process = self._start_delayed_run(identity_environment)
+        try:
+            expected = {
+                "GC_SESSION_ID": "fixture-session-id",
+                "GC_INSTANCE_TOKEN": "fixture-instance-token",
+                "GC_RUNTIME_EPOCH": "fixture-runtime-epoch",
+            }
+            paths = {
+                key: self._sidecar_path(
+                    self.acp_meta_dir,
+                    "fixture-session-name",
+                    key,
+                )
+                for key in expected
+            }
+            for _ in range(50):
+                if all(path.is_file() for path in paths.values()):
+                    break
+                time.sleep(0.02)
+            self.assertTrue(self.acp_meta_dir.is_dir())
+            self.assertEqual(
+                stat.S_IMODE(self.acp_meta_dir.stat().st_mode),
+                0o755,
+            )
+            self.assertEqual(set(self.acp_meta_dir.iterdir()), set(paths.values()))
+            for key, path in paths.items():
+                self.assertEqual(path.read_text(encoding="utf-8"), expected[key])
+                self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o644)
+            self.assertNotIn(
+                "must-not-be-seeded",
+                "\n".join(path.read_text(encoding="utf-8") for path in paths.values()),
+            )
+        finally:
+            self._stop_run(process)
+
+        identity_environment.update(
+            {
+                "GC_SESSION_ID": "fixture-session-id-next",
+                "GC_INSTANCE_TOKEN": "fixture-instance-token-next",
+                "GC_RUNTIME_EPOCH": "fixture-runtime-epoch-next",
+            }
+        )
+        process = self._start_delayed_run(identity_environment)
+        try:
+            for key, expected in {
+                "GC_SESSION_ID": "fixture-session-id-next",
+                "GC_INSTANCE_TOKEN": "fixture-instance-token-next",
+                "GC_RUNTIME_EPOCH": "fixture-runtime-epoch-next",
+            }.items():
+                path = self._sidecar_path(
+                    self.acp_meta_dir,
+                    "fixture-session-name",
+                    key,
+                )
+                for _ in range(50):
+                    if path.read_text(encoding="utf-8") == expected:
+                        break
+                    time.sleep(0.02)
+                self.assertEqual(path.read_text(encoding="utf-8"), expected)
+                self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o644)
+        finally:
+            self._stop_run(process)
+
+        no_session_environment = dict(identity_environment)
+        no_session_environment.pop("GC_SESSION_NAME")
+        no_session_tmpdir = self.base / "no-session-tmp"
+        no_session_tmpdir.mkdir()
+        os.chmod(no_session_tmpdir, 0o700)
+        no_session_environment["TMPDIR"] = str(no_session_tmpdir)
+        process = self._start_delayed_run(no_session_environment)
+        try:
+            time.sleep(0.1)
+            self.assertFalse((no_session_tmpdir / "gc-acp").exists())
+        finally:
+            self._stop_run(process)
 
     def test_code_luna_uses_fixed_argv_environment_and_sandbox(self) -> None:
         result = self._run("run", profile="code-luna", policy="coding")

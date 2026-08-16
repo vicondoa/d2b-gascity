@@ -79,6 +79,21 @@ The repository [LICENSE](LICENSE) applies to local work. It does not
 override an upstream license, the Copilot CLI terms, or notices that must
 remain with imported material.
 
+## Local ACP deployment shim
+
+The provider wrapper includes a small deployment shim for the pinned Gas City
+ACP sidecar identity contract. It writes only the three runtime identity
+values required by the upstream reconciler, using upstream-compatible
+SHA-256 names and atomic replacement under the service's private
+`$TMPDIR/gc-acp` directory. The NixOS service fixes `TMPDIR=/tmp` inside its
+`PrivateTmp` namespace. It does not modify Gas City source, package inputs, or
+upstream tests, and it does not own sidecar cleanup.
+Upstream ACP `Stop` remains the cleanup owner.
+
+The related orphan behavior is tracked upstream in
+[#4714](https://github.com/gastownhall/gascity/issues/4714). Remove this local
+shim when upstream ACP seeds identity before the wrapper handshake.
+
 ## Clean snapshot policy
 
 Only reviewed source files are copied. The following are never copied from
