@@ -177,6 +177,78 @@
           module = gasCityContributorModule;
           gasCityContributor = contributorFor system;
         };
+
+      packageSmokeFor = system:
+        import ./tests/smoke/package.nix {
+          pkgs = nixpkgsFor.${system};
+          gasCityContributor = contributorFor system;
+          gascityRevision = (locked "gascity").rev;
+          gascityPacksRevision = (locked "gascity-packs").rev;
+          beadsRevision = (locked "beads").rev;
+          llmAgentsRevision = (locked "llm-agents").rev;
+          doltVersion = (doltFor system).version;
+          goVersion = (goFor system).version;
+          copilotVersion = (copilotFor system).version;
+          tinyauthVersion = (tinyauthFor system).version;
+          nginxVersion = (nginxFor system).version;
+        };
+
+      generatedDriftFor = system:
+        let
+          pkgs = nixpkgsFor.${system};
+        in
+        pkgs.runCommand "d2b-gascity-generated-drift" {
+          nativeBuildInputs = [ pkgs.python3 ];
+        } ''
+          python3 ${./scripts/generate_inventory.py} \
+            --root ${./.} \
+            --check
+          touch "$out"
+        '';
+
+      privacyPolicyFor = system:
+        let
+          pkgs = nixpkgsFor.${system};
+        in
+        pkgs.runCommand "d2b-gascity-privacy-policy" {
+          nativeBuildInputs = [ pkgs.python3 ];
+        } ''
+          python3 ${./scripts/privacy_scan.py} \
+            --root ${./.} \
+            --tracked-only
+          touch "$out"
+        '';
+
+      staticPolicyFor = system:
+        let
+          pkgs = nixpkgsFor.${system};
+        in
+        pkgs.runCommand "d2b-gascity-static-policy" {
+          nativeBuildInputs = [ pkgs.python3 ];
+        } ''
+          python3 ${./scripts/static_policy.py} --root ${./.} --nix
+          touch "$out"
+        '';
+
+      aggregateFor = system:
+        let
+          packageSmoke = packageSmokeFor system;
+          sourceManifest = (sourceManifestFor system).check;
+          moduleEval = moduleEvalFor system;
+          generated = generatedDriftFor system;
+          privacy = privacyPolicyFor system;
+          static = staticPolicyFor system;
+          pkgs = nixpkgsFor.${system};
+        in
+        pkgs.runCommand "d2b-gascity-aggregate-check" { } ''
+          test -f ${packageSmoke}/result
+          test -f ${sourceManifest}/result
+          test -f ${moduleEval}
+          test -f ${generated}
+          test -f ${privacy}
+          test -f ${static}
+          touch "$out"
+        '';
     in
     {
       nixosModules = {
@@ -227,21 +299,13 @@
           sourceManifest = sourceManifestFor system;
         in
         {
-          package-smoke = import ./tests/smoke/package.nix {
-            inherit pkgs;
-            gasCityContributor = contributor;
-            gascityRevision = (locked "gascity").rev;
-            gascityPacksRevision = (locked "gascity-packs").rev;
-            beadsRevision = (locked "beads").rev;
-            llmAgentsRevision = (locked "llm-agents").rev;
-            doltVersion = (doltFor system).version;
-            goVersion = (goFor system).version;
-            copilotVersion = (copilotFor system).version;
-            tinyauthVersion = (tinyauthFor system).version;
-            nginxVersion = (nginxFor system).version;
-          };
+          package-smoke = packageSmokeFor system;
           source-manifest = sourceManifest.check;
           d2b-gascity-module = moduleEvalFor system;
+          generated-drift = generatedDriftFor system;
+          privacy-policy = privacyPolicyFor system;
+          static-policy = staticPolicyFor system;
+          aggregate = aggregateFor system;
         });
 
       vmChecks = forAllSystems (system: {

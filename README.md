@@ -48,6 +48,15 @@ changing the repository. In particular:
 - Do not introduce Speckit, the d2b panel or signoff system, d2b wave or
   delivery sequencing, or d2b pinning-hardening workflows here.
 
+## Validation
+
+Run `make check` for the complete repository-local check graph. It is
+credential-free and does not use a d2b test harness, panel, Speckit, or Rust
+toolchain. Focused targets and the manual credential boundary are documented
+in [docs/testing.md](docs/testing.md). Nix sandbox checks stay limited to
+deterministic repository policy; real ACP feasibility and live host acceptance
+are explicit manual commands only.
+
 ## License
 
 Local repository content is provided under the Apache License, Version 2.0.

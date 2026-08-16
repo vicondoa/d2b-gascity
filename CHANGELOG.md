@@ -24,6 +24,8 @@ and this project follows semantic versioning where releases are published.
 - Added a bounded Beads-bound publication helper for d2b `v3`.
 - Added a deterministic trusted publication subprocess with continuation-aware
   claims, source-anchor binding, and safe publish artifacts.
+- Added repository-local Make, Python, generated-inventory, privacy, static
+  policy, Nix, and private CI checks without the d2b test harness or Rust.
 - Hardened publication with dedicated systemd-projected credentials, HTTPS-only
   remotes, disabled hooks and tag following, and scrubbed GitHub child
   environments.

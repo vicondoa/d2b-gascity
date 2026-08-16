@@ -9,10 +9,12 @@ import json
 import os
 import pathlib
 import re
+import signal
 import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import tomllib
 import urllib.parse
 from collections.abc import Iterable, Mapping
@@ -33,6 +35,8 @@ PORTABLE_FILES = (
 )
 PORTABLE_DIRECTORIES = ("agents", "assets", "formulas", "providers")
 REQUIRED_INIT_FLAGS = ("--file", "--preserve-existing", "--no-start")
+DOLT_START_READY_TIMEOUT_MS = "120000"
+DOLT_SCHEMA_READY_TIMEOUT_SECONDS = 120.0
 
 
 class BootstrapError(RuntimeError):
@@ -351,6 +355,10 @@ def _city_env(state_root: pathlib.Path) -> dict[str, str]:
             "XDG_RUNTIME_DIR": str(state_root / "runtime"),
         }
     )
+    env.setdefault(
+        "GC_DOLT_CONCURRENT_START_READY_TIMEOUT_MS",
+        DOLT_START_READY_TIMEOUT_MS,
+    )
     return env
 
 
@@ -473,6 +481,227 @@ def _prepare_rig(args: argparse.Namespace, env: Mapping[str, str]) -> None:
         env=env,
         label="d2b origin HEAD pin",
     )
+
+
+def _dolt_connection(
+    args: argparse.Namespace,
+    env: Mapping[str, str],
+) -> tuple[pathlib.Path, str, int, str]:
+    metadata_path = args.city / ".beads" / "metadata.json"
+    config_path = args.city / ".gc" / "runtime" / "packs" / "dolt" / "dolt-config.yaml"
+    try:
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        config = config_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise BootstrapError("managed Dolt readiness metadata is missing") from error
+    database = metadata.get("dolt_database")
+    if not isinstance(database, str) or not database:
+        raise BootstrapError("managed Dolt metadata has no database name")
+    match = re.search(r"(?m)^\s*port:\s*(\d+)\s*$", config)
+    if match is None:
+        port_value = env.get("GC_DOLT_PORT", "").strip()
+        if not port_value or port_value == "0":
+            raise BootstrapError("managed Dolt configuration has no listener port")
+    else:
+        port_value = match.group(1)
+    try:
+        port = int(port_value)
+    except ValueError as error:
+        raise BootstrapError("managed Dolt listener port is invalid") from error
+    dolt = args.gc.parent / "dolt"
+    if not dolt.is_file() or not os.access(dolt, os.X_OK):
+        raise BootstrapError("packaged runtime is missing dolt for readiness probing")
+    host_match = re.search(r"(?m)^\s*host:\s*([^\s#]+)\s*$", config)
+    host = host_match.group(1) if host_match else env.get("GC_DOLT_HOST", "127.0.0.1")
+    return dolt, host, port, database
+
+
+def _wait_for_dolt_schema(
+    args: argparse.Namespace,
+    env: Mapping[str, str],
+    *,
+    timeout: float = DOLT_SCHEMA_READY_TIMEOUT_SECONDS,
+) -> None:
+    dolt, host, port, database = _dolt_connection(args, env)
+    query = f"SHOW TABLES FROM `{database}`"
+    deadline = time.monotonic() + timeout
+    last_error = "schema is not ready"
+    while time.monotonic() < deadline:
+        try:
+            result = subprocess.run(
+                [
+                    dolt,
+                    "--no-tls",
+                    "--host",
+                    host,
+                    "--port",
+                    str(port),
+                    "sql",
+                    "-q",
+                    query,
+                ],
+                cwd=args.city,
+                env=dict(env),
+                text=True,
+                capture_output=True,
+                check=False,
+                timeout=10,
+            )
+        except (OSError, subprocess.SubprocessError) as error:
+            last_error = str(error)
+        else:
+            output = result.stdout + result.stderr
+            if (
+                result.returncode == 0
+                and "schema_migrations" in output
+                and "issues" in output
+            ):
+                return
+            last_error = output.strip().splitlines()[-1] if output.strip() else last_error
+        time.sleep(0.25)
+    raise BootstrapError(f"managed Dolt schema did not become ready: {last_error}")
+
+
+def _start_dolt_server(
+    args: argparse.Namespace,
+    env: Mapping[str, str],
+) -> subprocess.Popen[bytes]:
+    dolt, _host, _port, _database = _dolt_connection(args, env)
+    config = args.city / ".gc" / "runtime" / "packs" / "dolt" / "dolt-config.yaml"
+    try:
+        return subprocess.Popen(
+            [dolt, "sql-server", "--config", str(config)],
+            cwd=args.city,
+            env=dict(env),
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+    except OSError as error:
+        raise BootstrapError("managed Dolt server could not be started") from error
+
+
+def _stop_dolt_server(process: subprocess.Popen[bytes] | None) -> None:
+    if process is None or process.poll() is not None:
+        return
+    try:
+        os.killpg(process.pid, signal.SIGTERM)
+    except ProcessLookupError:
+        return
+    try:
+        process.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            return
+        process.wait(timeout=10)
+
+
+def _ensure_dolt_schema(
+    args: argparse.Namespace,
+    env: Mapping[str, str],
+) -> subprocess.Popen[bytes] | None:
+    try:
+        _wait_for_dolt_schema(args, env, timeout=5.0)
+        return None
+    except BootstrapError:
+        _best_effort_stop(args.gc, args.city, env=env)
+    deadline = time.monotonic() + DOLT_SCHEMA_READY_TIMEOUT_SECONDS
+    process: subprocess.Popen[bytes] | None = None
+    last_error = "schema is not ready"
+    while time.monotonic() < deadline:
+        if process is None or process.poll() is not None:
+            process = _start_dolt_server(args, env)
+        try:
+            _wait_for_dolt_schema(args, env, timeout=2.0)
+            return process
+        except BootstrapError as error:
+            last_error = str(error)
+            time.sleep(0.25)
+    _stop_dolt_server(process)
+    raise BootstrapError(f"managed Dolt schema did not become ready: {last_error}")
+
+
+def _run_gc_init(
+    args: argparse.Namespace,
+    env: Mapping[str, str],
+) -> subprocess.Popen[bytes] | None:
+    command = [
+        args.gc,
+        "init",
+        "--file",
+        args.city / "city.toml",
+        "--preserve-existing",
+        "--no-start",
+        "--skip-provider-readiness",
+        "--name",
+        "d2b-gascity",
+        args.city,
+    ]
+    try:
+        _run(
+            command,
+            env=env,
+            label="gc init --file --preserve-existing --no-start",
+        )
+        return None
+    except BootstrapError as error:
+        markers = (
+            args.city / ".beads" / "metadata.json",
+            args.city / ".gc" / "runtime" / "packs" / "dolt" / "dolt-config.yaml",
+        )
+        if not all(path.is_file() for path in markers):
+            raise
+        _best_effort_stop(args.gc, args.city, env=env)
+        try:
+            return _ensure_dolt_schema(args, env)
+        except BootstrapError as recovery_error:
+            raise BootstrapError(
+                f"{error}; initialization recovery failed: {recovery_error}"
+            ) from error
+
+
+def _initialize_rig_beads(args: argparse.Namespace, env: Mapping[str, str]) -> None:
+    beads = args.rig / ".beads"
+    config = beads / "config.yaml"
+    metadata = beads / "metadata.json"
+    if config.is_file() and metadata.is_file():
+        return
+    if beads.exists():
+        raise BootstrapError("rig contains a partial .beads initialization")
+    dolt, host, port, _database = _dolt_connection(args, env)
+    bd = dolt.parent / "bd"
+    if not bd.is_file() or not os.access(bd, os.X_OK):
+        raise BootstrapError("packaged runtime is missing bd for rig initialization")
+    _run(
+        [
+            bd,
+            "init",
+            "--non-interactive",
+            "--skip-agents",
+            "--skip-hooks",
+            "--prefix",
+            RIG_NAME,
+            "--server",
+            "--server-host",
+            host,
+            "--server-port",
+            str(port),
+            "--database",
+            RIG_NAME,
+        ],
+        env=env,
+        label="bd init rig",
+        cwd=args.rig,
+    )
+    text = config.read_text(encoding="utf-8")
+    if not re.search(r"(?m)^\s*issue_prefix\s*:", text):
+        config.write_text(
+            text.rstrip() + f'\nissue_prefix: "{RIG_NAME}"\n',
+            encoding="utf-8",
+        )
 
 
 def _site_binding(city: pathlib.Path, rig: pathlib.Path) -> None:
@@ -632,29 +861,13 @@ def _init(args: argparse.Namespace) -> int:
     _configure_dolt_identity(args, env)
     _seed_pack_cache(args.pack_cache, args.state_root)
     _materialize_portable(args.portable_source, args.city, portable_files)
+    dolt_process: subprocess.Popen[bytes] | None = None
     try:
-        _run(
-            [
-                args.gc,
-                "init",
-                "--file",
-                args.city / "city.toml",
-                "--preserve-existing",
-                "--no-start",
-                "--skip-provider-readiness",
-                "--name",
-                "d2b-gascity",
-                args.city,
-            ],
-            env=env,
-            label="gc init --file --preserve-existing --no-start",
-        )
-        _run(
-            [args.gc, "import", "install", "--city", args.city],
-            env=env,
-            label="gc import install",
-        )
+        dolt_process = _run_gc_init(args, env)
+        if dolt_process is None:
+            dolt_process = _ensure_dolt_schema(args, env)
         _prepare_rig(args, env)
+        _initialize_rig_beads(args, env)
         _run(
             [
                 args.gc,
@@ -670,14 +883,22 @@ def _init(args: argparse.Namespace) -> int:
                 "--default-branch",
                 "v3",
                 "--start-suspended",
+                "--adopt",
             ],
             env=env,
             label="gc rig add",
         )
+        _run(
+            [args.gc, "import", "install", "--city", args.city],
+            env=env,
+            label="gc import install",
+        )
         _site_binding(args.city, args.rig)
     except BootstrapError:
+        _stop_dolt_server(dolt_process)
         _best_effort_stop(args.gc, args.city, env=env)
         raise
+    _stop_dolt_server(dolt_process)
     _run(
         [args.gc, "stop", "--city", args.city, "--force"],
         env=env,
@@ -721,11 +942,37 @@ def _register(args: argparse.Namespace) -> int:
             "register-existing requires GC_SUPERVISOR_SYSTEMD_UNIT with system scope "
             "or the explicit --fixture-supervisor test guard"
         )
-    result = _run(
-        [args.gc, "register", args.city, "--yes", "--json"],
-        env=env,
-        label="gc register",
+    command = [args.gc, "register", args.city, "--yes", "--json"]
+    result = subprocess.run(
+        command,
+        env=dict(env),
+        text=True,
+        capture_output=True,
+        check=False,
     )
+    if result.returncode:
+        payload: dict[str, object] | None = None
+        try:
+            candidate = json.loads(result.stdout.strip().splitlines()[-1])
+            if isinstance(candidate, dict):
+                payload = candidate
+        except (IndexError, json.JSONDecodeError):
+            pass
+        city_resolved = str(args.city.resolve())
+        registered = False
+        success_hint = "registered city" in (
+            result.stdout + result.stderr
+        ).lower()
+        if success_hint or (payload is not None and payload.get("ok") is True):
+            cities = _cities_json(args.gc, env)
+            registered = any(
+                pathlib.Path(entry.get("path", "")).resolve() == pathlib.Path(city_resolved)
+                for entry in cities.get("cities", [])
+            )
+        if not registered:
+            raise BootstrapError(
+                f"gc register failed: {_redact(result.stderr)}"
+            )
     print(result.stdout, end="")
     return 0
 

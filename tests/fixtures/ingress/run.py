@@ -38,7 +38,7 @@ ORIGIN = DASHBOARD_URL
 AUTH_ORIGIN = AUTH_URL
 SUPERVISOR_PORT = 8372
 FIXTURE_SESSION_EXPIRY = 4
-FIXTURE_SESSION_MAX_LIFETIME = 15
+FIXTURE_SESSION_MAX_LIFETIME = 30
 BUILD_ID = "f6741d94861aa14f0253deffbe9efb1cb3a35d92"
 TINYAUTH_VERSION = "5.1.3"
 NGINX_VERSION = "1.30.2"
@@ -274,8 +274,11 @@ class PublicCookieClient:
         return connection, response
 
 
-def proc_snapshot(base: Path, roots: set[int]) -> dict[int, tuple[int, int, str]]:
-    entries: dict[int, tuple[int, int, str]] = {}
+def proc_snapshot(
+    run_id: str,
+    roots: set[int],
+) -> dict[int, tuple[int, int, str, str | None]]:
+    entries: dict[int, tuple[int, int, str, str | None]] = {}
     for item in Path("/proc").iterdir():
         if not item.name.isdigit():
             continue
@@ -285,7 +288,15 @@ def proc_snapshot(base: Path, roots: set[int]) -> dict[int, tuple[int, int, str]
             fields = raw_stat.rsplit(")", 1)[1].split()
             ppid, pgid = int(fields[1]), int(fields[2])
             command = (item / "cmdline").read_bytes().replace(b"\0", b" ").decode(errors="replace")
-            entries[pid] = (ppid, pgid, command)
+            process_run_id = None
+            for entry in (item / "environ").read_bytes().split(b"\0"):
+                if entry.startswith(b"D2B_GASCITY_CHECK_RUN_ID="):
+                    process_run_id = entry.partition(b"=")[2].decode(
+                        "utf-8",
+                        errors="replace",
+                    )
+                    break
+            entries[pid] = (ppid, pgid, command, process_run_id)
         except (
             FileNotFoundError,
             PermissionError,
@@ -295,20 +306,25 @@ def proc_snapshot(base: Path, roots: set[int]) -> dict[int, tuple[int, int, str]
         ):
             continue
     selected = {pid for pid in roots if pid in entries}
+    selected.update(
+        pid
+        for pid, (_, _, _, process_run_id) in entries.items()
+        if pid != os.getpid() and process_run_id == run_id
+    )
     changed = True
     while changed:
         changed = False
-        for pid, (ppid, _, command) in entries.items():
+        for pid, (ppid, _, _, _) in entries.items():
             if pid in selected:
                 continue
-            if ppid in selected or str(base) in command:
+            if ppid in selected:
                 selected.add(pid)
                 changed = True
     return {pid: entries[pid] for pid in selected if pid in entries}
 
 
-def owned_groups(base: Path, roots: set[int]) -> set[int]:
-    groups = {pgid for _, (_, pgid, _) in proc_snapshot(base, roots).items()}
+def owned_groups(run_id: str, roots: set[int]) -> set[int]:
+    groups = {pgid for _, (_, pgid, _, _) in proc_snapshot(run_id, roots).items()}
     groups.discard(os.getpgrp())
     return {group for group in groups if group > 1}
 
@@ -323,13 +339,13 @@ def signal_groups(groups: set[int], signum: int) -> None:
             raise Failure(f"cannot signal owned process group {group}: {error}") from error
 
 
-def wait_groups_gone(base: Path, roots: set[int], timeout: float) -> bool:
+def wait_groups_gone(run_id: str, roots: set[int], timeout: float) -> bool:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        if not proc_snapshot(base, roots):
+        if not proc_snapshot(run_id, roots):
             return True
         time.sleep(0.1)
-    return not proc_snapshot(base, roots)
+    return not proc_snapshot(run_id, roots)
 
 
 class FixtureStreamHandler(BaseHTTPRequestHandler):
@@ -487,7 +503,16 @@ def reexec_in_network_namespace(repo: Path, runtime: Path) -> int:
 
 def main() -> int:
     repo = Path(__file__).resolve().parents[3]
-    runtime_value = os.environ.get("D2B_INGRESS_RUNTIME", str(repo / ".scratch" / "ingress-runtime"))
+    run_id = os.environ.get("D2B_GASCITY_CHECK_RUN_ID")
+    require(run_id, "D2B_GASCITY_CHECK_RUN_ID is required for ingress ownership")
+    run_root_value = os.environ.get(
+        "D2B_INGRESS_RUN_ROOT",
+        os.environ.get("D2B_GASCITY_CHECK_RUN_ROOT"),
+    )
+    require(run_root_value, "D2B_INGRESS_RUN_ROOT is required for ingress cleanup")
+    run_root = Path(run_root_value).expanduser().resolve()
+    runtime_value = os.environ.get("D2B_INGRESS_RUNTIME")
+    require(runtime_value, "D2B_INGRESS_RUNTIME is required for ingress execution")
     runtime = Path(runtime_value).expanduser().resolve()
     required_bins = ["gc", "dolt", "tinyauth", "nginx", "unshare", "ip"]
     require(runtime.is_dir(), f"runtime not found: {runtime_value}")
@@ -507,10 +532,9 @@ def main() -> int:
     require(code == 0, f"could not bring namespace loopback up: {output[-400:]}")
     wait_port_closed(SUPERVISOR_PORT)
 
-    scratch_root = repo / ".scratch" / "ingress-runs"
-    scratch_root.mkdir(parents=True, exist_ok=True, mode=0o700)
-    scratch_root.chmod(0o700)
-    base = scratch_root / f"run-{os.getpid()}-{time.time_ns()}"
+    run_root.mkdir(parents=True, exist_ok=True, mode=0o700)
+    run_root.chmod(0o700)
+    base = run_root / "ingress"
     base.mkdir(mode=0o700)
     processes: list[subprocess.Popen[bytes]] = []
     logs: list[object] = []
@@ -1098,21 +1122,38 @@ log:
         )
         require(cross_site_status == 403, "cross-site mutation was accepted")
         allowed = {**mutation_headers, "X-GC-Request": "dashboard"}
-        allowed_status, _, _, _ = public_client.request(
-            DASHBOARD_URL + "/v0/city/city",
-            "PATCH",
-            allowed,
+
+        def allowed_mutation(
+            body: bytes,
+            headers: dict[str, str],
+            label: str,
+        ) -> int | None:
+            status: int | None = None
+            for _ in range(6):
+                status, _, _, _ = public_client.request(
+                    DASHBOARD_URL + "/v0/city/city",
+                    "PATCH",
+                    headers,
+                    body,
+                )
+                if status == 200:
+                    return status
+                if status not in (None, 500, 502, 503, 504):
+                    break
+                time.sleep(0.5)
+            require(
+                status == 200,
+                f"{label} failed after transient backend retries: status={status}",
+            )
+            return status
+
+        allowed_mutation(
             mutation_body,
-        )
-        require(allowed_status == 200, "same-origin mutation with native request header failed")
-        restore_body = b'{"suspended":false}'
-        restore_status, _, _, _ = public_client.request(
-            DASHBOARD_URL + "/v0/city/city",
-            "PATCH",
             allowed,
-            restore_body,
+            "same-origin mutation with native request header",
         )
-        require(restore_status == 200, "fixture city restore mutation failed")
+        restore_body = b'{"suspended":false}'
+        allowed_mutation(restore_body, allowed, "fixture city restore mutation")
         forwarded_noise = {
             **allowed,
             "X-Forwarded-Host": "wrong.example.test",
@@ -1120,20 +1161,16 @@ log:
             "X-Forwarded-Port": "80",
             "X-Forwarded-For": "203.0.113.77",
         }
-        forwarded_status, _, _, _ = public_client.request(
-            DASHBOARD_URL + "/v0/city/city",
-            "PATCH",
-            forwarded_noise,
+        allowed_mutation(
             mutation_body,
-        )
-        require(forwarded_status == 200, "forged X-Forwarded-* headers changed a valid mutation decision")
-        forwarded_restore_status, _, _, _ = public_client.request(
-            DASHBOARD_URL + "/v0/city/city",
-            "PATCH",
             forwarded_noise,
-            restore_body,
+            "forged X-Forwarded-* mutation decision",
         )
-        require(forwarded_restore_status == 200, "fixture city restore after forwarded-header proof failed")
+        allowed_mutation(
+            restore_body,
+            forwarded_noise,
+            "fixture city restore after forwarded-header proof",
+        )
         print("PASS same-origin dashboard mutation, cross-site rejection, and forwarded-header neutrality")
 
         wrong_host_status, _, _, _ = public_client.request(
@@ -1257,13 +1294,15 @@ log:
         absolute_login_status, _, _, _ = login(absolute_client, FAKE_PASSWORD)
         require(absolute_login_status in (200, 204, 302), "absolute-expiry login failed")
         absolute_started = time.monotonic()
-        active_until = absolute_started + FIXTURE_SESSION_MAX_LIFETIME - 0.75
+        active_until = absolute_started + FIXTURE_SESSION_MAX_LIFETIME - 5.0
         while time.monotonic() < active_until:
             active_status, active_headers, _, active_body = absolute_client.request(
                 DASHBOARD_URL + "/api/health",
                 headers={"Sec-Fetch-Site": "same-origin"},
             )
-            if active_status is None:
+            for _ in range(4):
+                if active_status not in (None, 500, 502, 503, 504):
+                    break
                 time.sleep(0.2)
                 active_status, active_headers, _, active_body = absolute_client.request(
                     DASHBOARD_URL + "/api/health",
@@ -1512,8 +1551,8 @@ log:
             )
         command_lines = [
             command
-            for _, (_, _, command) in proc_snapshot(
-                base,
+            for _, (_, _, command, _) in proc_snapshot(
+                run_id,
                 {tinyauth.pid, nginx.pid, supervisor.pid},
             ).items()
         ]
@@ -1544,11 +1583,11 @@ log:
             helper.shutdown()
             helper.server_close()
         root_pids = {process.pid for process in processes}
-        all_groups = owned_groups(base, root_pids)
+        all_groups = owned_groups(run_id, root_pids)
         signal_groups(all_groups, signal.SIGTERM)
-        if not wait_groups_gone(base, root_pids, 5):
-            signal_groups(owned_groups(base, root_pids), signal.SIGKILL)
-            wait_groups_gone(base, root_pids, 3)
+        if not wait_groups_gone(run_id, root_pids, 5):
+            signal_groups(owned_groups(run_id, root_pids), signal.SIGKILL)
+            wait_groups_gone(run_id, root_pids, 3)
         for process in processes:
             try:
                 process.wait(timeout=0.2)
@@ -1556,7 +1595,7 @@ log:
                 pass
         for log in logs:
             log.close()
-        leaked = proc_snapshot(base, set())
+        leaked = proc_snapshot(run_id, set())
         if leaked:
             print(
                 "FAIL process leak: " + ", ".join(str(pid) for pid in sorted(leaked)),

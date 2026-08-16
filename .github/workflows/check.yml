@@ -1,0 +1,39 @@
+name: Hermetic repository checks
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - feat/**
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    steps:
+      - name: Check out source
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.0
+      - name: Install Nix
+        uses: cachix/install-nix-action@ba0dd844c9180cbf77aa72a116d6fbc515d0e87b # v31
+        with:
+          extra_nix_config: |
+            extra-experimental-features = nix-command flakes
+      - name: Preflight unprivileged user and network namespaces
+        run: |
+          set -euo pipefail
+          unshare="$(command -v unshare || true)"
+          ip="$(command -v ip || true)"
+          if [ -z "$unshare" ] || [ -z "$ip" ]; then
+            echo "::error::namespace preflight requires packaged or system unshare and ip commands; PATH=$PATH" >&2
+            exit 1
+          fi
+          if ! "$unshare" --user --map-root-user --net "$ip" link set lo up; then
+            echo "::error::unprivileged user or network namespaces are unavailable; enable CONFIG_USER_NS and allow unshare --user --net on this runner" >&2
+            exit 1
+          fi
+      - run: make check
+        name: Run complete repository check

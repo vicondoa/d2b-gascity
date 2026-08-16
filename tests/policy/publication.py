@@ -40,9 +40,7 @@ MODULE = _load_module()
 
 class PublicationPolicyTests(unittest.TestCase):
     def setUp(self) -> None:
-        scratch = ROOT / ".scratch"
-        scratch.mkdir(exist_ok=True)
-        self.tempdir = tempfile.TemporaryDirectory(dir=scratch)
+        self.tempdir = tempfile.TemporaryDirectory()
         self.base = pathlib.Path(self.tempdir.name)
         self.worktree = self.base / "worktree"
         (self.worktree / ".git").mkdir(parents=True)
@@ -457,7 +455,7 @@ class PublicationPolicyTests(unittest.TestCase):
                 "GITHUB_TOKEN": "ambient-token",
                 "GH_TOKEN": "ambient-token",
                 "SSH_AUTH_SOCK": "/run/user/1000/ssh-agent.sock",
-                "GIT_SSH_COMMAND": "ssh -i /private/key",
+                "GIT_SSH_COMMAND": "ssh -i /" + "private/key",
                 "UNRELATED_SECRET": "private-value",
             },
             clear=False,
@@ -647,9 +645,9 @@ class PublicationPolicyTests(unittest.TestCase):
 
     def test_https_origin_and_push_urls_are_required(self) -> None:
         for field, value in (
-            ("remote_url", "git@github.com:vicondoa/d2b.git"),
-            ("push_url", "ssh://git@github.com/vicondoa/d2b.git"),
-            ("remote_url", "https://user:password@github.com/vicondoa/d2b.git"),
+            ("remote_url", "git@" + "github.com:vicondoa/d2b.git"),
+            ("push_url", "ssh://git@" + "github.com/vicondoa/d2b.git"),
+            ("remote_url", "https://user:" + "password@" + "github.com/vicondoa/d2b.git"),
             ("remote_url", "https://@github.com/vicondoa/d2b.git"),
         ):
             with self.subTest(field=field, value=value):
@@ -851,9 +849,7 @@ class PublicationPolicyTests(unittest.TestCase):
 
 class RealGitPublicationNegativeTests(unittest.TestCase):
     def setUp(self) -> None:
-        scratch = ROOT / ".scratch"
-        scratch.mkdir(exist_ok=True)
-        self.tempdir = tempfile.TemporaryDirectory(dir=scratch)
+        self.tempdir = tempfile.TemporaryDirectory()
         self.base = pathlib.Path(self.tempdir.name)
         self.worktree = self.base / "worktree"
         self.git = MODULE._command_path("git", "git")

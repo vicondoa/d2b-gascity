@@ -354,7 +354,7 @@ class CompositionPolicyTests(unittest.TestCase):
     def test_resolved_publication_step_reaches_local_asset(self) -> None:
         gc = shutil.which("gc")
         self.assertIsNotNone(gc, "gc is required to resolve the pinned Pack graph")
-        with tempfile.TemporaryDirectory(dir=ROOT / ".scratch") as temp:
+        with tempfile.TemporaryDirectory() as temp:
             resolved_city = pathlib.Path(temp) / "city"
             shutil.copytree(CITY, resolved_city)
             result = subprocess.run(
@@ -403,8 +403,7 @@ class CompositionPolicyTests(unittest.TestCase):
         fixture = json.loads(WORKTREE_FIXTURE.read_text(encoding="utf-8"))
         remote_spec = fixture["remote"]
         target = fixture["target"]
-        base = ROOT / ".scratch" / f"u6-worktree-{uuid.uuid4().hex}"
-        base.mkdir(parents=True)
+        base = pathlib.Path(tempfile.mkdtemp(prefix=f"u6-worktree-{uuid.uuid4().hex}-"))
         try:
             remote = base / "remote.git"
             seed = base / "seed"
@@ -468,8 +467,9 @@ class CompositionPolicyTests(unittest.TestCase):
         fixture = json.loads(WORKTREE_FIXTURE.read_text(encoding="utf-8"))
         remote_spec = fixture["remote"]
         target = fixture["target"]
-        base = ROOT / ".scratch" / f"u6-worktree-negative-{uuid.uuid4().hex}"
-        base.mkdir(parents=True)
+        base = pathlib.Path(
+            tempfile.mkdtemp(prefix=f"u6-worktree-negative-{uuid.uuid4().hex}-")
+        )
         try:
             remote = base / "remote.git"
             seed = base / "seed"

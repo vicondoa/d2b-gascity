@@ -29,9 +29,7 @@ TOKEN = "fixture-discord-token-not-for-output"
 
 class DiscordImportTests(unittest.TestCase):
     def setUp(self) -> None:
-        scratch = ROOT / ".scratch"
-        scratch.mkdir(exist_ok=True)
-        self.tempdir = tempfile.TemporaryDirectory(dir=scratch)
+        self.tempdir = tempfile.TemporaryDirectory()
         self.base = pathlib.Path(self.tempdir.name)
         self.state = self.base / "state"
         self.city = self.base / "city"

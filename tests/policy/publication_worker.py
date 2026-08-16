@@ -45,9 +45,7 @@ MODULE = _load_module()
 
 class PublicationWorkerTests(unittest.TestCase):
     def setUp(self) -> None:
-        scratch = ROOT / ".scratch"
-        scratch.mkdir(exist_ok=True)
-        self.tempdir = tempfile.TemporaryDirectory(dir=scratch)
+        self.tempdir = tempfile.TemporaryDirectory()
         self.base = pathlib.Path(self.tempdir.name)
         self.rig = self.base / "rig"
         self.rig.mkdir()

@@ -18,7 +18,9 @@ import unittest
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts" / "copilot-provider.py"
 FAKE_COPILOT = ROOT / "tests" / "fixtures" / "acp" / "fake_copilot.py"
-SCRATCH = ROOT / ".scratch"
+SCRATCH = pathlib.Path(
+    os.environ.get("D2B_GASCITY_CHECK_RUN_ROOT", tempfile.gettempdir())
+)
 
 
 class CopilotAcceptanceTests(unittest.TestCase):
@@ -36,6 +38,7 @@ class CopilotAcceptanceTests(unittest.TestCase):
         self.credential = self.base / "copilot-token"
         self.credential.write_text("fixture-token\n", encoding="ascii")
         os.chmod(self.credential, 0o600)
+        self.canary = self.base / "forbidden-action-canary"
         self.fake = self.base / "bin" / "copilot"
         self.fake.parent.mkdir()
         shutil.copy2(FAKE_COPILOT, self.fake)
@@ -52,6 +55,7 @@ class CopilotAcceptanceTests(unittest.TestCase):
                 "AWS_SECRET_ACCESS_KEY": "must-not-reach-child",
                 "GC_HOME": str(self.base / "gc"),
                 "XDG_CONFIG_HOME": str(self.base / "config"),
+                "D2B_ACP_CANARY": str(self.canary),
             }
         )
         (self.base / "credentials").mkdir()
@@ -411,6 +415,27 @@ class CopilotAcceptanceTests(unittest.TestCase):
         self.assertNotIn("fixture-token", result.stdout)
         self.assertNotIn("fixture-token", result.stderr)
         self.assertNotIn("fixture-token", selection.read_text(encoding="utf-8"))
+
+    def test_prompt_injection_cannot_disclose_credentials_or_bypass_authority(self) -> None:
+        selection = self.base / "provider-selection.json"
+        self.mode_file.write_text("prompt-injection\n", encoding="ascii")
+        result = self._run("readiness", selection=selection)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        combined = result.stdout + result.stderr + selection.read_text(encoding="utf-8")
+        self.assertNotIn("fixture-token", combined)
+        self.assertNotIn("git push", combined)
+        event = self._events()[0]
+        self.assertNotIn("fixture-token", json.dumps(event, sort_keys=True))
+        protected = event["protected_action"]
+        self.assertEqual(protected["action"], "shell(git push --force)")
+        self.assertEqual(protected["result"], "rejected")
+        self.assertFalse(protected["authority_granted"])
+        self.assertIn("denied by", protected["rejection"])
+        self.assertNotIn("gh", protected["available_tools"])
+        self.assertNotIn("publication", protected["available_tools"])
+        self.assertFalse(self.canary.exists())
+        self.assertFalse(event["settings"]["sandbox"]["allowBypass"])
+        self.assertIn("--deny-tool", event["argv"])
 
     def test_process_group_is_cleaned_on_signal(self) -> None:
         self.mode_file.write_text("linger\n", encoding="ascii")

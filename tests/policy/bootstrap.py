@@ -13,9 +13,6 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 
 
 class BootstrapCleanupPolicyTests(unittest.TestCase):
-    def setUp(self) -> None:
-        (ROOT / ".scratch").mkdir(exist_ok=True)
-
     def _args(self, base: pathlib.Path) -> argparse.Namespace:
         return argparse.Namespace(
             state_root=base / "state",
@@ -34,7 +31,7 @@ class BootstrapCleanupPolicyTests(unittest.TestCase):
         )
 
     def test_failed_init_best_effort_stops_and_preserves_original_error(self) -> None:
-        with tempfile.TemporaryDirectory(dir=ROOT / ".scratch") as raw:
+        with tempfile.TemporaryDirectory() as raw:
             base = pathlib.Path(raw)
             args = self._args(base)
             calls: list[str] = []
@@ -59,6 +56,10 @@ class BootstrapCleanupPolicyTests(unittest.TestCase):
                 ),
                 mock.patch.object(MODULE, "_configure_dolt_identity"),
                 mock.patch.object(MODULE, "_seed_pack_cache"),
+                mock.patch.object(MODULE, "_ensure_dolt_schema", return_value=None),
+                mock.patch.object(MODULE, "_prepare_rig"),
+                mock.patch.object(MODULE, "_initialize_rig_beads"),
+                mock.patch.object(MODULE, "_site_binding"),
                 mock.patch.object(MODULE, "_run", side_effect=run),
                 mock.patch.object(MODULE, "_best_effort_stop") as stop,
             ):
@@ -69,10 +70,17 @@ class BootstrapCleanupPolicyTests(unittest.TestCase):
                     MODULE._init(args)
 
             stop.assert_called_once_with(args.gc, args.city, env=mock.ANY)
-            self.assertEqual(calls, ["gc init --file --preserve-existing --no-start", "gc import install"])
+            self.assertEqual(
+                calls,
+                [
+                    "gc init --file --preserve-existing --no-start",
+                    "gc rig add",
+                    "gc import install",
+                ],
+            )
 
     def test_successful_init_still_reports_cleanup_failure(self) -> None:
-        with tempfile.TemporaryDirectory(dir=ROOT / ".scratch") as raw:
+        with tempfile.TemporaryDirectory() as raw:
             base = pathlib.Path(raw)
             args = self._args(base)
 
@@ -95,7 +103,9 @@ class BootstrapCleanupPolicyTests(unittest.TestCase):
                 ),
                 mock.patch.object(MODULE, "_configure_dolt_identity"),
                 mock.patch.object(MODULE, "_seed_pack_cache"),
+                mock.patch.object(MODULE, "_ensure_dolt_schema", return_value=None),
                 mock.patch.object(MODULE, "_prepare_rig"),
+                mock.patch.object(MODULE, "_initialize_rig_beads"),
                 mock.patch.object(MODULE, "_site_binding"),
                 mock.patch.object(MODULE, "_run", side_effect=run),
                 mock.patch.object(MODULE, "_best_effort_stop") as stop,
@@ -107,6 +117,13 @@ class BootstrapCleanupPolicyTests(unittest.TestCase):
                     MODULE._init(args)
 
             stop.assert_not_called()
+
+    def test_init_uses_managed_dolt_readiness_timeout_without_fixture_retry(self) -> None:
+        source = (ROOT / "scripts" / "bootstrap.py").read_text(encoding="utf-8")
+        self.assertIn("GC_DOLT_CONCURRENT_START_READY_TIMEOUT_MS", source)
+        self.assertIn("DOLT_START_READY_TIMEOUT_MS", source)
+        self.assertNotIn("_dolt_schema_race", source)
+        self.assertNotIn("_reset_failed_init", source)
 
 
 if __name__ == "__main__":

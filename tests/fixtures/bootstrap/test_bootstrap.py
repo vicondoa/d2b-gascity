@@ -16,6 +16,9 @@ import unittest
 ROOT = pathlib.Path(__file__).resolve().parents[3]
 BOOTSTRAP = ROOT / "scripts" / "bootstrap.py"
 PACK_CACHE = os.environ.get("U3_PACK_CACHE")
+SCRATCH = pathlib.Path(
+    os.environ.get("D2B_GASCITY_CHECK_RUN_ROOT", tempfile.gettempdir())
+)
 
 
 def packaged_binary(name: str) -> pathlib.Path | None:
@@ -44,11 +47,10 @@ class BootstrapFixtureTests(unittest.TestCase):
             if not cls.pack_cache.is_dir():
                 raise RuntimeError("U3_PACK_CACHE does not name a directory")
         else:
-            scratch = ROOT / ".scratch"
-            scratch.mkdir(exist_ok=True)
+            SCRATCH.mkdir(mode=0o700, parents=True, exist_ok=True)
             cls.cache_temp = tempfile.TemporaryDirectory(
                 prefix="d2b-gascity-u3-cache-",
-                dir=scratch,
+                dir=SCRATCH,
             )
             cache_root = pathlib.Path(cls.cache_temp.name)
             city = cache_root / "city"
@@ -85,7 +87,7 @@ class BootstrapFixtureTests(unittest.TestCase):
 
     def setUp(self) -> None:
         short_name = hashlib.sha1(self._testMethodName.encode(), usedforsecurity=False).hexdigest()[:10]
-        self.base = ROOT / ".scratch" / "u3b" / short_name
+        self.base = SCRATCH / "bootstrap" / short_name
         shutil.rmtree(self.base, ignore_errors=True)
         self.base.mkdir(parents=True)
         self.state = self.base / "state"
@@ -121,6 +123,14 @@ class BootstrapFixtureTests(unittest.TestCase):
                 "GC_SUPERVISOR_LOG_TEE": "0",
                 "GC_DOLT_PORT": str(self.dolt_port),
             }
+        )
+        subprocess.run(
+            [str(self.gc.parent / "bd"), "metrics", "off"],
+            cwd=ROOT,
+            env=self.env,
+            text=True,
+            capture_output=True,
+            check=False,
         )
 
     def tearDown(self) -> None:
@@ -165,13 +175,14 @@ class BootstrapFixtureTests(unittest.TestCase):
             str(self.cache),
             *extra,
         ]
-        return subprocess.run(
+        result = subprocess.run(
             command,
             cwd=ROOT,
             env=self.env,
             text=True,
             capture_output=True,
         )
+        return result
 
     def _make_fake_d2b_repository(self) -> pathlib.Path:
         work = self.base / "d2b-source"

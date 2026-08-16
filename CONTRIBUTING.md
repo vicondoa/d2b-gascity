@@ -35,14 +35,29 @@ Run the smallest relevant validation for the files changed. Before staging,
 inspect `git status --short`, the staged file list, and the complete diff.
 Check that no ignored or untracked runtime artifact is being included.
 
+## Checks
+
+The complete local gate is:
+
+```bash
+make check
+```
+
+The repository-local runner owns deterministic discovery, one contributor
+runtime, the U3 pack cache, ingress namespace execution, scratch cleanup, and
+process-leak detection. Use `make test-policy`, `make test-fixtures`,
+`make test-ingress`, `make test-generated`, `make test-privacy`, or
+`make check-nix` when narrowing a failure. See [docs/testing.md](docs/testing.md)
+for the Nix-sandbox boundary and manual credential-backed acceptance.
+
 Evidence must be redacted and limited to revisions, safe counts, timings,
 and pass or fail results. Never commit live prompts or responses, tokens,
 cookies, host-specific values, service environments, private databases,
 private worktrees, or unredacted logs.
 
-For the initial governance scaffold, read-only shell checks are the
-replacement verification. A committed privacy script is not required until
-a later unit introduces behavior that needs one.
+The repository-local privacy scanner is enforcing. Generic fixtures and
+RFC1918/RFC5737 addresses are allowed only in tests; live credentials and
+host-private values remain manual and must never enter evidence.
 
 ## Model lanes
 
