@@ -45,6 +45,9 @@ and this project follows semantic versioning where releases are published.
 - Added a stateless ACP identity deployment shim that seeds upstream-compatible
   session metadata under the service's private `TMPDIR` before slow Copilot
   handshakes without patching Gas City.
+- Added a native systemd-socket-proxyd compatibility route for upstream #5262,
+  forwarding the standalone CLI API endpoint to the supervisor without an
+  upstream patch or a second lifecycle owner.
 
 ### Changed
 
@@ -68,3 +71,5 @@ and this project follows semantic versioning where releases are published.
 - Kept the pinned Gas City source and package unpatched; the ACP shim is
   deployment-owned until upstream identity seeding supersedes it. Related
   orphan behavior is tracked by upstream #4714.
+- Restricted the standalone API compatibility listener to loopback and uid
+  41080, and documented removal once upstream identity-aware routing lands.

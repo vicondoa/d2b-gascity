@@ -26,6 +26,17 @@ secrets or private deployment data in the report.
   not gain authority to update, merge, force, or bypass protection on that
   branch.
 
+## Local API compatibility boundary
+
+The standalone API compatibility shim for upstream #5262 listens only on
+`127.0.0.1:18372` and forwards bytes to the supervisor at
+`127.0.0.1:8372` with native `systemd-socket-proxyd`. The nftables output rule
+admits only uid 41080. Ordinary host users therefore cannot use this route to
+bypass dashboard authentication. The shim is not public ingress and is not a
+Gas City lifecycle owner: it never starts, stops, or reconciles the
+supervisor. Do not widen its bind, UID gate, or role. Remove it when upstream
+identity-aware routing is available.
+
 ## Protected data
 
 Never commit or attach:

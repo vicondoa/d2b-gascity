@@ -16,6 +16,24 @@ d2b-gascity.service
   GC_SUPERVISOR_SYSTEMD_SCOPE=system
 ```
 
+The module also declares a socket-activated API compatibility proxy. It is
+deployment infrastructure, not a second Gas City lifecycle owner:
+
+```text
+uid 41080 CLI process
+  -> 127.0.0.1:18372
+       d2b-gascity-api-proxy.socket
+         d2b-gascity-api-proxy.service
+           systemd-socket-proxyd
+             -> 127.0.0.1:8372
+```
+
+This byte-forwarding route is the no-upstream-patch compatibility shim for
+upstream #5262. The proxy runs as `d2b-gascity` and never starts, stops, or
+reconciles the supervisor. An nftables output rule permits only uid 41080 to
+connect to port 18372, so it is not a host-wide local API or dashboard ingress.
+Remove it when upstream provides identity-aware standalone API routing.
+
 `KillMode=control-group` makes the service cgroup the ownership boundary for
 the supervisor and all of its upstream-managed children. The module does not
 declare a Dolt unit, dashboard unit, controller unit, Discord unit, ACP unit,
@@ -52,6 +70,17 @@ dashboard mode requires a host-supplied hostname, which is emitted as the sole
 `allowed_hosts` entry. The generated file never sets `allowed_origins`,
 `allow_mutations`, `write_auth_*`, or `read_auth_*`. There is no non-loopback
 supervisor option.
+
+The portable city also contains:
+
+```toml
+[api]
+bind = "127.0.0.1"
+port = 18372
+```
+
+This is the standalone CLI endpoint used by the compatibility route. The
+supervisor may ignore this city API port and continues to own 8372.
 
 Managed Dolt uses upstream dynamic allocation by default. A fixed
 `dolt.fixedPort` is optional; when selected, it must be distinct from every
@@ -185,7 +214,8 @@ Both relay listener ports are admitted only on the configured interface and
 trusted external proxy CIDRs. Nginx evaluates a source-admission `geo` map in
 rewrite phase before Host handling and retains `allow`/`deny` as defense in
 depth. A loopback owner policy permits the supervisor port to be reached by
-the Gas City identity and relay identity only. TinyAuth's raw loopback port
+the Gas City identity and relay identity only. The separate API compatibility
+port is admitted only to the Gas City uid 41080. TinyAuth's raw loopback port
 accepts connections only from the relay identity. The shared Gas City identity
 remains a deliberate trust boundary because upstream children legitimately use
 the supervisor API.

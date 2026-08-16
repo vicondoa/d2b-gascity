@@ -12,6 +12,7 @@ let
   cacheRoot = "${stateRoot}/cache";
   runtimeRoot = "/run/d2b-gascity";
   supervisorPort = 8372;
+  apiProxyPort = 18372;
   effectivePackage = if cfg.package == null then pkgs.hello else cfg.package;
   packagePath = toString effectivePackage;
 
@@ -88,6 +89,7 @@ ${remoteInputRules}
       chain output {
         type filter hook output priority 0; policy accept;
         oifname "lo" tcp dport ${toString supervisorPort} meta skuid != { 41080${lib.optionalString cfg.dashboard.remote.enable ", 41081"} } drop
+        oifname "lo" tcp dport ${toString apiProxyPort} meta skuid != 41080 drop
 ${remoteOutputRules}
 ${lib.optionalString (cfg.dolt.fixedPort != null)
   ''        oifname "lo" tcp dport ${toString cfg.dolt.fixedPort} meta skuid != 41080 drop
@@ -233,6 +235,51 @@ in
           "GC_DOLT_PORT=${toString cfg.dolt.fixedPort}";
 
         LoadCredential = credentials;
+      };
+    };
+
+    systemd.sockets.d2b-gascity-api-proxy = {
+      description = "Gas City standalone API compatibility proxy socket";
+      wantedBy = [ "sockets.target" ];
+      listenStreams = [ "127.0.0.1:${toString apiProxyPort}" ];
+    };
+
+    systemd.services.d2b-gascity-api-proxy = {
+      description = "Gas City standalone API compatibility proxy";
+      after = [ "d2b-gascity-api-proxy.socket" ];
+      serviceConfig = {
+        Type = "exec";
+        User = "d2b-gascity";
+        Group = "d2b-gascity";
+        ExecStart =
+          "${pkgs.systemd}/lib/systemd/systemd-socket-proxyd 127.0.0.1:${toString supervisorPort}";
+        Restart = "on-failure";
+        RestartSec = "5s";
+        TimeoutStartSec = "30s";
+        TimeoutStopSec = "30s";
+        KillMode = "control-group";
+        LimitNOFILE = 4096;
+
+        AmbientCapabilities = [ "" ];
+        CapabilityBoundingSet = [ "" ];
+        NoNewPrivileges = true;
+        PrivateTmp = true;
+        PrivateDevices = true;
+        ProtectHome = true;
+        ProtectSystem = "strict";
+        ProtectKernelTunables = true;
+        ProtectKernelModules = true;
+        ProtectKernelLogs = true;
+        ProtectKernelKeyring = true;
+        ProtectControlGroups = true;
+        ProtectClock = true;
+        ProtectHostname = true;
+        ProtectProc = "invisible";
+        ProcSubset = "pid";
+        RestrictSUIDSGID = true;
+        LockPersonality = true;
+        UMask = "0077";
+        RestrictAddressFamilies = [ "AF_UNIX" "AF_INET" "AF_INET6" ];
       };
     };
   };

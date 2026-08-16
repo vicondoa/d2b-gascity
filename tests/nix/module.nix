@@ -46,6 +46,8 @@ let
 
   core = (mkEval coreConfig).config;
   main = core.systemd.services.d2b-gascity.serviceConfig;
+  apiProxy = core.systemd.services.d2b-gascity-api-proxy.serviceConfig;
+  apiProxySocket = core.systemd.sockets.d2b-gascity-api-proxy;
   coreSupervisorText = core.environment.etc."d2b-gascity/supervisor.toml".text;
   invalidFirewallDisabled = (mkEval {
     networking.firewall.enable = false;
@@ -80,6 +82,14 @@ let
     };
   }).config;
   fixedPortMain = fixedPort.systemd.services.d2b-gascity.serviceConfig;
+
+  invalidApiProxyPort = (mkEval {
+    services.d2bGasCity = {
+      enable = true;
+      package = testPackage;
+      dolt.fixedPort = 18372;
+    };
+  }).config;
 
   remoteConfig = {
     services.d2bGasCity = {
@@ -250,7 +260,8 @@ in
     assert !(disabled.networking.firewall.interfaces ? lo);
     true;
 
-  core = assert coreD2bUnits == [ "d2b-gascity" ];
+  core = assert coreD2bUnits
+    == [ "d2b-gascity" "d2b-gascity-api-proxy" ];
     assert core.networking.firewall.enable;
     assert core.networking.firewall.backend == "iptables";
     assert !(core.networking.nftables.enable or false);
@@ -274,6 +285,9 @@ in
     assert lib.hasInfix "type filter hook output priority 0; policy accept;"
       core.networking.firewall.extraCommands;
     assert lib.hasInfix "tcp dport 8372 meta skuid != { 41080 } drop"
+      core.networking.firewall.extraCommands;
+    assert lib.hasInfix
+      "tcp dport 18372 meta skuid != 41080 drop"
       core.networking.firewall.extraCommands;
     assert !(lib.hasInfix "iifname"
       core.networking.firewall.extraCommands);
@@ -339,6 +353,46 @@ in
     assert !(core.services.d2bGasCity ? supervisor);
     assert lib.hasInfix "bind = \"127.0.0.1\"" coreSupervisorText;
     assert lib.hasInfix "port = 8372" coreSupervisorText;
+    assert apiProxy.ExecStart
+      == "${pkgs.systemd}/lib/systemd/systemd-socket-proxyd 127.0.0.1:8372";
+    assert apiProxy.User == "d2b-gascity";
+    assert apiProxy.Group == "d2b-gascity";
+    assert apiProxy.Restart == "on-failure";
+    assert apiProxy.KillMode == "control-group";
+    assert apiProxy.NoNewPrivileges;
+    assert apiProxy.PrivateTmp;
+    assert apiProxy.PrivateDevices;
+    assert apiProxy.ProtectHome;
+    assert apiProxy.ProtectSystem == "strict";
+    assert apiProxy.ProtectKernelTunables;
+    assert apiProxy.ProtectKernelModules;
+    assert apiProxy.ProtectKernelLogs;
+    assert apiProxy.ProtectKernelKeyring;
+    assert apiProxy.ProtectControlGroups;
+    assert apiProxy.ProtectClock;
+    assert apiProxy.ProtectHostname;
+    assert apiProxy.ProtectProc == "invisible";
+    assert apiProxy.ProcSubset == "pid";
+    assert apiProxy.RestrictSUIDSGID;
+    assert apiProxy.LockPersonality;
+    assert apiProxy.UMask == "0077";
+    assert apiProxy.AmbientCapabilities == [ "" ];
+    assert apiProxy.CapabilityBoundingSet == [ "" ];
+    assert apiProxy.RestrictAddressFamilies
+      == [ "AF_UNIX" "AF_INET" "AF_INET6" ];
+    assert apiProxySocket.listenStreams == [ "127.0.0.1:18372" ];
+    assert apiProxySocket.wantedBy == [ "sockets.target" ];
+    assert !(lib.hasInfix "d2b-gascity.service"
+      (stringValue (apiProxy.requires or [ ])));
+    assert !(lib.hasInfix "d2b-gascity.service"
+      (stringValue (apiProxy.wants or [ ])));
+    assert !(lib.hasInfix "d2b-gascity.service"
+      (stringValue (apiProxy.after or [ ])));
+    assert !(lib.hasInfix "d2b-gascity.service"
+      (stringValue (apiProxy.bindsTo or [ ])));
+    assert !(lib.hasInfix "d2b-gascity.service"
+      (stringValue (apiProxy.partOf or [ ])));
+    assert (apiProxySocket.unitConfig.PartOf or null) == null;
     true;
 
   "without-copilot" = assert (noCopilotMain.ExecStartPre or [ ]) == [ ];
@@ -356,7 +410,12 @@ in
     true;
 
   remote = assert remoteD2bUnits
-    == [ "d2b-gascity" "d2b-gascity-relay" "d2b-gascity-tinyauth" ];
+    == [
+      "d2b-gascity"
+      "d2b-gascity-api-proxy"
+      "d2b-gascity-relay"
+      "d2b-gascity-tinyauth"
+    ];
     assert (remote.systemd.services.d2b-gascity-relay.unitConfig.PartOf or null) == null;
     assert (remote.systemd.services.d2b-gascity-tinyauth.unitConfig.PartOf or null) == null;
     assert !(lib.hasInfix "d2b-gascity.service"
@@ -486,6 +545,9 @@ in
       remote.networking.firewall.extraCommands;
     assert lib.hasInfix "tcp dport 8372 meta skuid != { 41080, 41081 } drop"
       remote.networking.firewall.extraCommands;
+    assert lib.hasInfix
+      "tcp dport 18372 meta skuid != 41080 drop"
+      remote.networking.firewall.extraCommands;
     assert (remote.networking.firewall.extraStopCommands or "") == "";
     assert !(lib.hasInfix "flush ruleset"
       remote.networking.firewall.extraCommands);
@@ -529,6 +591,11 @@ in
   "invalid-remote-port" = assert hasFailedAssertion
     "ports"
     invalidRemotePort.assertions;
+    true;
+
+  "invalid-api-proxy-port" = assert hasFailedAssertion
+    "ports"
+    invalidApiProxyPort.assertions;
     true;
 
   "invalid-relay-address" = assert hasFailedAssertion

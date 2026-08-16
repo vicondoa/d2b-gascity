@@ -15,6 +15,27 @@ reconciliation using the machine-local site binding. Ordinary start must not
 copy the prototype, rewrite portable files, or create a second user
 supervisor.
 
+### Standalone CLI API compatibility
+
+Upstream #5262 can classify the supervisor-hosted controller socket as a
+standalone endpoint when `gc session submit` runs in a separate CLI process.
+The deployment therefore keeps the portable city configuration pointed at a
+loopback compatibility endpoint:
+
+```toml
+[api]
+bind = "127.0.0.1"
+port = 18372
+```
+
+The NixOS module socket-activates native
+`systemd-socket-proxyd` on `127.0.0.1:18372` and forwards bytes to the
+supervisor's `127.0.0.1:8372` listener. Only uid 41080 may connect through the
+loopback output firewall rule. The proxy has no lifecycle relationship with
+`d2b-gascity.service`: it does not start, stop, or supervise Gas City, and it
+is not the public or authenticated dashboard ingress. Remove this shim when
+upstream identity-aware routing lands.
+
 The U3 operator check is explicit-path and state-preserving. If the supervisor
 was stopped when the check began, a successful check enforces a stopped city
 and a failed check best-effort restores it; a supervisor already running under

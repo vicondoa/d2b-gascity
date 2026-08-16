@@ -28,6 +28,11 @@ class PortableConfigTests(unittest.TestCase):
     def test_city_has_one_pathless_d2b_rig(self) -> None:
         config = tomllib.loads((CITY / "city.toml").read_text())
         self.assertEqual(
+            config["api"],
+            {"bind": "127.0.0.1", "port": 18372},
+        )
+        self.assertNotIn("allow_mutations", (CITY / "city.toml").read_text())
+        self.assertEqual(
             config["workspace"],
             {"provider": "copilot-review"},
         )

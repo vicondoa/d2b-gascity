@@ -3,6 +3,7 @@ from __future__ import annotations
 import pathlib
 import re
 import subprocess
+import tomllib
 import unittest
 
 
@@ -70,6 +71,72 @@ class DashboardTopologyTests(unittest.TestCase):
         for forbidden in ("allowed_origins", "allow_mutations", "write_auth_", "read_auth_"):
             self.assertNotIn(forbidden, read("nixos-modules/default.nix"))
         self.assertIn("forbidden not in config_text", fixture)
+
+    def test_api_proxy_is_native_loopback_compatibility_infrastructure(self) -> None:
+        module = read("nixos-modules/default.nix")
+        options = read("nixos-modules/options.nix")
+        city_text = read("city/city.toml")
+        city = tomllib.loads(city_text)
+
+        self.assertIn("apiProxyPort = 18372", options)
+        self.assertIn("systemd.sockets.d2b-gascity-api-proxy", module)
+        self.assertIn("systemd.services.d2b-gascity-api-proxy", module)
+        self.assertIn(
+            "${pkgs.systemd}/lib/systemd/systemd-socket-proxyd",
+            module,
+        )
+        self.assertIn(
+            'listenStreams = [ "127.0.0.1:${toString apiProxyPort}" ]',
+            module,
+        )
+        self.assertIn("apiProxyPort = 18372", module)
+        proxy = module.split("systemd.services.d2b-gascity-api-proxy", 1)[1]
+        for needle in (
+            'User = "d2b-gascity";',
+            'Group = "d2b-gascity";',
+            "NoNewPrivileges = true;",
+            "PrivateTmp = true;",
+            "PrivateDevices = true;",
+            'ProtectSystem = "strict";',
+            "ProtectKernelTunables = true;",
+            "ProtectKernelModules = true;",
+            "ProtectKernelLogs = true;",
+            "ProtectKernelKeyring = true;",
+            "ProtectControlGroups = true;",
+            "ProtectClock = true;",
+            "ProtectHostname = true;",
+            'ProtectProc = "invisible";',
+            'ProcSubset = "pid";',
+            "RestrictSUIDSGID = true;",
+            "LockPersonality = true;",
+            'UMask = "0077";',
+            'RestrictAddressFamilies = [ "AF_UNIX" "AF_INET" "AF_INET6" ];',
+        ):
+            self.assertIn(needle, proxy, needle)
+        self.assertNotIn("gc supervisor run", proxy)
+        for lifecycle_edge in ("Requires", "Wants", "BindsTo", "PartOf"):
+            self.assertNotIn(lifecycle_edge, proxy, lifecycle_edge)
+        self.assertIn("supervisorPort = 8372", module)
+        self.assertIn(
+            '"${pkgs.systemd}/lib/systemd/systemd-socket-proxyd '
+            '127.0.0.1:${toString supervisorPort}"',
+            module,
+        )
+        self.assertIn(
+            'oifname "lo" tcp dport ${toString apiProxyPort} '
+            'meta skuid != 41080 drop',
+            module,
+        )
+        self.assertNotIn("socat", module.lower())
+        self.assertNotIn("allow_mutations", city_text)
+        self.assertEqual(
+            city["api"],
+            {"bind": "127.0.0.1", "port": 18372},
+        )
+        self.assertNotRegex(
+            module,
+            r"d2b-gascity-api-proxy[^\n]*(?:Requires|BindsTo|PartOf).*d2b-gascity",
+        )
 
     def test_firewall_owns_only_the_gas_city_nft_table(self) -> None:
         module = read("nixos-modules/default.nix")

@@ -14,6 +14,8 @@ Focused commands are available for `make test-policy`, `make test-fixtures`,
 fixture. `make test-vm` builds the named
 `vmChecks.x86_64-linux.d2b-gascity` output and is intentionally outside the
 default cross-system flake checks.
+The fixture suite also starts native `systemd-socket-proxyd` with a local
+credential-free HTTP backend and checks method/body and SSE forwarding.
 
 The Nix checks cover deterministic generated drift, tracked-file privacy, and
 static workflow policy. Bootstrap and ingress fixtures that need package

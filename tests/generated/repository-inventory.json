@@ -67,6 +67,7 @@
       "tests/acceptance/rollback.py",
       "tests/fixtures/acp/__init__.py",
       "tests/fixtures/acp/fake_copilot.py",
+      "tests/fixtures/api_proxy/test_api_proxy.py",
       "tests/fixtures/bootstrap/test_bootstrap.py",
       "tests/fixtures/composition/resolved-agents.json",
       "tests/fixtures/discord/__init__.py",
@@ -231,6 +232,10 @@
       "role": "helper/fixture data"
     },
     {
+      "path": "tests/fixtures/api_proxy/test_api_proxy.py",
+      "role": "executed fixture"
+    },
+    {
       "path": "tests/fixtures/bootstrap/test_bootstrap.py",
       "role": "executed fixture"
     },
@@ -374,6 +379,7 @@
     "tests/acceptance/rollback.py",
     "tests/fixtures/acp/__init__.py",
     "tests/fixtures/acp/fake_copilot.py",
+    "tests/fixtures/api_proxy/test_api_proxy.py",
     "tests/fixtures/bootstrap/test_bootstrap.py",
     "tests/fixtures/composition/resolved-agents.json",
     "tests/fixtures/discord/__init__.py",

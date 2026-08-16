@@ -23,6 +23,10 @@ external TLS/OpenResty host
         proxy_pass  -> 127.0.0.1:8375
 ```
 
+The standalone CLI compatibility socket at `127.0.0.1:18372` is not part of
+this dashboard topology. It is a uid-41080-only byte-forwarding route for
+upstream #5262 and is never a public or dashboard ingress.
+
 The dashboard listener is the only listener that forwards to Gas City. The
 auth listener exposes TinyAuth root-relative login, logout, asset, and API
 routes. `auth.gascity.example.test` is exactly one label below

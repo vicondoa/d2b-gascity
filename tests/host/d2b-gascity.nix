@@ -32,6 +32,7 @@ pkgs.testers.runNixOSTest {
   testScript = ''
     start_all()
     machine.wait_for_unit("d2b-gascity.service")
+    machine.wait_for_unit("d2b-gascity-api-proxy.socket")
 
     machine.succeed(
         "test \"$(systemctl show -P User d2b-gascity.service)\" = d2b-gascity"
@@ -43,13 +44,23 @@ pkgs.testers.runNixOSTest {
         "test \"$(systemctl show -P Restart d2b-gascity.service)\" = on-failure"
     )
     machine.succeed(
+        "test \"$(systemctl show -P User d2b-gascity-api-proxy.service)\" = d2b-gascity"
+    )
+    machine.succeed(
+        "test \"$(systemctl show -P Group d2b-gascity-api-proxy.service)\" = d2b-gascity"
+    )
+    machine.succeed(
+        "systemctl show -P ExecStart d2b-gascity-api-proxy.service | "
+        "grep -F -- 'systemd-socket-proxyd 127.0.0.1:8372'"
+    )
+    machine.succeed(
         "test -d /var/lib/d2b-gascity/city && "
         "test -d /var/lib/d2b-gascity/rigs/d2b && "
         "test -d /var/lib/d2b-gascity/gc"
     )
     machine.succeed(
         "test \"$(systemctl list-unit-files 'd2b-gascity*' --no-legend | "
-        "awk '{print $1}' | wc -l)\" = 1"
+        "awk '{print $1}' | wc -l)\" = 3"
     )
 
     supervisor_env = (
@@ -70,6 +81,11 @@ pkgs.testers.runNixOSTest {
     machine.wait_until_succeeds(
         as_city + "curl --fail --silent "
         "http://127.0.0.1:8372/health",
+        timeout=60,
+    )
+    machine.wait_until_succeeds(
+        as_city + "curl --fail --silent "
+        "http://127.0.0.1:18372/health",
         timeout=60,
     )
     machine.succeed(
@@ -99,6 +115,11 @@ pkgs.testers.runNixOSTest {
     machine.wait_until_succeeds(
         as_city + "curl --fail --silent "
         "http://127.0.0.1:8372/health",
+        timeout=60,
+    )
+    machine.wait_until_succeeds(
+        as_city + "curl --fail --silent "
+        "http://127.0.0.1:18372/health",
         timeout=60,
     )
     machine.succeed(

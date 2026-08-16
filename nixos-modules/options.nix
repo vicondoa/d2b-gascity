@@ -9,6 +9,8 @@ let
   path = types.nullOr types.str;
   hostname = types.nullOr (types.strMatching "^[A-Za-z0-9][A-Za-z0-9.-]{0,252}$");
   cidr = types.strMatching "^[0-9A-Fa-f:.]+/[0-9]{1,3}$";
+  supervisorPort = 8372;
+  apiProxyPort = 18372;
 
   absolutePath = value:
     lib.hasPrefix "/" value
@@ -62,7 +64,7 @@ let
       lib.splitString "." cfg.dashboard.remote.authHostname;
 
   configuredPorts =
-    [ 8372 ]
+    [ supervisorPort apiProxyPort ]
     ++ lib.optionals cfg.dashboard.remote.enable [
       cfg.dashboard.remote.relayPort
       cfg.dashboard.remote.authPort
@@ -275,7 +277,7 @@ in
         }
         {
           assertion = lib.unique configuredPorts == configuredPorts;
-          message = "Gas City supervisor, dashboard relay, auth relay, TinyAuth, and fixed Dolt ports must be distinct.";
+          message = "Gas City supervisor, API proxy, dashboard relay, auth relay, TinyAuth, and fixed Dolt ports must be distinct.";
         }
       ]
       ++ pathAssertions

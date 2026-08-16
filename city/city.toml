@@ -7,6 +7,10 @@ suspended_on_start = true
 [workspace]
 provider = "copilot-review"
 
+[api]
+bind = "127.0.0.1"
+port = 18372
+
 [rigs.imports.roles]
 source = "https://github.com/gastownhall/gascity-packs/tree/main/gascity/roles"
 version = "sha:5d2a9d023edbb9ba24fdcff554e89fc3d7da72fe"
