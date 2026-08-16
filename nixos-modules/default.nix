@@ -95,6 +95,13 @@ ${lib.optionalString (cfg.dolt.fixedPort != null)
       }
     }
   '';
+  nftBinary = "${pkgs.nftables}/bin/nft";
+  nftFirewallCommands = ''
+    ${nftBinary} -f - <<'EOF'
+destroy table inet d2b_gascity
+${nftRules}
+EOF
+  '';
 in
 {
   imports = [
@@ -103,6 +110,17 @@ in
   ];
 
   config = lib.mkIf cfg.enable {
+    assertions = [
+      {
+        assertion = config.networking.firewall.enable;
+        message = "services.d2bGasCity requires networking.firewall.enable = true.";
+      }
+      {
+        assertion = config.networking.firewall.backend == "iptables";
+        message = "services.d2bGasCity requires networking.firewall.backend = \"iptables\".";
+      }
+    ];
+
     users.groups.d2b-gascity = { };
     users.groups.d2b-gascity-operators = {
       members = cfg.operators.users;
@@ -128,8 +146,9 @@ in
         cfg.dashboard.remote.relayPort
         cfg.dashboard.remote.authPort
       ]);
-    networking.nftables.enable = true;
-    networking.nftables.ruleset = lib.mkAfter nftRules;
+    # Keep the stale table on stop: listeners disappear, so it is harmless and
+    # avoiding removal prevents a reload gap or foreign mutation.
+    networking.firewall.extraCommands = lib.mkAfter nftFirewallCommands;
 
     systemd.services.d2b-gascity = {
       description = "Standalone Gas City supervisor";

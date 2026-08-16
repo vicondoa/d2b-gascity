@@ -71,6 +71,29 @@ class DashboardTopologyTests(unittest.TestCase):
             self.assertNotIn(forbidden, read("nixos-modules/default.nix"))
         self.assertIn("forbidden not in config_text", fixture)
 
+    def test_firewall_owns_only_the_gas_city_nft_table(self) -> None:
+        module = read("nixos-modules/default.nix")
+
+        self.assertNotIn("networking.nftables.enable", module)
+        self.assertNotIn("networking.nftables.ruleset", module)
+        self.assertIn("config.networking.firewall.enable", module)
+        self.assertIn('config.networking.firewall.backend == "iptables"', module)
+        self.assertIn("networking.firewall.extraCommands", module)
+        self.assertNotIn("networking.firewall.extraStopCommands", module)
+        self.assertIn("${pkgs.nftables}/bin/nft", module)
+        self.assertIn("destroy table inet d2b_gascity", module)
+        self.assertEqual(module.count("${nftBinary} -f -"), 1)
+        self.assertIn("chain input {", module)
+        self.assertIn("chain output {", module)
+        self.assertIn("type filter hook input priority 0; policy accept;", module)
+        self.assertIn("type filter hook output priority 0; policy accept;", module)
+        self.assertNotIn("flush ruleset", module.lower())
+        self.assertNotRegex(
+            module,
+            r"delete\s+table\s+(?:ip|ip6|inet|bridge)(?!\s+d2b_gascity\b)",
+        )
+        self.assertNotIn("delete table", module)
+
     def test_split_hosts_and_complete_auth_request_listener_are_explicit(self) -> None:
         module = read("nixos-modules/ingress-relay.nix")
         fixture = read("tests/fixtures/ingress/nginx.conf.in")

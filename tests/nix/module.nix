@@ -47,6 +47,20 @@ let
   core = (mkEval coreConfig).config;
   main = core.systemd.services.d2b-gascity.serviceConfig;
   coreSupervisorText = core.environment.etc."d2b-gascity/supervisor.toml".text;
+  invalidFirewallDisabled = (mkEval {
+    networking.firewall.enable = false;
+    services.d2bGasCity = {
+      enable = true;
+      package = testPackage;
+    };
+  }).config;
+  invalidNftablesBackend = (mkEval {
+    networking.firewall.backend = "nftables";
+    services.d2bGasCity = {
+      enable = true;
+      package = testPackage;
+    };
+  }).config;
   noCopilot = (mkEval {
     services.d2bGasCity = {
       enable = true;
@@ -224,6 +238,35 @@ in
     true;
 
   core = assert coreD2bUnits == [ "d2b-gascity" ];
+    assert core.networking.firewall.enable;
+    assert core.networking.firewall.backend == "iptables";
+    assert !(core.networking.nftables.enable or false);
+    assert (core.networking.nftables.ruleset or "") == "";
+    assert lib.hasInfix "destroy table inet d2b_gascity"
+      core.networking.firewall.extraCommands;
+    assert !(lib.hasInfix "delete table"
+      core.networking.firewall.extraCommands);
+    assert lib.hasInfix "/bin/nft -f -"
+      core.networking.firewall.extraCommands;
+    assert lib.length (lib.splitString "/bin/nft -f -"
+      core.networking.firewall.extraCommands) == 2;
+    assert lib.hasInfix "table inet d2b_gascity"
+      core.networking.firewall.extraCommands;
+    assert lib.hasInfix "chain input {"
+      core.networking.firewall.extraCommands;
+    assert lib.hasInfix "type filter hook input priority 0; policy accept;"
+      core.networking.firewall.extraCommands;
+    assert lib.hasInfix "chain output {"
+      core.networking.firewall.extraCommands;
+    assert lib.hasInfix "type filter hook output priority 0; policy accept;"
+      core.networking.firewall.extraCommands;
+    assert lib.hasInfix "tcp dport 8372 meta skuid != { 41080 } drop"
+      core.networking.firewall.extraCommands;
+    assert !(lib.hasInfix "iifname"
+      core.networking.firewall.extraCommands);
+    assert (core.networking.firewall.extraStopCommands or "") == "";
+    assert !(lib.hasInfix "flush ruleset"
+      core.networking.firewall.extraCommands);
     assert main.ExecStart == "${testPackage}/bin/gc supervisor run";
     assert main.User == "d2b-gascity";
     assert main.Group == "d2b-gascity";
@@ -284,9 +327,13 @@ in
 
   "fixed-port" = assert builtins.elem "GC_DOLT_PORT=8375"
     fixedPortMain.Environment;
+    assert !(fixedPort.networking.nftables.enable or false);
+    assert (fixedPort.networking.nftables.ruleset or "") == "";
+    assert fixedPort.networking.firewall.backend == "iptables";
     assert lib.hasInfix
       "tcp dport 8375 meta skuid != 41080 drop"
-      fixedPort.networking.nftables.ruleset;
+      fixedPort.networking.firewall.extraCommands;
+    assert (fixedPort.networking.firewall.extraStopCommands or "") == "";
     true;
 
   remote = assert remoteD2bUnits
@@ -390,15 +437,49 @@ in
     assert !(lib.hasInfix "allow_mutations" remoteSupervisorText);
     assert !(lib.hasInfix "write_auth_" remoteSupervisorText);
     assert !(lib.hasInfix "read_auth_" remoteSupervisorText);
-    assert lib.hasInfix "table inet d2b_gascity" remote.networking.nftables.ruleset;
-    assert lib.hasInfix "tcp dport 8373 ip saddr !="
-      remote.networking.nftables.ruleset;
-    assert lib.hasInfix "tcp dport 8374 ip saddr !="
-      remote.networking.nftables.ruleset;
+    assert !(remote.networking.nftables.enable or false);
+    assert (remote.networking.nftables.ruleset or "") == "";
+    assert remote.networking.firewall.enable;
+    assert remote.networking.firewall.backend == "iptables";
+    assert lib.hasInfix "/bin/nft -f -"
+      remote.networking.firewall.extraCommands;
+    assert lib.length (lib.splitString "/bin/nft -f -"
+      remote.networking.firewall.extraCommands) == 2;
+    assert lib.hasInfix "destroy table inet d2b_gascity"
+      remote.networking.firewall.extraCommands;
+    assert !(lib.hasInfix "delete table"
+      remote.networking.firewall.extraCommands);
+    assert lib.hasInfix "table inet d2b_gascity"
+      remote.networking.firewall.extraCommands;
+    assert lib.hasInfix
+      "tcp dport 8373 ip saddr != { 127.0.0.1/32 } drop"
+      remote.networking.firewall.extraCommands;
+    assert lib.hasInfix
+      "tcp dport 8373 ip6 saddr != { ::/128 } drop"
+      remote.networking.firewall.extraCommands;
+    assert lib.hasInfix
+      "tcp dport 8374 ip saddr != { 127.0.0.1/32 } drop"
+      remote.networking.firewall.extraCommands;
+    assert lib.hasInfix
+      "tcp dport 8374 ip6 saddr != { ::/128 } drop"
+      remote.networking.firewall.extraCommands;
     assert lib.hasInfix "tcp dport 8375 meta skuid != 41081 drop"
-      remote.networking.nftables.ruleset;
+      remote.networking.firewall.extraCommands;
     assert lib.hasInfix "tcp dport 8372 meta skuid != { 41080, 41081 } drop"
-      remote.networking.nftables.ruleset;
+      remote.networking.firewall.extraCommands;
+    assert (remote.networking.firewall.extraStopCommands or "") == "";
+    assert !(lib.hasInfix "flush ruleset"
+      remote.networking.firewall.extraCommands);
+    true;
+
+  "invalid-firewall-disabled" = assert hasFailedAssertion
+    "firewall.enable = true"
+    invalidFirewallDisabled.assertions;
+    true;
+
+  "invalid-nftables-backend" = assert hasFailedAssertion
+    "firewall.backend = \"iptables\""
+    invalidNftablesBackend.assertions;
     true;
 
   "invalid-remote" = assert hasFailedAssertion

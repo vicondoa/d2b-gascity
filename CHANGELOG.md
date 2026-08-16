@@ -49,3 +49,5 @@ and this project follows semantic versioning where releases are published.
   isolated the ingress fixture's fixed supervisor port in an unprivileged
   network namespace, and tightened rotation, SSE restart, cookie-secret
   scanning, and cleanup proofs.
+- Moved Gas City firewall programming onto the existing iptables-backed NixOS
+  firewall service and atomically replace only `table inet d2b_gascity`.
