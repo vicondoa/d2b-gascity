@@ -442,24 +442,24 @@ class CompositionPolicyTests(unittest.TestCase):
 
     def test_discord_helper_uses_official_gateway_only_seams(self) -> None:
         helper = (ROOT / "scripts" / "discord-import.py").read_text(encoding="utf-8")
+        import_helper = helper[
+            helper.index("def _import_app") : helper.index("def _bind_dm")
+        ]
+        bind_helper = helper[helper.index("def _bind_dm") : helper.index("def _parser")]
         self.assertIn(
-            '"--city",\n        str(city),\n        "discord",\n        "import-app"',
-            helper,
+            '"discord",\n        "import-app"',
+            import_helper,
         )
         self.assertIn(
-            '"--city",\n            str(city),\n            "discord",\n            "bind-dm"',
-            helper,
+            '"discord",\n            "bind-dm"',
+            bind_helper,
         )
-        self.assertNotIn(
-            '"discord",\n        "import-app",\n        "--city"',
-            helper,
-        )
-        self.assertNotIn(
-            '"discord",\n            "bind-dm",\n            "--city"',
-            helper,
-        )
-        self.assertIn('"discord",\n        "import-app"', helper)
-        self.assertIn('"discord",\n            "bind-dm"', helper)
+        self.assertNotIn('"--city"', import_helper)
+        self.assertNotIn("'--city'", import_helper)
+        self.assertNotIn('"--city"', bind_helper)
+        self.assertNotIn("'--city'", bind_helper)
+        self.assertEqual(helper.count("cwd=city"), 2)
+        self.assertIn('city = _validate_directory(args.city, "city")', helper)
         self.assertIn('"--bot-token-file"', helper)
         self.assertIn('"/dev/stdin"', helper)
         self.assertIn('"--role-allowlist"', helper)

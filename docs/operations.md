@@ -110,6 +110,10 @@ Gas City operator path after rotation:
 gc service restart discord-gateway --city <city-root>
 ```
 
+The helper validates the city path and uses it as the subprocess cwd for both
+commands. Its global `--city` option is helper-only and is not forwarded into
+the Pack v2 scripts.
+
 The helper passes the token through `/dev/stdin`, never argv or its output. It
 requires an owner-only state root, rejects unsafe credential files, paths, IDs,
 and session names before invoking `gc`, and does not echo child diagnostics.

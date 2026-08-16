@@ -45,8 +45,8 @@ and this project follows semantic versioning where releases are published.
 
 ### Changed
 
-- Fixed the Discord import helper to place the root-scoped city flag before
-  the official Discord subcommands.
+- Fixed the Discord import helper to rely on the validated city cwd and avoid
+  forwarding the global `--city` flag into Pack v2 scripts.
 - Set the imported city-scoped `bd.dog` agent suspended by default so an idle
   rig does not launch background ACP model work; explicit resume retains the
   portable workspace provider fallback.

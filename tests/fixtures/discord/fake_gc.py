@@ -24,8 +24,9 @@ def main() -> int:
             "github_token_present": "GITHUB_TOKEN" in os.environ,
         },
     }
-    command = argv[2:] if len(argv) >= 4 and argv[0] == "--city" else []
-    if command[:2] == ["discord", "import-app"]:
+    if "--city" in argv:
+        return 7
+    if argv[:2] == ["discord", "import-app"]:
         if "--bot-token-file" not in argv:
             return 2
         index = argv.index("--bot-token-file")
@@ -33,7 +34,7 @@ def main() -> int:
             return 3
         event["kind"] = "import-app"
         sys.stdout.buffer.write(stdin)
-    elif command[:2] == ["discord", "bind-dm"]:
+    elif argv[:2] == ["discord", "bind-dm"]:
         if stdin:
             return 4
         event["kind"] = "bind-dm"

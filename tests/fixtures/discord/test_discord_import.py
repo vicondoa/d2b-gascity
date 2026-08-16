@@ -114,10 +114,10 @@ class DiscordImportTests(unittest.TestCase):
         import_event = events[0]
         argv = import_event["argv"]
         self.assertEqual(
-            argv[:4],
-            ["--city", str(self.city), "discord", "import-app"],
+            argv[:2],
+            ["discord", "import-app"],
         )
-        self.assertNotIn("--city", argv[4:])
+        self.assertNotIn("--city", argv)
         self.assertTrue(import_event["stdin_present"])
         self.assertEqual(
             import_event["stdin_sha256"],
@@ -141,10 +141,10 @@ class DiscordImportTests(unittest.TestCase):
         for event in events[1:]:
             bind_argv = event["argv"]
             self.assertEqual(
-                bind_argv[:4],
-                ["--city", str(self.city), "discord", "bind-dm"],
+                bind_argv[:2],
+                ["discord", "bind-dm"],
             )
-            self.assertNotIn("--city", bind_argv[4:])
+            self.assertNotIn("--city", bind_argv)
         bound = {tuple(event["argv"][-2:]) for event in events[1:]}
         self.assertEqual(
             bound,
