@@ -223,6 +223,19 @@ let
       lib.concatStringsSep "\n" value
     else
       value;
+
+  environmentValue = name: environment:
+    let
+      entries = builtins.filter
+        (entry: lib.hasPrefix "${name}=" entry)
+        environment;
+    in
+    assert lib.length entries == 1;
+    builtins.head (builtins.match "${name}=(.*)" (builtins.head entries));
+
+  coreGcHome = environmentValue "GC_HOME" main.Environment;
+  coreDoltRoot = environmentValue "DOLT_ROOT_PATH" main.Environment;
+  coreGitConfig = environmentValue "GIT_CONFIG_GLOBAL" main.Environment;
 in
 {
   _relayConfig = relayText;
@@ -298,6 +311,9 @@ in
     assert core.users.groups.d2b-gascity-operators.members == [ "alice" ];
     assert (main.SystemCallFilter or null) == null;
     assert builtins.elem "GC_HOME=/var/lib/d2b-gascity/gc" main.Environment;
+    assert coreGcHome == "/var/lib/d2b-gascity/gc";
+    assert coreDoltRoot == "${coreGcHome}/dolt";
+    assert coreGitConfig == "${coreGcHome}/gitconfig";
     assert builtins.elem
       "GC_SUPERVISOR_SYSTEMD_UNIT=d2b-gascity.service"
       main.Environment;

@@ -218,5 +218,8 @@ substitute.
 The repository contains no rig path, `.gc/site.toml`, cities registry, Beads
 metadata, Dolt database, credential, host unit, or service state. The
 explicit state root and city path supplied to bootstrap are deployment
-inputs. Keep them outside the portable source and protect them with the
-host's normal ownership and backup policy.
+inputs. In the NixOS deployment, `--state-root` is the service's
+`GC_HOME`, `/var/lib/d2b-gascity/gc`; bootstrap therefore keeps Dolt at
+`/var/lib/d2b-gascity/gc/dolt` and the global Git config at
+`/var/lib/d2b-gascity/gc/gitconfig`. Keep these paths outside the portable
+source and protect them with the host's normal ownership and backup policy.

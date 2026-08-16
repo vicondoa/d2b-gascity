@@ -15,6 +15,13 @@ python3 scripts/bootstrap.py init \
   --gc <packaged-runtime>/bin/gc
 ```
 
+For the NixOS deployment, pass the service's `GC_HOME` as `--state-root`:
+`/var/lib/d2b-gascity/gc`. Bootstrap then derives
+`DOLT_ROOT_PATH=/var/lib/d2b-gascity/gc/dolt` and
+`GIT_CONFIG_GLOBAL=/var/lib/d2b-gascity/gc/gitconfig`, matching the service
+environment exactly. The deployment city and rig paths are
+`/var/lib/d2b-gascity/city` and `/var/lib/d2b-gascity/rigs/d2b`.
+
 The `init` mode:
 
 1. Refuses a symlink, partial, or non-empty city target.

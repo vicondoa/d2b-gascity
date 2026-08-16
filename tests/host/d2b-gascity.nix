@@ -61,9 +61,9 @@ pkgs.testers.runNixOSTest {
         "GC_HOME=/var/lib/d2b-gascity/gc "
         "GC_SUPERVISOR_SYSTEMD_UNIT=d2b-gascity.service "
         "GC_SUPERVISOR_SYSTEMD_SCOPE=system "
-        "DOLT_ROOT_PATH=/var/lib/d2b-gascity/dolt-root "
+        "DOLT_ROOT_PATH=/var/lib/d2b-gascity/gc/dolt "
         "GIT_CONFIG_NOSYSTEM=1 "
-        "GIT_CONFIG_GLOBAL=/var/lib/d2b-gascity/gitconfig "
+        "GIT_CONFIG_GLOBAL=/var/lib/d2b-gascity/gc/gitconfig "
     )
     as_city = "runuser -u d2b-gascity -- env " + supervisor_env
 
@@ -75,6 +75,9 @@ pkgs.testers.runNixOSTest {
     machine.succeed(
         "test \"$(pgrep -u d2b-gascity -f 'gc supervisor run' | wc -l)\" = 1"
     )
+
+    machine.succeed("systemctl stop d2b-gascity.service")
+    machine.fail("pgrep -u d2b-gascity -f 'gc supervisor run'")
 
     machine.succeed(
         as_city
@@ -90,6 +93,13 @@ pkgs.testers.runNixOSTest {
         as_city
         + "${gasCityContributor}/bin/gc init --template empty --no-start "
         "--skip-provider-readiness --yes /var/lib/d2b-gascity/city"
+    )
+    machine.succeed("systemctl start d2b-gascity.service")
+    machine.wait_for_unit("d2b-gascity.service")
+    machine.wait_until_succeeds(
+        as_city + "curl --fail --silent "
+        "http://127.0.0.1:8372/health",
+        timeout=60,
     )
     machine.succeed(
         as_city

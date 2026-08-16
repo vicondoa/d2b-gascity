@@ -222,11 +222,11 @@ in
           "XDG_CACHE_HOME=${cacheRoot}"
           "XDG_RUNTIME_DIR=${runtimeRoot}"
           "GC_HOME=${gcHome}"
-          "DOLT_ROOT_PATH=${stateRoot}/dolt-root"
+          "DOLT_ROOT_PATH=${gcHome}/dolt"
           "GC_SUPERVISOR_SYSTEMD_UNIT=d2b-gascity.service"
           "GC_SUPERVISOR_SYSTEMD_SCOPE=system"
           "GIT_CONFIG_NOSYSTEM=1"
-          "GIT_CONFIG_GLOBAL=${stateRoot}/gitconfig"
+          "GIT_CONFIG_GLOBAL=${gcHome}/gitconfig"
           "PATH=${packagePath}/bin:/run/current-system/sw/bin"
         ] ++ lib.optional (cfg.dolt.fixedPort != null)
           "GC_DOLT_PORT=${toString cfg.dolt.fixedPort}";
