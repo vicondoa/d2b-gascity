@@ -350,8 +350,8 @@ in
       "${testPackage}/bin/d2b-gascity-copilot-provider readiness --selection-path /var/lib/d2b-gascity/config/provider-selection.json"
     ];
     assert main.NoNewPrivileges;
-    assert main.PrivateTmp;
-    assert main.PrivateDevices;
+    assert main.PrivateTmp == false;
+    assert main.PrivateDevices == false;
     assert main.ProtectHome;
     assert main.ProtectSystem == "strict";
     assert main.ProtectKernelTunables;

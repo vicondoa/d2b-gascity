@@ -192,8 +192,8 @@ in
         AmbientCapabilities = [ "" ];
         CapabilityBoundingSet = [ "" ];
         NoNewPrivileges = true;
-        PrivateTmp = true;
-        PrivateDevices = true;
+        PrivateTmp = false;
+        PrivateDevices = false;
         ProtectHome = true;
         ProtectSystem = "strict";
         ProtectKernelTunables = true;

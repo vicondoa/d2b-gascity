@@ -39,7 +39,7 @@ the supervisor and all of its upstream-managed children. The module does not
 declare a Dolt unit, dashboard unit, controller unit, Discord unit, ACP unit,
 or per-child lifecycle sidecar. Gas City starts and reconciles those children
 itself. Bootstrap is an operator command, not `ExecStartPre`; an empty registry
-is a valid service state.
+is a valid service state. Official work dispatch is `gc sling <agent> <bead>`.
 
 The persistent layout is fixed and intentionally separate from the retired
 prototype:
@@ -118,9 +118,10 @@ non-empty, it writes the non-empty `GC_SESSION_ID`, `GC_INSTANCE_TOKEN`, and
 `GC_RUNTIME_EPOCH` values to the upstream ACP sidecar directory. The file names
 use the upstream SHA-256 session and key hashes, and each file is replaced
 through a flushed temporary file with mode `0644`; the directory is mode
-`0755`. The NixOS service sets `TMPDIR=/tmp` inside the unit's `PrivateTmp`
-namespace, so upstream Go `os.TempDir()` and wrapper Python
-`tempfile.gettempdir()` both resolve to the same `/tmp/gc-acp` directory.
+`0755`. The supervisor sets `TMPDIR=/tmp` and does not use `PrivateTmp` or
+`PrivateDevices`, so Gas City can create its own tmux sessions and PTYs the
+same way `gc start` does. Upstream Go `os.TempDir()` and wrapper Python
+`tempfile.gettempdir()` still share `/tmp/gc-acp`.
 
 This is a deployment shim, not an upstream Gas City patch. It seeds no other
 environment value or credential, rejects control characters and oversized
