@@ -96,7 +96,7 @@ pkgs.testers.runNixOSTest {
     )
     machine.succeed(
         "runuser -u d2b-gascity -- env TMUX_TMPDIR=/run/d2b-gascity "
-        "tmux -L d2b-gascity has-session -t gc-runtime"
+        "tmux -L d2b-gascity show-options -s exit-empty"
     )
 
     machine.succeed("systemctl stop d2b-gascity.service")

@@ -54,9 +54,9 @@ and this project follows semantic versioning where releases are published.
 
 ### Changed
 
-- Start the city tmux server from `d2b-gascity.service` with `TMUX_TMPDIR`
-  under `/run/d2b-gascity` so ACP sessions can start after a supervisor
-  restart without leaving PrivateTmp.
+- Start the city tmux server from `d2b-gascity.service` with `exit-empty off`
+  and `TMUX_TMPDIR` under `/run/d2b-gascity`, without a dummy session the
+  supervisor would adopt.
 - Drop the git-origin Beads federation remote after rig initialization so the
   local city does not expect remotesapi or push issue data into `vicondoa/d2b`.
 - Run CI checks and generated-inventory reproduction through the pinned Nix

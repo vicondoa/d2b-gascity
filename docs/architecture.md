@@ -44,8 +44,10 @@ is a valid service state.
 ACP sessions use a named tmux server `tmux -L d2b-gascity`. Upstream treats a
 missing server as a failed observation rather than an empty city, so the
 supervisor unit starts that server in the same sandbox before `gc supervisor
-run` and points `TMUX_TMPDIR` at `/run/d2b-gascity`. This is not a second
-lifecycle owner. ACP identity sidecars stay under the private `TMPDIR=/tmp`.
+run`, sets `exit-empty off`, and points `TMUX_TMPDIR` at `/run/d2b-gascity`.
+It does not create a dummy tmux session, because the supervisor would adopt
+that session as an agent. This is not a second lifecycle owner. ACP identity
+sidecars stay under the private `TMPDIR=/tmp`.
 
 The persistent layout is fixed and intentionally separate from the retired
 prototype:

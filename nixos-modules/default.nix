@@ -12,16 +12,12 @@ let
   cacheRoot = "${stateRoot}/cache";
   runtimeRoot = "/run/d2b-gascity";
   cityTmuxSocket = "d2b-gascity";
-  cityTmuxSession = "gc-runtime";
   tmuxBin = "${pkgs.tmux}/bin/tmux";
   cityTmuxStart = pkgs.writeShellScript "d2b-gascity-tmux-start" ''
     set -euo pipefail
     export TMUX_TMPDIR="${runtimeRoot}"
-    if ${tmuxBin} -L ${cityTmuxSocket} has-session -t ${cityTmuxSession} \
-      2>/dev/null; then
-      exit 0
-    fi
-    ${tmuxBin} -L ${cityTmuxSocket} new-session -d -s ${cityTmuxSession}
+    ${tmuxBin} -L ${cityTmuxSocket} start-server
+    ${tmuxBin} -L ${cityTmuxSocket} set-option -s exit-empty off
   '';
   cityTmuxStop = pkgs.writeShellScript "d2b-gascity-tmux-stop" ''
     export TMUX_TMPDIR="${runtimeRoot}"

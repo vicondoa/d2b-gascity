@@ -16,8 +16,9 @@ copy the prototype, rewrite portable files, or create a second user
 supervisor.
 
 The same unit starts the city tmux server `tmux -L d2b-gascity` before the
-supervisor and sets `TMUX_TMPDIR=/run/d2b-gascity`. Upstream will not create
-the first ACP session while that server is absent. Diagnose with:
+supervisor, sets `exit-empty off`, and sets `TMUX_TMPDIR=/run/d2b-gascity`.
+It does not create a dummy session. Upstream will not create the first ACP
+session while that server is absent. Diagnose with:
 
 ```text
 sudo -u d2b-gascity env TMUX_TMPDIR=/run/d2b-gascity \
