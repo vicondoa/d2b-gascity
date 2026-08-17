@@ -28,6 +28,11 @@ Copilot runs as the official tmux harness: `builtin:copilot` with
 `COPILOT_GITHUB_TOKEN` from the systemd credential so the pane can authenticate.
 Do not set city `[session] provider = "acp"` unless you want ACP transport.
 
+Official `gc supervisor install` reads `$GC_HOME/supervisor.toml`. That file
+must include the dashboard hostname in `allowed_hosts`, or the proxy returns
+HTTP 421 `host_not_allowed`. The NixOS module keeps this file linked to
+`/etc/d2b-gascity/supervisor.toml`.
+
 ### Standalone CLI API compatibility
 
 Upstream #5262 can classify the supervisor-hosted controller socket as a

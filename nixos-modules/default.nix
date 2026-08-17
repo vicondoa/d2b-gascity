@@ -54,6 +54,7 @@ let
     "d /var/lib/d2b-gascity/rigs 0750 d2b-gascity d2b-gascity -"
     "d /var/lib/d2b-gascity/rigs/d2b 0700 d2b-gascity d2b-gascity -"
     "d /var/lib/d2b-gascity/gc 0700 d2b-gascity d2b-gascity -"
+    "L+ /var/lib/d2b-gascity/gc/supervisor.toml - - - - /etc/d2b-gascity/supervisor.toml"
     "d /var/lib/d2b-gascity/home 0700 d2b-gascity d2b-gascity -"
     "d /var/lib/d2b-gascity/config 0700 d2b-gascity d2b-gascity -"
     "d /var/lib/d2b-gascity/state 0700 d2b-gascity d2b-gascity -"

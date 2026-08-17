@@ -59,7 +59,8 @@ and this project follows semantic versioning where releases are published.
   does not block the ready prompt, clear pack ACP transport, and leave the
   city runtime on the tmux default. Give the supervisor user a real shell and
   linger so official `gc supervisor install` / `gc start` can own the user
-  unit and tmux panes.
+  unit and tmux panes. Point `GC_HOME/supervisor.toml` at the host-allowed
+  supervisor file so the dashboard Host header is accepted.
 - Resume the bootstrap-suspended `d2b` rig during delegated
   `register-existing` so official `gc sling` can start agents.
 - Leave supervisor `PrivateTmp` and `PrivateDevices` off, and keep `/tmp`
