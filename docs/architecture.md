@@ -39,7 +39,8 @@ the supervisor and all of its upstream-managed children. The module does not
 declare a Dolt unit, dashboard unit, controller unit, Discord unit, ACP unit,
 or per-child lifecycle sidecar. Gas City starts and reconciles those children
 itself. Bootstrap is an operator command, not `ExecStartPre`; an empty registry
-is a valid service state. Official work dispatch is `gc sling <agent> <bead>`.
+is a valid service state. Official work dispatch is `gc sling <agent> <bead>`. The supervisor keeps
+`/tmp` writable because Dolt and tmux create temp files there.
 
 The persistent layout is fixed and intentionally separate from the retired
 prototype:

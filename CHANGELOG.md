@@ -54,8 +54,9 @@ and this project follows semantic versioning where releases are published.
 
 ### Changed
 
-- Leave supervisor `PrivateTmp` and `PrivateDevices` off so Gas City can own
-  tmux sessions and PTYs the same way official `gc start` does.
+- Leave supervisor `PrivateTmp` and `PrivateDevices` off, and keep `/tmp`
+  writable, so official Gas City Dolt/tmux temp files work under
+  `ProtectSystem=strict`.
 - Drop the git-origin Beads federation remote after rig initialization so the
   local city does not expect remotesapi or push issue data into `vicondoa/d2b`.
 - Run CI checks and generated-inventory reproduction through the pinned Nix

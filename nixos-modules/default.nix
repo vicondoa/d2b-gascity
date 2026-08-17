@@ -213,6 +213,7 @@ in
         ReadWritePaths = [
           stateRoot
           runtimeRoot
+          "/tmp"
         ];
         ReadOnlyPaths = [
           "${packagePath}/share/d2b-gascity"
