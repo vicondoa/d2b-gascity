@@ -41,6 +41,12 @@ or per-child lifecycle sidecar. Gas City starts and reconciles those children
 itself. Bootstrap is an operator command, not `ExecStartPre`; an empty registry
 is a valid service state.
 
+ACP sessions use a named tmux server `tmux -L d2b-gascity`. Upstream treats a
+missing server as a failed observation rather than an empty city, so the
+supervisor unit starts that server in the same sandbox before `gc supervisor
+run` and points `TMUX_TMPDIR` at `/run/d2b-gascity`. This is not a second
+lifecycle owner. ACP identity sidecars stay under the private `TMPDIR=/tmp`.
+
 The persistent layout is fixed and intentionally separate from the retired
 prototype:
 

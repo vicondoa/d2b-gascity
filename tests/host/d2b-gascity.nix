@@ -91,6 +91,13 @@ pkgs.testers.runNixOSTest {
     machine.succeed(
         "test \"$(pgrep -u d2b-gascity -f 'gc supervisor run' | wc -l)\" = 1"
     )
+    machine.succeed(
+        "test -S /run/d2b-gascity/tmux-41080/d2b-gascity"
+    )
+    machine.succeed(
+        "runuser -u d2b-gascity -- env TMUX_TMPDIR=/run/d2b-gascity "
+        "tmux -L d2b-gascity has-session -t gc-runtime"
+    )
 
     machine.succeed("systemctl stop d2b-gascity.service")
     machine.fail("pgrep -u d2b-gascity -f 'gc supervisor run'")
