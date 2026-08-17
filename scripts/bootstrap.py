@@ -1102,6 +1102,12 @@ def _register(args: argparse.Namespace) -> int:
             raise BootstrapError(
                 f"gc register failed: {_redact(result.stderr)}"
             )
+    _run(
+        [args.gc, "rig", "resume", RIG_NAME],
+        env=env,
+        cwd=args.city,
+        label="gc rig resume",
+    )
     print(result.stdout, end="")
     return 0
 

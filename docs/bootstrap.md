@@ -34,7 +34,9 @@ The `init` mode:
 5. Installs the exact locked imports, clones or accepts a `v3` d2b checkout,
    and runs `gc rig add --start-suspended`. It then removes the Dolt
    federation remote that `bd init` copies from the git origin so the local
-   city does not expect remotesapi or push beads into `vicondoa/d2b`.
+   city does not expect remotesapi or push beads into `vicondoa/d2b`. The
+   rig stays suspended until `register-existing --allow-start` (or an
+   operator) runs official `gc rig resume d2b`.
 
 If initialization, import installation, or rig setup fails after materializing
 the city, bootstrap best-effort stops that city before returning the original

@@ -54,6 +54,11 @@ and this project follows semantic versioning where releases are published.
 
 ### Changed
 
+- Set city `[session] provider = "acp"` so the default runtime is ACP, not
+  tmux. Every model-backed agent already uses ACP transport; the tmux default
+  made session listing fail closed before any ACP session could start.
+- Resume the bootstrap-suspended `d2b` rig during delegated
+  `register-existing` so official `gc sling` can start agents.
 - Leave supervisor `PrivateTmp` and `PrivateDevices` off, and keep `/tmp`
   writable, so official Gas City Dolt/tmux temp files work under
   `ProtectSystem=strict`.

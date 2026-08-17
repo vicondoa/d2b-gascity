@@ -15,6 +15,14 @@ reconciliation using the machine-local site binding. Ordinary start must not
 copy the prototype, rewrite portable files, or create a second user
 supervisor.
 
+Bootstrap adds the `d2b` rig with `gc rig add --start-suspended` so init
+does not launch agents. After the supervisor is up, official activation is
+`gc rig resume d2b` from the city directory. `register-existing --allow-start`
+runs that resume. Until the rig is resumed, Gas City skips every
+`d2b/...` agent: `gc sling` can route beads, but sessions stay
+`start-pending` and `poolDesired` stays 0. The resume override persists in
+`.gc/runtime/suspension-state.json` across supervisor restarts.
+
 ### Standalone CLI API compatibility
 
 Upstream #5262 can classify the supervisor-hosted controller socket as a

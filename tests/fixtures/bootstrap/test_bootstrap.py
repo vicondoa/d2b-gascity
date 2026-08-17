@@ -473,6 +473,16 @@ class BootstrapFixtureTests(unittest.TestCase):
         self._start_fixture_supervisor()
         first = self._run_bootstrap("register-existing", "--allow-start")
         self.assertEqual(first.returncode, 0, first.stderr)
+        listed = subprocess.run(
+            [str(self.gc), "rig", "list"],
+            env=self.env,
+            cwd=self.city,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(listed.returncode, 0, listed.stderr)
+        self.assertNotIn("d2b (suspended)", listed.stdout)
         second = self._run_bootstrap("register-existing", "--allow-start")
         self.assertEqual(second.returncode, 0, second.stderr)
         checked = self._run_bootstrap("check")

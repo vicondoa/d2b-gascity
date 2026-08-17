@@ -7,6 +7,9 @@ suspended_on_start = true
 [workspace]
 provider = "copilot-review"
 
+[session]
+provider = "acp"
+
 [api]
 bind = "127.0.0.1"
 port = 18372
