@@ -258,10 +258,21 @@ def _ensure_runtime(env: dict[str, str], run_root: pathlib.Path) -> pathlib.Path
     candidate = pathlib.Path(paths[-1]).resolve()
     if not (candidate / "bin" / "gc").is_file():
         raise RunnerError(f"built contributor runtime is missing gc: {candidate}")
+    if not (candidate / "bin" / "python3").is_file():
+        raise RunnerError(f"built contributor runtime is missing python3: {candidate}")
     env["GC_CONTRIBUTOR_ROOT"] = str(candidate)
     env["PATH"] = os.pathsep.join((str(candidate / "bin"), env.get("PATH", os.defpath)))
     env["D2B_GASCITY_CHECK_RUN_ROOT"] = str(run_root)
     return candidate
+
+
+def _python(env: dict[str, str]) -> str:
+    root = env.get("GC_CONTRIBUTOR_ROOT")
+    if root:
+        candidate = pathlib.Path(root) / "bin" / "python3"
+        if candidate.is_file():
+            return str(candidate)
+    return sys.executable
 
 
 def _ensure_pack_cache(
@@ -314,7 +325,7 @@ def _run_python_tests(kind: str, env: dict[str, str]) -> None:
         files = [*files, ACP_ACCEPTANCE]
     for path in files:
         print(f"==> python {path.relative_to(ROOT)}", flush=True)
-        _run_command([sys.executable, str(path)], env=env, timeout=1800)
+        _run_command([_python(env), str(path)], env=env, timeout=1800)
 
 
 def _run_acceptance(env: dict[str, str]) -> None:
@@ -323,7 +334,7 @@ def _run_acceptance(env: dict[str, str]) -> None:
     env["U3_PACK_CACHE"] = env.get("U3_PACK_CACHE", "")
     env["D2B_INGRESS_RUN_ROOT"] = env["D2B_GASCITY_CHECK_RUN_ROOT"]
     print(f"==> ingress {INGRESS_FIXTURE.relative_to(ROOT)}", flush=True)
-    _run_command([sys.executable, str(INGRESS_FIXTURE)], env=env, timeout=1800)
+    _run_command([_python(env), str(INGRESS_FIXTURE)], env=env, timeout=1800)
 
 
 def _run_python_policy(env: dict[str, str]) -> None:
@@ -336,11 +347,11 @@ def _run_python_fixtures(env: dict[str, str]) -> None:
 
 def _run_rollback(env: dict[str, str]) -> None:
     print(f"==> rollback {ROLLBACK_ACCEPTANCE.relative_to(ROOT)}", flush=True)
-    _run_command([sys.executable, str(ROLLBACK_ACCEPTANCE)], env=env, timeout=1800)
+    _run_command([_python(env), str(ROLLBACK_ACCEPTANCE)], env=env, timeout=1800)
 
 
 def _run_generated(env: dict[str, str], *, write: bool = False) -> None:
-    command = [sys.executable, str(ROOT / "scripts" / "generate_inventory.py")]
+    command = [_python(env), str(ROOT / "scripts" / "generate_inventory.py")]
     command.append("--write" if write else "--check")
     _run_command(command, env=env)
 
@@ -348,7 +359,7 @@ def _run_generated(env: dict[str, str], *, write: bool = False) -> None:
 def _run_privacy(env: dict[str, str]) -> None:
     _run_command(
         [
-            sys.executable,
+            _python(env),
             str(ROOT / "scripts" / "privacy_scan.py"),
             "--root",
             str(ROOT),
@@ -359,7 +370,7 @@ def _run_privacy(env: dict[str, str]) -> None:
 
 def _run_static(env: dict[str, str]) -> None:
     _run_command(
-        [sys.executable, str(ROOT / "scripts" / "static_policy.py"), "--root", str(ROOT)],
+        [_python(env), str(ROOT / "scripts" / "static_policy.py"), "--root", str(ROOT)],
         env=env,
     )
 

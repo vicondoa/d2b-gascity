@@ -4,6 +4,7 @@ import os
 import pathlib
 import subprocess
 import sys
+import tempfile
 import time
 import unittest
 from unittest import mock
@@ -60,6 +61,37 @@ class RunnerOwnershipPolicyTests(unittest.TestCase):
             if other.poll() is None:
                 _stop_group(os.getpgid(other.pid))
             other.wait(timeout=5)
+
+    def test_runtime_commands_use_contributor_python(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="u9-runtime-python-") as directory:
+            runtime = pathlib.Path(directory)
+            python = runtime / "bin" / "python3"
+            python.parent.mkdir(parents=True)
+            python.write_text("#!/bin/sh\n", encoding="utf-8")
+            python.chmod(0o755)
+            env = {
+                "D2B_GASCITY_CHECK_RUN_ID": "u9-runtime-python",
+                "D2B_GASCITY_CHECK_RUN_ROOT": directory,
+                "GC_CONTRIBUTOR_ROOT": str(runtime),
+            }
+            seen: list[list[str]] = []
+
+            def capture(command: list[str], **_kwargs: object) -> object:
+                seen.append(command)
+                return subprocess.CompletedProcess(command, 0, "", "")
+
+            with mock.patch.object(runner, "_run_command", side_effect=capture):
+                runner._run_python_policy(env)
+                runner._run_acceptance(env)
+                runner._run_rollback(env)
+                runner._run_generated(env)
+                runner._run_privacy(env)
+                runner._run_static(env)
+
+        self.assertTrue(seen)
+        for command in seen:
+            with self.subTest(command=command):
+                self.assertEqual(command[0], str(python))
 
     def test_python_only_commands_skip_runtime_and_pack_setup(self) -> None:
         commands = {

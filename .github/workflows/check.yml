@@ -35,5 +35,5 @@ jobs:
             echo "::error::unprivileged user or network namespaces are unavailable; enable CONFIG_USER_NS and allow unshare --user --net on this runner" >&2
             exit 1
           fi
-      - run: make check
+      - run: nix develop --no-write-lock-file --command make check
         name: Run complete repository check

@@ -40,10 +40,16 @@ class WorkflowPolicyTests(unittest.TestCase):
         self.assertNotIn("ubuntu-24.04", text)
         self.assertIn("pull_request:", text)
         self.assertIn("push:", text)
-        self.assertRegex(text, r"(?m)^\s*-\s*run:\s*make check\s*$")
+        self.assertRegex(
+            text,
+            r"(?m)^\s*-\s*run:\s*nix develop --no-write-lock-file "
+            r"--command make check\s*$",
+        )
         self.assertNotIn("if: ${{ secrets.", text)
         preflight = text.index("Preflight unprivileged user and network namespaces")
-        check = text.index("run: make check")
+        check = text.index(
+            "run: nix develop --no-write-lock-file --command make check"
+        )
         self.assertLess(preflight, check)
         for marker in (
             'command -v unshare',
@@ -70,6 +76,10 @@ class WorkflowPolicyTests(unittest.TestCase):
         self.assertIn("repository-inventory.patch", text)
         self.assertNotIn("secrets.", text.lower())
         self.assertRegex(text, r"actions/upload-artifact@[0-9a-f]{40}")
+        self.assertIn(
+            "nix develop --no-write-lock-file --command make update-generated",
+            text,
+        )
 
     def test_planted_unpinned_action_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory(prefix="u9-ci-") as directory:

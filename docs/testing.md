@@ -6,6 +6,11 @@ Copilot, the exact ingress fixture in its network namespace, privacy and
 generated-drift checks, and `nix flake check`. The runner builds one contributor
 runtime per process, seeds one pack cache inside a mode-0700 OS temporary root
 outside the repository, and removes that exact root before exit.
+GitHub Actions invokes it as
+`nix develop --no-write-lock-file --command make check` so CI uses the pinned
+development-shell tools. After the runner builds the contributor runtime, it
+also launches Python tests with that runtime's `python3` instead of the
+invoking interpreter.
 
 Focused commands are available for `make test-policy`, `make test-fixtures`,
 `make test-rollback`, `make test-ingress`, `make test-generated`,
@@ -33,6 +38,6 @@ introduced here; its separate integration and failure policy remain owned by
 the later delivery boundary.
 
 Generated inventory is reproduced with `make update-generated`. The workflow
-`.github/workflows/update-generated.yml` is manual-only and emits a patch
-artifact, then fails deliberately so it never silently mutates the default
-branch.
+`.github/workflows/update-generated.yml` runs that target through the same
+pinned development shell, is manual-only, and emits a patch artifact before
+failing deliberately so it never silently mutates the default branch.

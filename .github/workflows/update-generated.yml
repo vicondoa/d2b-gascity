@@ -19,7 +19,7 @@ jobs:
           extra_nix_config: |
             extra-experimental-features = nix-command flakes
       - name: Reproduce generated inventory
-        run: make update-generated
+        run: nix develop --no-write-lock-file --command make update-generated
       - name: Save generated patch
         run: |
           git diff --binary -- tests/generated/repository-inventory.json > repository-inventory.patch

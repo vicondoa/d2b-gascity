@@ -54,6 +54,9 @@ and this project follows semantic versioning where releases are published.
 
 ### Changed
 
+- Run CI checks and generated-inventory reproduction through the pinned Nix
+  development shell, and invoke repository Python tests with the contributor
+  runtime interpreter after that runtime is built.
 - Fixed the Discord import helper to rely on the validated city cwd and avoid
   forwarding the global `--city` flag into Pack v2 scripts.
 - Set the imported city-scoped `bd.dog` agent suspended by default so an idle
