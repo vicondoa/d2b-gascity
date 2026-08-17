@@ -23,6 +23,11 @@ runs that resume. Until the rig is resumed, Gas City skips every
 `start-pending` and `poolDesired` stays 0. The resume override persists in
 `.gc/runtime/suspension-state.json` across supervisor restarts.
 
+Copilot runs as the official tmux harness: `builtin:copilot` with
+`--yolo` and pinned model flags. The supervisor exports
+`COPILOT_GITHUB_TOKEN` from the systemd credential so the pane can authenticate.
+Do not set city `[session] provider = "acp"` unless you want ACP transport.
+
 ### Standalone CLI API compatibility
 
 Upstream #5262 can classify the supervisor-hosted controller socket as a
@@ -84,8 +89,9 @@ until their owning units define them.
 
 The resolved model-backed role graph is classified in
 `city/role-provider-matrix.json`. The matrix is generated from the pinned
-Pack v2 imports and every classified agent is patched to ACP with one of the
-portable planning, review, or coding providers. The imported city-scoped
+Pack v2 imports and every classified agent is patched to a portable planning,
+review, or coding Copilot provider. Pack ACP transport is cleared so Gas City
+drives the official `copilot --yolo` REPL in tmux. The imported city-scoped
 `bd.dog` agent is not in that matrix and has only the exact suspended-only
 control patch, so it does not perform background model work while the rig is
 idle. An explicit operator resume leaves its provider unset and therefore

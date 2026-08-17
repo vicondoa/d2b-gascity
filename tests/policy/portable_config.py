@@ -36,7 +36,7 @@ class PortableConfigTests(unittest.TestCase):
             config["workspace"],
             {"provider": "copilot-review"},
         )
-        self.assertEqual(config["session"], {"provider": "acp"})
+        self.assertNotIn("session", config)
         rigs = config.get("rigs", [])
         self.assertEqual(len(rigs), 1)
         self.assertEqual(rigs[0]["name"], "d2b")

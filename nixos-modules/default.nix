@@ -137,6 +137,8 @@ in
       group = "d2b-gascity";
       home = stateRoot;
       createHome = false;
+      linger = true;
+      shell = pkgs.bash;
       description = "Dedicated Gas City supervisor";
     };
 
@@ -173,15 +175,19 @@ in
         RuntimeDirectory = "d2b-gascity";
         RuntimeDirectoryMode = "0750";
 
-        ExecStart = "${packagePath}/bin/gc supervisor run";
+        ExecStart = pkgs.writeShellScript "d2b-gascity-supervisor" ''
+          set -eu
+          if [ -n "''${CREDENTIALS_DIRECTORY:-}" ] && [ -f "$CREDENTIALS_DIRECTORY/copilot-token" ]; then
+            COPILOT_GITHUB_TOKEN=$(${pkgs.coreutils}/bin/tr -d '\n' < "$CREDENTIALS_DIRECTORY/copilot-token")
+            export COPILOT_GITHUB_TOKEN
+          fi
+          exec ${packagePath}/bin/gc supervisor run
+        '';
         Restart = "on-failure";
         RestartSec = "5s";
         TimeoutStartSec = "5min";
         TimeoutStopSec = "2min";
         KillMode = "control-group";
-        ExecStartPre = lib.optional
-          (cfg.credentials.copilotTokenFile != null)
-          "${packagePath}/bin/d2b-gascity-copilot-provider readiness --selection-path ${cfg.copilot.providerSelectionFile}";
 
         CPUQuota = cfg.resources.cpuQuota;
         MemoryHigh = cfg.resources.memoryHigh;
@@ -203,8 +209,6 @@ in
         ProtectControlGroups = true;
         ProtectClock = true;
         ProtectHostname = true;
-        ProtectProc = "invisible";
-        ProcSubset = "pid";
         RestrictSUIDSGID = true;
         LockPersonality = true;
         UMask = "0077";
@@ -235,6 +239,7 @@ in
           "TMPDIR=/tmp"
           "GIT_CONFIG_NOSYSTEM=1"
           "GIT_CONFIG_GLOBAL=${gcHome}/gitconfig"
+          "COPILOT_ALLOW_ALL=true"
           "PATH=${packagePath}/bin:${pkgs.openssl}/bin:/run/current-system/sw/bin"
         ] ++ lib.optional (cfg.dolt.fixedPort != null)
           "GC_DOLT_PORT=${toString cfg.dolt.fixedPort}";

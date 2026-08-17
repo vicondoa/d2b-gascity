@@ -54,9 +54,12 @@ and this project follows semantic versioning where releases are published.
 
 ### Changed
 
-- Set city `[session] provider = "acp"` so the default runtime is ACP, not
-  tmux. Every model-backed agent already uses ACP transport; the tmux default
-  made session listing fail closed before any ACP session could start.
+- Drive Copilot through official Gas City tmux: inherit `builtin:copilot`
+  (`copilot --yolo` plus model flags), set `COPILOT_ALLOW_ALL` so folder-trust
+  does not block the ready prompt, clear pack ACP transport, and leave the
+  city runtime on the tmux default. Give the supervisor user a real shell and
+  linger so official `gc supervisor install` / `gc start` can own the user
+  unit and tmux panes.
 - Resume the bootstrap-suspended `d2b` rig during delegated
   `register-existing` so official `gc sling` can start agents.
 - Leave supervisor `PrivateTmp` and `PrivateDevices` off, and keep `/tmp`

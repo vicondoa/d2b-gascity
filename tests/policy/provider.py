@@ -299,39 +299,66 @@ class ProviderPolicyTests(unittest.TestCase):
                     )
                     self.assertFalse(meta_dir.exists())
 
-    def test_portable_providers_are_direct_acp_wrappers(self) -> None:
+    def test_portable_providers_inherit_builtin_copilot(self) -> None:
         config = tomllib.loads(CITY.read_text(encoding="utf-8"))
         providers = config.get("providers", {})
         self.assertEqual(set(providers), set(EXPECTED) | {"publication-worker"})
-        for name, (profile, policy) in EXPECTED.items():
+        expected_args = {
+            "copilot-planning-grok": [
+                "--yolo",
+                "--model",
+                "grok-4.6",
+                "--context",
+                "long_context",
+                "--effort",
+                "high",
+            ],
+            "copilot-review": [
+                "--yolo",
+                "--model",
+                "grok-4.6",
+                "--context",
+                "long_context",
+                "--effort",
+                "high",
+            ],
+            "copilot-review-grok": [
+                "--yolo",
+                "--model",
+                "grok-4.6",
+                "--context",
+                "long_context",
+                "--effort",
+                "high",
+            ],
+            "copilot-review-luna": [
+                "--yolo",
+                "--model",
+                "gpt-5.6-luna",
+                "--context",
+                "long_context",
+                "--effort",
+                "max",
+            ],
+            "copilot-code-luna": [
+                "--yolo",
+                "--model",
+                "gpt-5.6-luna",
+                "--context",
+                "default",
+                "--effort",
+                "max",
+            ],
+        }
+        for name, args in expected_args.items():
             with self.subTest(provider=name):
                 provider = providers[name]
                 self.assertEqual(provider["base"], "builtin:copilot")
-                self.assertEqual(
-                    provider["command"],
-                    "d2b-gascity-copilot-provider",
-                )
-                self.assertEqual(
-                    provider["acp_command"],
-                    "d2b-gascity-copilot-provider",
-                )
-                self.assertEqual(
-                    provider["path_check"],
-                    "d2b-gascity-copilot-provider",
-                )
-                self.assertEqual(provider["args"], ["run"])
-                self.assertEqual(provider["ready_delay_ms"], 0)
-                self.assertTrue(provider["supports_acp"])
-                self.assertEqual(
-                    provider["acp_args"],
-                    [
-                        "run",
-                        "--profile",
-                        profile,
-                        "--tool-policy",
-                        policy,
-                    ],
-                )
+                self.assertEqual(provider["args"], args)
+                self.assertEqual(provider["env"], {"COPILOT_ALLOW_ALL": "true", "COPILOT_GITHUB_TOKEN": "$COPILOT_GITHUB_TOKEN"})
+                self.assertNotIn("command", provider)
+                self.assertNotIn("acp_command", provider)
+                self.assertNotIn("supports_acp", provider)
         self.assertEqual(
             providers["publication-worker"],
             {
@@ -346,18 +373,8 @@ class ProviderPolicyTests(unittest.TestCase):
     def test_tool_policies_are_closed(self) -> None:
         config = tomllib.loads(CITY.read_text(encoding="utf-8"))
         providers = config["providers"]
-        self.assertEqual(
-            providers["copilot-planning-grok"]["acp_args"][-1],
-            "planning",
-        )
-        self.assertEqual(
-            providers["copilot-review"]["acp_args"][-1],
-            "review",
-        )
-        self.assertEqual(
-            providers["copilot-code-luna"]["acp_args"][-1],
-            "coding",
-        )
+        for name in EXPECTED:
+            self.assertEqual(providers[name]["args"][0], "--yolo")
         self.assertNotIn("allow-all", CITY.read_text(encoding="utf-8"))
 
     def test_profiles_are_grok_and_luna_only(self) -> None:

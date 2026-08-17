@@ -86,7 +86,7 @@ class CompositionPolicyTests(unittest.TestCase):
         self.assertNotIn(("", "control-dispatcher"), classified)
         self.assertNotIn(("d2b", "publisher"), classified)
 
-    def test_every_model_agent_has_exact_acp_patch_and_control_agents_do_not(self) -> None:
+    def test_every_model_agent_has_exact_tmux_patch_and_control_agents_do_not(self) -> None:
         city = tomllib.loads((CITY / "city.toml").read_text(encoding="utf-8"))
         matrix = json.loads(MATRIX.read_text(encoding="utf-8"))
         all_patches = {
@@ -105,7 +105,7 @@ class CompositionPolicyTests(unittest.TestCase):
         for identity, entry in expected.items():
             with self.subTest(agent=identity):
                 self.assertEqual(patches[identity]["provider"], entry["provider"])
-                self.assertEqual(patches[identity]["session"], "acp")
+                self.assertEqual(patches[identity]["session"], "")
         for identity in (
             ("", "control-dispatcher"),
             ("d2b", "control-dispatcher"),
@@ -123,7 +123,7 @@ class CompositionPolicyTests(unittest.TestCase):
             for identity, entry in expected.items():
                 with self.subTest(resolved_agent=identity):
                     self.assertEqual(resolved[identity]["Provider"], entry["provider"])
-                    self.assertEqual(resolved[identity]["Session"], "acp")
+                    self.assertEqual(resolved[identity].get("Session", ""), "")
 
     def test_city_scoped_dog_is_an_exact_suspended_only_control_patch(self) -> None:
         city = tomllib.loads((CITY / "city.toml").read_text(encoding="utf-8"))

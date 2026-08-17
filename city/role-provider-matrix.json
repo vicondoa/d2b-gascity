@@ -6,7 +6,7 @@
       "name": "ce-adversarial-reviewer",
       "origin": "compound-engineering",
       "provider": "copilot-review",
-      "session": "acp"
+      "session": ""
     },
     {
       "category": "review-synthesis-triage-analysis",
@@ -14,7 +14,7 @@
       "name": "ce-agent-native-reviewer",
       "origin": "compound-engineering",
       "provider": "copilot-review",
-      "session": "acp"
+      "session": ""
     },
     {
       "category": "review-synthesis-triage-analysis",
@@ -22,7 +22,7 @@
       "name": "ce-api-contract-reviewer",
       "origin": "compound-engineering",
       "provider": "copilot-review",
-      "session": "acp"
+      "session": ""
     },
     {
       "category": "planning-design-decomposition",
@@ -30,7 +30,7 @@
       "name": "ce-architecture-strategist",
       "origin": "compound-engineering",
       "provider": "copilot-planning-grok",
-      "session": "acp"
+      "session": ""
     },
     {
       "category": "planning-design-decomposition",
@@ -38,7 +38,7 @@
       "name": "ce-brainstorm",
       "origin": "compound-engineering",
       "provider": "copilot-planning-grok",
-      "session": "acp"
+      "session": ""
     },
     {
       "category": "review-synthesis-triage-analysis",
@@ -46,7 +46,7 @@
       "name": "ce-code-review-selector",
       "origin": "compound-engineering",
       "provider": "copilot-review",
-      "session": "acp"
+      "session": ""
     },
     {
       "category": "review-synthesis-triage-analysis",
@@ -54,7 +54,7 @@
       "name": "ce-code-review-synthesizer",
       "origin": "compound-engineering",
       "provider": "copilot-review",
-      "session": "acp"
+      "session": ""
     },
     {
       "category": "review-synthesis-triage-analysis",
@@ -62,7 +62,7 @@
       "name": "ce-coherence-reviewer",
       "origin": "compound-engineering",
       "provider": "copilot-review",
-      "session": "acp"
+      "session": ""
     },
     {
       "category": "review-synthesis-triage-analysis",
@@ -70,7 +70,7 @@
       "name": "ce-compound",
       "origin": "compound-engineering",
       "provider": "copilot-review",
-      "session": "acp"
+      "session": ""
     },
     {
       "category": "review-synthesis-triage-analysis",
@@ -78,7 +78,7 @@
       "name": "ce-correctness-reviewer",
       "origin": "compound-engineering",
       "provider": "copilot-review",
-      "session": "acp"
+      "session": ""
     },
     {
       "category": "review-synthesis-triage-analysis",
@@ -86,7 +86,7 @@
       "name": "ce-data-migration-reviewer",
       "origin": "compound-engineering",
       "provider": "copilot-review",
-      "session": "acp"
+      "session": ""
     },
     {
       "category": "review-synthesis-triage-analysis",
@@ -94,7 +94,7 @@
       "name": "ce-deployment-verification-agent",
       "origin": "compound-engineering",
       "provider": "copilot-review",
-      "session": "acp"
+      "session": ""
     },
     {
       "category": "review-synthesis-triage-analysis",
@@ -102,7 +102,7 @@
       "name": "ce-feasibility-reviewer",
       "origin": "compound-engineering",
       "provider": "copilot-review",
-      "session": "acp"
+      "session": ""
     },
     {
       "category": "review-synthesis-triage-analysis",
@@ -110,7 +110,7 @@
       "name": "ce-julik-frontend-races-reviewer",
       "origin": "compound-engineering",
       "provider": "copilot-review",
-      "session": "acp"
+      "session": ""
     },
     {
       "category": "review-synthesis-triage-analysis",
@@ -118,7 +118,7 @@
       "name": "ce-learnings-researcher",
       "origin": "compound-engineering",
       "provider": "copilot-review",
-      "session": "acp"
+      "session": ""
     },
     {
       "category": "review-synthesis-triage-analysis",
@@ -126,7 +126,7 @@
       "name": "ce-maintainability-reviewer",
       "origin": "compound-engineering",
       "provider": "copilot-review",
-      "session": "acp"
+      "session": ""
     },
     {
       "category": "review-synthesis-triage-analysis",
@@ -134,7 +134,7 @@
       "name": "ce-performance-reviewer",
       "origin": "compound-engineering",
       "provider": "copilot-review",
-      "session": "acp"
+      "session": ""
     },
     {
       "category": "planning-design-decomposition",
@@ -142,7 +142,7 @@
       "name": "ce-plan",
       "origin": "compound-engineering",
       "provider": "copilot-planning-grok",
-      "session": "acp"
+      "session": ""
     },
     {
       "category": "review-synthesis-triage-analysis",
@@ -150,7 +150,7 @@
       "name": "ce-plan-review-synthesizer",
       "origin": "compound-engineering",
       "provider": "copilot-review",
-      "session": "acp"
+      "session": ""
     },
     {
       "category": "implementation-fix-work",
@@ -158,7 +158,7 @@
       "name": "ce-pr-comment-resolver",
       "origin": "compound-engineering",
       "provider": "copilot-code-luna",
-      "session": "acp"
+      "session": ""
     },
     {
       "category": "review-synthesis-triage-analysis",
@@ -166,7 +166,7 @@
       "name": "ce-previous-comments-reviewer",
       "origin": "compound-engineering",
       "provider": "copilot-review",
-      "session": "acp"
+      "session": ""
     },
     {
       "category": "review-synthesis-triage-analysis",
@@ -174,7 +174,7 @@
       "name": "ce-project-standards-reviewer",
       "origin": "compound-engineering",
       "provider": "copilot-review",
-      "session": "acp"
+      "session": ""
     },
     {
       "category": "review-synthesis-triage-analysis",
@@ -182,7 +182,7 @@
       "name": "ce-reliability-reviewer",
       "origin": "compound-engineering",
       "provider": "copilot-review",
-      "session": "acp"
+      "session": ""
     },
     {
       "category": "review-synthesis-triage-analysis",
@@ -190,7 +190,7 @@
       "name": "ce-scope-guardian-reviewer",
       "origin": "compound-engineering",
       "provider": "copilot-review",
-      "session": "acp"
+      "session": ""
     },
     {
       "category": "review-synthesis-triage-analysis",
@@ -198,7 +198,7 @@
       "name": "ce-security-reviewer",
       "origin": "compound-engineering",
       "provider": "copilot-review",
-      "session": "acp"
+      "session": ""
     },
     {
       "category": "review-synthesis-triage-analysis",
@@ -206,7 +206,7 @@
       "name": "ce-swift-ios-reviewer",
       "origin": "compound-engineering",
       "provider": "copilot-review",
-      "session": "acp"
+      "session": ""
     },
     {
       "category": "review-synthesis-triage-analysis",
@@ -214,7 +214,7 @@
       "name": "ce-testing-reviewer",
       "origin": "compound-engineering",
       "provider": "copilot-review",
-      "session": "acp"
+      "session": ""
     },
     {
       "category": "implementation-fix-work",
@@ -222,7 +222,7 @@
       "name": "ce-work",
       "origin": "compound-engineering",
       "provider": "copilot-code-luna",
-      "session": "acp"
+      "session": ""
     },
     {
       "category": "planning-design-decomposition",
@@ -230,7 +230,7 @@
       "name": "design-author",
       "origin": "gascity-roles",
       "provider": "copilot-planning-grok",
-      "session": "acp"
+      "session": ""
     },
     {
       "category": "review-synthesis-triage-analysis",
@@ -238,7 +238,7 @@
       "name": "design-implementation-reviewer",
       "origin": "gascity-roles",
       "provider": "copilot-review",
-      "session": "acp"
+      "session": ""
     },
     {
       "category": "review-synthesis-triage-analysis",
@@ -246,7 +246,7 @@
       "name": "design-test-risk-reviewer",
       "origin": "gascity-roles",
       "provider": "copilot-review",
-      "session": "acp"
+      "session": ""
     },
     {
       "category": "review-synthesis-triage-analysis",
@@ -254,7 +254,7 @@
       "name": "gap-analyst",
       "origin": "gascity-roles",
       "provider": "copilot-review",
-      "session": "acp"
+      "session": ""
     },
     {
       "category": "review-synthesis-triage-analysis",
@@ -262,7 +262,7 @@
       "name": "implementation-reviewer",
       "origin": "gascity-roles",
       "provider": "copilot-review",
-      "session": "acp"
+      "session": ""
     },
     {
       "category": "implementation-fix-work",
@@ -270,7 +270,7 @@
       "name": "implementation-worker",
       "origin": "gascity-roles",
       "provider": "copilot-code-luna",
-      "session": "acp"
+      "session": ""
     },
     {
       "category": "review-synthesis-triage-analysis",
@@ -278,7 +278,7 @@
       "name": "issue-triager",
       "origin": "gascity-roles",
       "provider": "copilot-review",
-      "session": "acp"
+      "session": ""
     },
     {
       "category": "planning-design-decomposition",
@@ -286,7 +286,7 @@
       "name": "requirements-planner",
       "origin": "gascity-roles",
       "provider": "copilot-planning-grok",
-      "session": "acp"
+      "session": ""
     },
     {
       "category": "review-synthesis-triage-analysis",
@@ -294,7 +294,7 @@
       "name": "review-synthesizer",
       "origin": "gascity-roles",
       "provider": "copilot-review",
-      "session": "acp"
+      "session": ""
     },
     {
       "category": "review-synthesis-triage-analysis",
@@ -302,7 +302,7 @@
       "name": "run-operator",
       "origin": "gascity-roles",
       "provider": "copilot-review",
-      "session": "acp"
+      "session": ""
     },
     {
       "category": "planning-design-decomposition",
@@ -310,7 +310,7 @@
       "name": "task-decomposer",
       "origin": "gascity-roles",
       "provider": "copilot-planning-grok",
-      "session": "acp"
+      "session": ""
     },
     {
       "category": "implementation-fix-work",
@@ -318,7 +318,7 @@
       "name": "copilot-code-luna",
       "origin": "gascity-roles",
       "provider": "copilot-code-luna",
-      "session": "acp"
+      "session": ""
     },
     {
       "category": "planning-design-decomposition",
@@ -326,7 +326,7 @@
       "name": "copilot-planning-grok",
       "origin": "gascity-roles",
       "provider": "copilot-planning-grok",
-      "session": "acp"
+      "session": ""
     },
     {
       "category": "review-synthesis-triage-analysis",
@@ -334,7 +334,7 @@
       "name": "copilot-review",
       "origin": "gascity-roles",
       "provider": "copilot-review",
-      "session": "acp"
+      "session": ""
     },
     {
       "category": "review-synthesis-triage-analysis",
@@ -342,7 +342,7 @@
       "name": "copilot-review-luna",
       "origin": "gascity-roles",
       "provider": "copilot-review-luna",
-      "session": "acp"
+      "session": ""
     },
     {
       "category": "review-synthesis-triage-analysis",
@@ -350,7 +350,7 @@
       "name": "copilot-review-grok",
       "origin": "gascity-roles",
       "provider": "copilot-review-grok",
-      "session": "acp"
+      "session": ""
     },
     {
       "category": "implementation-fix-work",
@@ -358,7 +358,7 @@
       "name": "copilot-code-luna",
       "origin": "gascity-roles",
       "provider": "copilot-code-luna",
-      "session": "acp"
+      "session": ""
     },
     {
       "category": "planning-design-decomposition",
@@ -366,7 +366,7 @@
       "name": "copilot-planning-grok",
       "origin": "gascity-roles",
       "provider": "copilot-planning-grok",
-      "session": "acp"
+      "session": ""
     },
     {
       "category": "review-synthesis-triage-analysis",
@@ -374,7 +374,7 @@
       "name": "copilot-review",
       "origin": "gascity-roles",
       "provider": "copilot-review",
-      "session": "acp"
+      "session": ""
     },
     {
       "category": "review-synthesis-triage-analysis",
@@ -382,7 +382,7 @@
       "name": "copilot-review-luna",
       "origin": "gascity-roles",
       "provider": "copilot-review-luna",
-      "session": "acp"
+      "session": ""
     },
     {
       "category": "review-synthesis-triage-analysis",
@@ -390,7 +390,7 @@
       "name": "copilot-review-grok",
       "origin": "gascity-roles",
       "provider": "copilot-review-grok",
-      "session": "acp"
+      "session": ""
     }
   ],
   "control_agents": [

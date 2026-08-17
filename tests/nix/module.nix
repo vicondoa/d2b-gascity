@@ -335,7 +335,8 @@ in
     assert (core.networking.firewall.extraStopCommands or "") == "";
     assert !(lib.hasInfix "flush ruleset"
       core.networking.firewall.extraCommands);
-    assert main.ExecStart == "${testPackage}/bin/gc supervisor run";
+    assert lib.hasInfix "gc supervisor run" (builtins.readFile main.ExecStart);
+    assert lib.hasInfix "COPILOT_GITHUB_TOKEN" (builtins.readFile main.ExecStart);
     assert main.User == "d2b-gascity";
     assert main.Group == "d2b-gascity";
     assert main.KillMode == "control-group";
@@ -346,9 +347,7 @@ in
     assert main.MemoryMax == "4G";
     assert main.MemorySwapMax == "0";
     assert main.TasksMax == 512;
-    assert main.ExecStartPre == [
-      "${testPackage}/bin/d2b-gascity-copilot-provider readiness --selection-path /var/lib/d2b-gascity/config/provider-selection.json"
-    ];
+    assert (main.ExecStartPre or [ ]) == [ ];
     assert main.NoNewPrivileges;
     assert main.PrivateTmp == false;
     assert main.PrivateDevices == false;
