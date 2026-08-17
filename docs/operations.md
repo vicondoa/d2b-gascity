@@ -15,16 +15,6 @@ reconciliation using the machine-local site binding. Ordinary start must not
 copy the prototype, rewrite portable files, or create a second user
 supervisor.
 
-The same unit starts the city tmux server `tmux -L d2b-gascity` before the
-supervisor, sets `exit-empty off`, and sets `TMUX_TMPDIR=/run/d2b-gascity`.
-It does not create a dummy session. Upstream will not create the first ACP
-session while that server is absent. Diagnose with:
-
-```text
-sudo -u d2b-gascity env TMUX_TMPDIR=/run/d2b-gascity \
-  tmux -L d2b-gascity list-sessions
-```
-
 ### Standalone CLI API compatibility
 
 Upstream #5262 can classify the supervisor-hosted controller socket as a

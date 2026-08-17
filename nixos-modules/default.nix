@@ -11,18 +11,6 @@ let
   xdgStateRoot = "${stateRoot}/state";
   cacheRoot = "${stateRoot}/cache";
   runtimeRoot = "/run/d2b-gascity";
-  cityTmuxSocket = "d2b-gascity";
-  tmuxBin = "${pkgs.tmux}/bin/tmux";
-  cityTmuxStart = pkgs.writeShellScript "d2b-gascity-tmux-start" ''
-    set -euo pipefail
-    export TMUX_TMPDIR="${runtimeRoot}"
-    ${tmuxBin} -L ${cityTmuxSocket} start-server
-    ${tmuxBin} -L ${cityTmuxSocket} set-option -s exit-empty off
-  '';
-  cityTmuxStop = pkgs.writeShellScript "d2b-gascity-tmux-stop" ''
-    export TMUX_TMPDIR="${runtimeRoot}"
-    ${tmuxBin} -L ${cityTmuxSocket} kill-server >/dev/null 2>&1 || true
-  '';
   supervisorPort = 8372;
   apiProxyPort = 18372;
   effectivePackage = if cfg.package == null then pkgs.hello else cfg.package;
@@ -191,12 +179,9 @@ in
         TimeoutStartSec = "5min";
         TimeoutStopSec = "2min";
         KillMode = "control-group";
-        ExecStartPre = [
-          cityTmuxStart
-        ] ++ lib.optional
+        ExecStartPre = lib.optional
           (cfg.credentials.copilotTokenFile != null)
           "${packagePath}/bin/d2b-gascity-copilot-provider readiness --selection-path ${cfg.copilot.providerSelectionFile}";
-        ExecStopPost = cityTmuxStop;
 
         CPUQuota = cfg.resources.cpuQuota;
         MemoryHigh = cfg.resources.memoryHigh;
@@ -247,7 +232,6 @@ in
           "GC_SUPERVISOR_SYSTEMD_UNIT=d2b-gascity.service"
           "GC_SUPERVISOR_SYSTEMD_SCOPE=system"
           "TMPDIR=/tmp"
-          "TMUX_TMPDIR=${runtimeRoot}"
           "GIT_CONFIG_NOSYSTEM=1"
           "GIT_CONFIG_GLOBAL=${gcHome}/gitconfig"
           "PATH=${packagePath}/bin:${pkgs.openssl}/bin:/run/current-system/sw/bin"

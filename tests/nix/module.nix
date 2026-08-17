@@ -346,12 +346,9 @@ in
     assert main.MemoryMax == "4G";
     assert main.MemorySwapMax == "0";
     assert main.TasksMax == 512;
-    assert builtins.length main.ExecStartPre == 2;
-    assert lib.hasInfix "d2b-gascity-tmux-start" (builtins.toString main.ExecStartPre);
-    assert lib.hasInfix
-      "d2b-gascity-copilot-provider readiness --selection-path /var/lib/d2b-gascity/config/provider-selection.json"
-      (builtins.toString main.ExecStartPre);
-    assert lib.hasInfix "d2b-gascity-tmux-stop" (builtins.toString main.ExecStopPost);
+    assert main.ExecStartPre == [
+      "${testPackage}/bin/d2b-gascity-copilot-provider readiness --selection-path /var/lib/d2b-gascity/config/provider-selection.json"
+    ];
     assert main.NoNewPrivileges;
     assert main.PrivateTmp;
     assert main.PrivateDevices;
@@ -378,9 +375,6 @@ in
     assert builtins.elem "GC_SUPERVISOR_SYSTEMD_SCOPE=system" main.Environment;
     assert builtins.elem
       "TMPDIR=/tmp"
-      main.Environment;
-    assert builtins.elem
-      "TMUX_TMPDIR=/run/d2b-gascity"
       main.Environment;
     assert builtins.elem
       "/etc/d2b-gascity/supervisor.toml:/var/lib/d2b-gascity/gc/supervisor.toml"
@@ -459,10 +453,7 @@ in
       appMain.LoadCredential);
     true;
 
-  "without-copilot" = assert builtins.length (noCopilotMain.ExecStartPre or [ ]) == 1;
-    assert lib.hasInfix
-      "d2b-gascity-tmux-start"
-      (builtins.toString noCopilotMain.ExecStartPre);
+  "without-copilot" = assert (noCopilotMain.ExecStartPre or [ ]) == [ ];
     true;
 
   "fixed-port" = assert builtins.elem "GC_DOLT_PORT=8375"
