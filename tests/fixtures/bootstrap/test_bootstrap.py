@@ -346,6 +346,26 @@ class BootstrapFixtureTests(unittest.TestCase):
         self.assertIn('workspace_name = "d2b-gascity"', site)
         self.assertIn(str(self.rig), site)
         self.assertNotIn(f'path = "{self.rig}"', (self.city / "city.toml").read_text())
+        rig_beads = (self.rig / ".beads" / "config.yaml").read_text(encoding="utf-8")
+        self.assertNotRegex(rig_beads, r"(?m)^\s*sync\.remote\s*:")
+        remotes = subprocess.run(
+            [
+                str(self.dolt),
+                "--data-dir",
+                str(self.city / ".beads" / "dolt"),
+                "sql",
+                "-q",
+                "USE d2b; SELECT name, url FROM dolt_remotes;",
+            ],
+            env=self.env,
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(remotes.returncode, 0, remotes.stderr)
+        self.assertNotIn("origin", remotes.stdout)
+        self.assertNotIn("git+", remotes.stdout)
         origin_head = subprocess.run(
             [
                 "git",

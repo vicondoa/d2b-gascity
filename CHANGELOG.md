@@ -54,6 +54,8 @@ and this project follows semantic versioning where releases are published.
 
 ### Changed
 
+- Drop the git-origin Beads federation remote after rig initialization so the
+  local city does not expect remotesapi or push issue data into `vicondoa/d2b`.
 - Run CI checks and generated-inventory reproduction through the pinned Nix
   development shell, and invoke repository Python tests with the contributor
   runtime interpreter after that runtime is built.

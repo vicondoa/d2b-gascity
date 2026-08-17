@@ -737,6 +737,85 @@ def _initialize_rig_beads(args: argparse.Namespace, env: Mapping[str, str]) -> N
         )
 
 
+def _detach_rig_git_federation(
+    args: argparse.Namespace,
+    env: Mapping[str, str],
+) -> None:
+    """Drop the git-origin Dolt remote that bd init copies from the checkout.
+
+    Publication uses the worker, not remotesapi. Leave the git remote intact.
+    """
+    try:
+        dolt, _host, _port, _database = _dolt_connection(args, env)
+    except BootstrapError:
+        return
+    bd = dolt.parent / "bd"
+    if not bd.is_file() or not os.access(bd, os.X_OK):
+        raise BootstrapError("packaged runtime is missing bd for rig federation cleanup")
+    for argv in (
+        [bd, "federation", "remove-peer", "origin"],
+        [bd, "dolt", "remote", "remove", "origin"],
+        [bd, "config", "unset", "sync.remote"],
+    ):
+        subprocess.run(
+            [os.fspath(item) for item in argv],
+            cwd=args.rig,
+            env=dict(env),
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+    data_dir = args.city / ".beads" / "dolt"
+    if not data_dir.is_dir():
+        return
+    status = subprocess.run(
+        [
+            os.fspath(dolt),
+            "--data-dir",
+            str(data_dir),
+            "sql",
+            "-q",
+            f"USE {RIG_NAME}; SELECT table_name FROM dolt_status;",
+        ],
+        cwd=args.city,
+        env=dict(env),
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if status.returncode != 0:
+        return
+    dirty = [
+        line
+        for line in status.stdout.splitlines()
+        if line.startswith("|")
+        and "table_name" not in line
+        and "---" not in line
+    ]
+    if not dirty:
+        return
+    commit = subprocess.run(
+        [
+            os.fspath(dolt),
+            "--data-dir",
+            str(data_dir),
+            "sql",
+            "-q",
+            f"USE {RIG_NAME}; CALL DOLT_ADD('-A'); "
+            "CALL DOLT_COMMIT('-Am', 'Commit local rig store overlay');",
+        ],
+        cwd=args.city,
+        env=dict(env),
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if commit.returncode != 0:
+        raise BootstrapError(
+            "rig store overlay commit failed: " + _redact(commit.stderr or commit.stdout)
+        )
+
+
 def _site_binding(city: pathlib.Path, rig: pathlib.Path) -> None:
     site_path = city / ".gc" / "site.toml"
     if not site_path.is_file() or site_path.is_symlink():
@@ -937,6 +1016,7 @@ def _init(args: argparse.Namespace) -> int:
             env=env,
             label="gc rig add",
         )
+        _detach_rig_git_federation(args, env)
         _run(
             [args.gc, "import", "install", "--city", args.city],
             env=env,

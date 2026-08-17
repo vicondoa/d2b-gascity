@@ -32,7 +32,9 @@ The `init` mode:
 4. Runs `gc init --file ... --preserve-existing --no-start` and skips provider
    readiness until the provider work is available.
 5. Installs the exact locked imports, clones or accepts a `v3` d2b checkout,
-   and runs `gc rig add --start-suspended`.
+   and runs `gc rig add --start-suspended`. It then removes the Dolt
+   federation remote that `bd init` copies from the git origin so the local
+   city does not expect remotesapi or push beads into `vicondoa/d2b`.
 
 If initialization, import installation, or rig setup fails after materializing
 the city, bootstrap best-effort stops that city before returning the original
