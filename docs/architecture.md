@@ -159,6 +159,40 @@ blocked. The result is atomically written owner-only to
 credential is persisted. Without a Copilot credential, no readiness command
 is added and the service remains valid.
 
+## Pull-request publication credentials
+
+The one-shot `d2b-gascity-publication-worker` is the only publication path.
+The service projects the exact policy credential and exactly one authentication
+mode into `CREDENTIALS_DIRECTORY`: the legacy static
+`github-publication-token`, or the preferred
+`github-publication-app-key` and `github-publication-app-config` pair. The
+policy is required whenever any publication credential is configured. The App
+config has no host path or secret and must be exactly:
+
+```json
+{
+  "version": 1,
+  "app_id": 123456,
+  "installation_id": 789012,
+  "repository": "vicondoa/d2b"
+}
+```
+
+The PEM app key is private and accepts only projected mode `0400` or `0440`.
+The helper first tries the static token for compatibility. Only a missing
+static projection permits fallback to an on-demand GitHub App flow. That flow
+builds a JWT with `RS256`, `iat=now-60`, `exp=now+540`, and the decimal app ID,
+then invokes the packaged OpenSSL through the key path with the signing input
+on standard input. It requests only `metadata:read`, `contents:write`, and
+`pull_requests:write` for `vicondoa/d2b`, and rejects broader permissions,
+unexpected repositories, invalid token text, or an expiry outside the bounded
+future window.
+
+The installation token exists only in the helper process and child GitHub
+environments. It is never written to disk, metadata, artifacts, logs, or JSON
+publication records. There is no token cache, daemon, refresh timer, or
+supervisor restart coupling; each publication attempt mints a current token.
+
 ## Optional remote dashboard ingress
 
 When `dashboard.remote.enable` is false, no TinyAuth or relay unit, credential,

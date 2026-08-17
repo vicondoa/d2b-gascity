@@ -49,6 +49,18 @@ let
   apiProxy = core.systemd.services.d2b-gascity-api-proxy.serviceConfig;
   apiProxySocket = core.systemd.sockets.d2b-gascity-api-proxy;
   coreSupervisorText = core.environment.etc."d2b-gascity/supervisor.toml".text;
+  appAuthConfig = {
+    services.d2bGasCity = {
+      enable = true;
+      package = testPackage;
+      credentials.githubPublicationPolicyFile = "/run/secrets/github-publication-policy";
+      credentials.githubPublicationAppKeyFile = "/run/secrets/github-publication-app-key";
+      credentials.githubPublicationAppConfigFile = "/run/secrets/github-publication-app-config";
+    };
+  };
+
+  appAuth = (mkEval appAuthConfig).config;
+  appMain = appAuth.systemd.services.d2b-gascity.serviceConfig;
   invalidFirewallDisabled = (mkEval {
     networking.firewall.enable = false;
     services.d2bGasCity = {
@@ -222,6 +234,35 @@ let
     "/run/secrets/copilot\nnext"
   ];
 
+  invalidPublicationNoPolicy = (mkEval {
+    services.d2bGasCity = {
+      enable = true;
+      package = testPackage;
+      credentials.githubPublicationAppKeyFile = "/run/secrets/github-publication-app-key";
+      credentials.githubPublicationAppConfigFile = "/run/secrets/github-publication-app-config";
+    };
+  }).config;
+
+  invalidPublicationPartial = (mkEval {
+    services.d2bGasCity = {
+      enable = true;
+      package = testPackage;
+      credentials.githubPublicationPolicyFile = "/run/secrets/github-publication-policy";
+      credentials.githubPublicationAppKeyFile = "/run/secrets/github-publication-app-key";
+    };
+  }).config;
+
+  invalidPublicationBoth = (mkEval {
+    services.d2bGasCity = {
+      enable = true;
+      package = testPackage;
+      credentials.githubPublicationPolicyFile = "/run/secrets/github-publication-policy";
+      credentials.githubPublicationTokenFile = "/run/secrets/github-publication-token";
+      credentials.githubPublicationAppKeyFile = "/run/secrets/github-publication-app-key";
+      credentials.githubPublicationAppConfigFile = "/run/secrets/github-publication-app-config";
+    };
+  }).config;
+
   hasFailedAssertion = needle: assertions:
     lib.any (
       assertion:
@@ -345,6 +386,9 @@ in
     assert builtins.elem
       "github-publication-policy:/run/secrets/github-publication-policy"
       main.LoadCredential;
+    assert builtins.elem
+      "PATH=${testPackage}/bin:${pkgs.openssl}/bin:/run/current-system/sw/bin"
+      main.Environment;
     assert !(lib.hasInfix "GC_DOLT_PORT=" (stringValue main.Environment));
     assert !(lib.hasInfix "allowed_origins" coreSupervisorText);
     assert !(lib.hasInfix "allow_mutations" coreSupervisorText);
@@ -393,6 +437,20 @@ in
     assert !(lib.hasInfix "d2b-gascity.service"
       (stringValue (apiProxy.partOf or [ ])));
     assert (apiProxySocket.unitConfig.PartOf or null) == null;
+    true;
+
+  "app-auth" = assert builtins.elem
+    "github-publication-app-key:/run/secrets/github-publication-app-key"
+    appMain.LoadCredential;
+    assert builtins.elem
+      "github-publication-app-config:/run/secrets/github-publication-app-config"
+      appMain.LoadCredential;
+    assert builtins.elem
+      "github-publication-policy:/run/secrets/github-publication-policy"
+      appMain.LoadCredential;
+    assert !(builtins.elem
+      "github-publication-token:/run/secrets/github-publication-token"
+      appMain.LoadCredential);
     true;
 
   "without-copilot" = assert (noCopilotMain.ExecStartPre or [ ]) == [ ];
@@ -606,5 +664,22 @@ in
   "invalid-paths" = assert lib.all
     (candidate: hasFailedAssertion "copilotTokenFile" candidate.assertions)
     invalidPathConfigs;
+    true;
+
+  "invalid-publication-no-policy" = assert hasFailedAssertion
+    "githubPublicationPolicyFile is required"
+    invalidPublicationNoPolicy.assertions;
+    true;
+
+  "invalid-publication-partial" = assert hasFailedAssertion
+    "must be configured together"
+    invalidPublicationPartial.assertions;
+    assert hasFailedAssertion "exactly one GitHub publication auth mode"
+      invalidPublicationPartial.assertions;
+    true;
+
+  "invalid-publication-both" = assert hasFailedAssertion
+    "exactly one GitHub publication auth mode"
+    invalidPublicationBoth.assertions;
     true;
 }

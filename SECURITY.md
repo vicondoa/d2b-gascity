@@ -25,6 +25,11 @@ secrets or private deployment data in the report.
 - The d2b rig is the single intended target and uses `v3`. Publication must
   not gain authority to update, merge, force, or bypass protection on that
   branch.
+- Publication accepts either the compatibility static token or a complete
+  GitHub App key/config pair, never both. The exact server policy remains
+  mandatory for either mode. App installation tokens are minted per
+  publication attempt with only metadata read, contents write, and pull
+  requests write for `vicondoa/d2b`.
 
 ## Local API compatibility boundary
 
@@ -41,8 +46,8 @@ identity-aware routing is available.
 
 Never commit or attach:
 
-- credentials, tokens, keys, cookies, password hashes, or secret-bearing
-  environment files;
+- credentials, tokens, GitHub App private keys, cookies, password hashes, or
+  secret-bearing environment files;
 - private host values, authorities, addresses, paths, user or channel IDs,
   or host configuration;
 - `.gc`, `.beads`, Dolt, worktree, session, database, socket, cache, report,

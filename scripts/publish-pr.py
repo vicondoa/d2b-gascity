@@ -16,7 +16,11 @@ import stat
 import subprocess
 import sys
 import tempfile
+import time
+from datetime import datetime
+import urllib.error
 import urllib.parse
+import urllib.request
 from collections.abc import Mapping
 
 
@@ -27,6 +31,16 @@ BRANCH_PREFIX = "gascity/"
 CREDENTIALS_DIRECTORY_ENV = "CREDENTIALS_DIRECTORY"
 GITHUB_PUBLICATION_TOKEN_CREDENTIAL = "github-publication-token"
 GITHUB_PUBLICATION_POLICY_CREDENTIAL = "github-publication-policy"
+GITHUB_PUBLICATION_APP_KEY_CREDENTIAL = "github-publication-app-key"
+GITHUB_PUBLICATION_APP_CONFIG_CREDENTIAL = "github-publication-app-config"
+GITHUB_API_BASE = "https://api.github.com"
+GITHUB_API_TIMEOUT = 30
+INSTALLATION_TOKEN_MAX_LIFETIME = 3600
+REQUESTED_PERMISSIONS = {
+    "metadata": "read",
+    "contents": "write",
+    "pull_requests": "write",
+}
 
 EXPECTED_HEAD_KEY = "gc.publication.expected_head_sha"
 BASE_SHA_KEY = "gc.publication.base_sha"
@@ -696,7 +710,10 @@ def _read_credential(
                 not stat.S_ISREG(info.st_mode)
                 or info.st_size <= 0
                 or info.st_size > max_size
-                or (private and (not info.st_mode & 0o400 or info.st_mode & 0o077))
+                or (
+                    private
+                    and stat.S_IMODE(info.st_mode) not in {0o400, 0o440}
+                )
                 or (not private and info.st_mode & 0o222)
             ):
                 raise PublishError(failure_code)
@@ -741,6 +758,226 @@ def _read_github_token() -> str:
     if not value or any(ord(character) < 0x21 or ord(character) > 0x7E for character in value):
         raise PublishError("github-credential-invalid")
     return value
+
+
+def _read_github_app_key() -> str:
+    value = _read_credential(
+        GITHUB_PUBLICATION_APP_KEY_CREDENTIAL,
+        max_size=32 * 1024,
+        private=True,
+        failure_code="github-app-key-unverified",
+        unavailable_code="github-app-key-unavailable",
+    )
+    lines = value.strip("\r\n").splitlines()
+    if len(lines) < 3:
+        raise PublishError("github-app-key-invalid")
+    begin = lines[0]
+    if not begin.startswith("-----BEGIN ") or not begin.endswith(" PRIVATE KEY-----"):
+        raise PublishError("github-app-key-invalid")
+    label = begin[len("-----BEGIN ") : -len("-----")]
+    if label not in {"PRIVATE KEY", "RSA PRIVATE KEY"}:
+        raise PublishError("github-app-key-invalid")
+    if lines[-1] != f"-----END {label}-----" or not any(lines[1:-1]):
+        raise PublishError("github-app-key-invalid")
+    return value
+
+
+def _load_github_app_config() -> dict[str, object]:
+    try:
+        value = _read_credential(
+            GITHUB_PUBLICATION_APP_CONFIG_CREDENTIAL,
+            max_size=8 * 1024,
+            private=False,
+            failure_code="github-app-config-unverified",
+            unavailable_code="github-app-config-unavailable",
+        )
+        raw = json.loads(value)
+    except PublishError:
+        raise
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise PublishError("github-app-config-invalid") from error
+
+    if (
+        not isinstance(raw, Mapping)
+        or set(raw) != {"version", "app_id", "installation_id", "repository"}
+        or raw.get("version") != 1
+        or isinstance(raw.get("version"), bool)
+        or raw.get("repository") != REPOSITORY
+    ):
+        raise PublishError("github-app-config-invalid")
+    for key in ("app_id", "installation_id"):
+        value = raw.get(key)
+        if (
+            not isinstance(value, int)
+            or isinstance(value, bool)
+            or value <= 0
+            or value > 2**63 - 1
+        ):
+            raise PublishError("github-app-config-invalid")
+    return {
+        "version": 1,
+        "app_id": raw["app_id"],
+        "installation_id": raw["installation_id"],
+        "repository": REPOSITORY,
+    }
+
+
+def _urlsafe_b64(value: bytes) -> str:
+    return base64.urlsafe_b64encode(value).rstrip(b"=").decode("ascii")
+
+
+def _create_github_app_jwt(
+    app_id: int,
+    key_path: pathlib.Path,
+    *,
+    openssl_command: str,
+) -> str:
+    now = int(time.time())
+    header = _urlsafe_b64(
+        json.dumps(
+            {"alg": "RS256", "typ": "JWT"},
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("utf-8")
+    )
+    payload = _urlsafe_b64(
+        json.dumps(
+            {"exp": now + 540, "iat": now - 60, "iss": app_id},
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("utf-8")
+    )
+    signing_input = f"{header}.{payload}".encode("ascii")
+    try:
+        openssl = _command_path(openssl_command, "openssl")
+    except PublishError as error:
+        raise PublishError("github-app-jwt-unavailable") from error
+    try:
+        result = subprocess.run(
+            [openssl, "dgst", "-sha256", "-sign", str(key_path)],
+            input=signing_input,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            env=_scrubbed_environment(openssl),
+            check=False,
+            close_fds=True,
+            timeout=GITHUB_API_TIMEOUT,
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise PublishError("github-app-jwt-unavailable") from error
+    if result.returncode != 0 or not result.stdout:
+        raise PublishError("github-app-jwt-failed")
+    return f"{header}.{payload}.{_urlsafe_b64(result.stdout)}"
+
+
+def _valid_installation_token_expiry(value: object, *, now: int) -> bool:
+    if not isinstance(value, str) or not value:
+        return False
+    try:
+        normalized = value[:-1] + "+00:00" if value.endswith("Z") else value
+        parsed = datetime.fromisoformat(normalized)
+        expires_at = parsed.timestamp()
+    except (OSError, TypeError, ValueError, OverflowError):
+        return False
+    if parsed.tzinfo is None:
+        return False
+    return now < expires_at <= now + INSTALLATION_TOKEN_MAX_LIFETIME
+
+
+def _validate_installation_token_response(raw: object, *, now: int) -> str:
+    if not isinstance(raw, Mapping):
+        raise PublishError("github-app-response-invalid")
+    token = raw.get("token")
+    if (
+        not isinstance(token, str)
+        or not token
+        or any(ord(character) < 0x21 or ord(character) > 0x7E for character in token)
+        or not _valid_installation_token_expiry(raw.get("expires_at"), now=now)
+    ):
+        raise PublishError("github-app-response-invalid")
+
+    permissions = raw.get("permissions")
+    if (
+        not isinstance(permissions, Mapping)
+        or set(permissions) - set(REQUESTED_PERMISSIONS)
+        or set(permissions) != set(REQUESTED_PERMISSIONS)
+        or any(
+            permissions.get(name) != level
+            for name, level in REQUESTED_PERMISSIONS.items()
+        )
+    ):
+        raise PublishError("github-app-response-invalid")
+
+    repositories = raw.get("repositories")
+    if not isinstance(repositories, list) or len(repositories) != 1:
+        raise PublishError("github-app-response-invalid")
+    repository = repositories[0]
+    if isinstance(repository, Mapping):
+        repository = repository.get("full_name")
+    if repository != REPOSITORY:
+        raise PublishError("github-app-response-invalid")
+    if raw.get("repository_selection", "selected") != "selected":
+        raise PublishError("github-app-response-invalid")
+    return token
+
+
+def _request_github_installation_token(
+    jwt: str,
+    installation_id: int,
+) -> str:
+    body = json.dumps(
+        {
+            "repositories": ["d2b"],
+            "permissions": REQUESTED_PERMISSIONS,
+        },
+        separators=(",", ":"),
+    ).encode("utf-8")
+    request = urllib.request.Request(
+        (
+            f"{GITHUB_API_BASE}/app/installations/"
+            f"{installation_id}/access_tokens"
+        ),
+        data=body,
+        headers={
+            "Accept": "application/vnd.github+json",
+            "Authorization": f"Bearer {jwt}",
+            "Content-Type": "application/json",
+            "User-Agent": "d2b-gascity-publication",
+            "X-GitHub-Api-Version": "2022-11-28",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=GITHUB_API_TIMEOUT) as response:
+            if response.getcode() != 201:
+                raise PublishError("github-app-api-unavailable")
+            payload = response.read(64 * 1024 + 1)
+    except PublishError:
+        raise
+    except urllib.error.HTTPError as error:
+        raise PublishError("github-app-api-unavailable") from error
+    except (OSError, TimeoutError, urllib.error.URLError) as error:
+        raise PublishError("github-app-api-unavailable") from error
+    if not isinstance(payload, bytes) or len(payload) > 64 * 1024:
+        raise PublishError("github-app-response-invalid")
+    try:
+        raw = json.loads(payload.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise PublishError("github-app-response-invalid") from error
+    return _validate_installation_token_response(raw, now=int(time.time()))
+
+
+def _mint_github_installation_token(*, openssl_command: str) -> str:
+    config = _load_github_app_config()
+    _read_github_app_key()
+    credentials_directory = _credentials_directory()
+    key_path = credentials_directory / GITHUB_PUBLICATION_APP_KEY_CREDENTIAL
+    jwt = _create_github_app_jwt(
+        config["app_id"],
+        key_path,
+        openssl_command=openssl_command,
+    )
+    return _request_github_installation_token(jwt, config["installation_id"])
 
 
 def _parse_pull_request(raw: Mapping[str, object]) -> PullRequest:
@@ -987,6 +1224,7 @@ def publish(
     git_command: str = "git",
     gh_command: str = "gh",
     beads_cwd: pathlib.Path | None = None,
+    openssl_command: str = "openssl",
 ) -> dict[str, object]:
     issue_id = _validate_work_id(issue_id)
     branch = derive_branch(issue_id)
@@ -1003,7 +1241,14 @@ def publish(
         environment=local_git_environment,
     )
     _load_server_policy()
-    token = _read_github_token()
+    try:
+        token = _read_github_token()
+    except PublishError as error:
+        if error.code != "github-credential-unavailable":
+            raise
+        token = _mint_github_installation_token(
+            openssl_command=openssl_command,
+        )
     git_remote_environment = _git_remote_environment(token, git)
     gh_environment = _gh_environment(token, gh)
     with _trusted_bare_repository(

@@ -221,18 +221,39 @@ the only push is one SHA-to-`refs/heads/gascity/<work-id>` refspec without
 force or force-with-lease.
 
 Host configuration sets
-`services.d2bGasCity.credentials.githubPublicationTokenFile` and
-`services.d2bGasCity.credentials.githubPublicationPolicyFile` to
-administrator-controlled absolute source paths. The Gas City systemd unit
-projects those sources under the fixed credential names
-`github-publication-token` and `github-publication-policy`, and systemd
-provides their credential directory through `CREDENTIALS_DIRECTORY`. The
-helper reads only those names from that directory; arbitrary caller-selected
-paths and environment overrides are not accepted.
+`services.d2bGasCity.credentials.githubPublicationPolicyFile` plus exactly one
+authentication mode: the compatibility
+`githubPublicationTokenFile`, or both
+`githubPublicationAppKeyFile` and `githubPublicationAppConfigFile`. The
+systemd unit projects fixed names
+`github-publication-policy`, `github-publication-token`,
+`github-publication-app-key`, and `github-publication-app-config`, and systemd
+provides their directory through `CREDENTIALS_DIRECTORY`. The helper reads
+only those names; arbitrary caller-selected paths and environment overrides
+are not accepted. The App config is an exact versioned JSON object, using
+placeholders for host-local identifiers:
+
+```json
+{
+  "version": 1,
+  "app_id": 123456,
+  "installation_id": 789012,
+  "repository": "vicondoa/d2b"
+}
+```
+
+The app-key projection is a PEM private key with exact `0400` or `0440`
+permissions. A missing static token may fall back to on-demand installation
+token minting; an unreadable or invalid static token never falls back. Each
+mint creates a short-lived RS256 app JWT, signs it with the packaged OpenSSL
+binary through credential-path input, requests only metadata read plus
+contents and pull-requests write for `d2b`, and validates the response before
+using it. There is no refresh timer, token cache, persistence, or supervisor
+restart requirement.
 
 Host acceptance requires an administrator to review the repository rules and
 the least-privilege publication identity against the exact policy, keep the
-policy source non-writable, and keep the token source private. The helper
+policy source non-writable, and keep the app-key source private. The helper
 gives `gh` the dedicated publication token and gives Git remote operations a
 GitHub authorization header through a child-only Git configuration. Both
 subprocess environments use a nonexistent home, disabled terminal prompts,
@@ -247,13 +268,15 @@ gh api repos/vicondoa/d2b --jq '{name: .full_name, permissions: .permissions}'
 gh api 'repos/vicondoa/d2b/branches/v3/protection'
 gh api 'repos/vicondoa/d2b/rulesets?includes_parents=true'
 stat -c 'uid=%u mode=%a' "$configured_publication_policy_source"
+stat -c 'uid=%u mode=%a' "$configured_publication_app_key_source"
 ```
 
 The first three reads are run with the dedicated publication identity and
 must document create-only `gascity/*` branches, no `v3` update, no force
 update, no merge or queue authority, and no bypass actor. The final check
-must report the expected host ownership and no write bits. Do not copy either
-credential into the repository or encode a fixed deployment path in source.
+must report the expected host ownership and no write bits. Do not copy any
+credential into the repository or encode a fixed deployment path or host
+identifier in source.
 Pack-native behavior includes application and public-key validation, role,
 guild, and channel policy, signed-interaction timestamp rejection at the
 pack's retention window, duplicate interaction receipts, bot/self filtering

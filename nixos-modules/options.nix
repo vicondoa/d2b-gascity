@@ -11,6 +11,19 @@ let
   cidr = types.strMatching "^[0-9A-Fa-f:.]+/[0-9]{1,3}$";
   supervisorPort = 8372;
   apiProxyPort = 18372;
+  publicationTokenConfigured =
+    cfg.credentials.githubPublicationTokenFile != null;
+  publicationAppKeyConfigured =
+    cfg.credentials.githubPublicationAppKeyFile != null;
+  publicationAppConfigConfigured =
+    cfg.credentials.githubPublicationAppConfigFile != null;
+  publicationAppConfigured =
+    publicationAppKeyConfigured && publicationAppConfigConfigured;
+  publicationCredentialConfigured =
+    publicationTokenConfigured
+    || publicationAppKeyConfigured
+    || publicationAppConfigConfigured
+    || cfg.credentials.githubPublicationPolicyFile != null;
 
   absolutePath = value:
     lib.hasPrefix "/" value
@@ -90,6 +103,14 @@ let
     (lib.optional (cfg.credentials.githubPublicationPolicyFile != null) {
       assertion = absolutePath cfg.credentials.githubPublicationPolicyFile;
       message = "services.d2bGasCity.credentials.githubPublicationPolicyFile must be absolute.";
+    })
+    (lib.optional (publicationAppKeyConfigured) {
+      assertion = absolutePath cfg.credentials.githubPublicationAppKeyFile;
+      message = "services.d2bGasCity.credentials.githubPublicationAppKeyFile must be absolute.";
+    })
+    (lib.optional (publicationAppConfigConfigured) {
+      assertion = absolutePath cfg.credentials.githubPublicationAppConfigFile;
+      message = "services.d2bGasCity.credentials.githubPublicationAppConfigFile must be absolute.";
     })
     (lib.optional (cfg.credentials.discordBotTokenFile != null) {
       assertion = absolutePath cfg.credentials.discordBotTokenFile;
@@ -186,6 +207,18 @@ in
         description = "Optional host-local GitHub publication policy source.";
       };
 
+      githubPublicationAppKeyFile = mkOption {
+        type = path;
+        default = null;
+        description = "Optional root-owned GitHub App private-key source.";
+      };
+
+      githubPublicationAppConfigFile = mkOption {
+        type = path;
+        default = null;
+        description = "Optional host-local GitHub App identifier and repository configuration source.";
+      };
+
       discordBotTokenFile = mkOption {
         type = path;
         default = null;
@@ -278,6 +311,24 @@ in
         {
           assertion = lib.unique configuredPorts == configuredPorts;
           message = "Gas City supervisor, API proxy, dashboard relay, auth relay, TinyAuth, and fixed Dolt ports must be distinct.";
+        }
+      ]
+      ++ lib.optionals publicationCredentialConfigured [
+        {
+          assertion = cfg.credentials.githubPublicationPolicyFile != null;
+          message = "services.d2bGasCity.credentials.githubPublicationPolicyFile is required when GitHub publication credentials are configured.";
+        }
+        {
+          assertion =
+            publicationTokenConfigured != publicationAppConfigured;
+          message = "Configure exactly one GitHub publication auth mode: githubPublicationTokenFile or the complete githubPublicationAppKeyFile/githubPublicationAppConfigFile pair.";
+        }
+      ]
+      ++ [
+        {
+          assertion =
+            publicationAppKeyConfigured == publicationAppConfigConfigured;
+          message = "GitHub publication App key and config sources must be configured together.";
         }
       ]
       ++ pathAssertions

@@ -48,6 +48,9 @@ and this project follows semantic versioning where releases are published.
 - Added a native systemd-socket-proxyd compatibility route for upstream #5262,
   forwarding the standalone CLI API endpoint to the supervisor without an
   upstream patch or a second lifecycle owner.
+- Added on-demand GitHub App installation-token minting for publication with
+  strict app-key/config projections, least-privilege permissions, bounded
+  response validation, and no token persistence.
 
 ### Changed
 
@@ -60,7 +63,7 @@ and this project follows semantic versioning where releases are published.
   and `high` effort, retained Luna coding and unsupported/unavailable-only
   review fallback, and supplied the machine-selected review provider as the
   portable workspace default.
-- Accepted exact `0400` and `0440` modes for systemd-projected Copilot
+- Accepted exact `0400` and `0440` modes for systemd-projected private
   credentials while retaining strict explicit credential-file checks.
 - Hardened auth Origin matching, decoupled relay and TinyAuth stopping,
   isolated the ingress fixture's fixed supervisor port in an unprivileged

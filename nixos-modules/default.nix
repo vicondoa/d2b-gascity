@@ -40,6 +40,10 @@ let
       "github-publication-token:${cfg.credentials.githubPublicationTokenFile}")
     (lib.optional (cfg.credentials.githubPublicationPolicyFile != null)
       "github-publication-policy:${cfg.credentials.githubPublicationPolicyFile}")
+    (lib.optional (cfg.credentials.githubPublicationAppKeyFile != null)
+      "github-publication-app-key:${cfg.credentials.githubPublicationAppKeyFile}")
+    (lib.optional (cfg.credentials.githubPublicationAppConfigFile != null)
+      "github-publication-app-config:${cfg.credentials.githubPublicationAppConfigFile}")
     (lib.optional (cfg.credentials.discordBotTokenFile != null)
       "discord-bot-token:${cfg.credentials.discordBotTokenFile}")
   ];
@@ -230,7 +234,7 @@ in
           "TMPDIR=/tmp"
           "GIT_CONFIG_NOSYSTEM=1"
           "GIT_CONFIG_GLOBAL=${gcHome}/gitconfig"
-          "PATH=${packagePath}/bin:/run/current-system/sw/bin"
+          "PATH=${packagePath}/bin:${pkgs.openssl}/bin:/run/current-system/sw/bin"
         ] ++ lib.optional (cfg.dolt.fixedPort != null)
           "GC_DOLT_PORT=${toString cfg.dolt.fixedPort}";
 

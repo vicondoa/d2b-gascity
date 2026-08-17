@@ -52,6 +52,9 @@ pkgs.runCommand "gas-city-package-smoke" {
     test -x "$toolPath"
     test "$(command -v "$tool")" = "$toolPath"
   done
+  publicationWorkerPath="${gasCityContributor}/bin"
+  test "$(PATH="$publicationWorkerPath:${pkgs.coreutils}/bin" \
+    command -v openssl)" = "$publicationWorkerPath/openssl"
   unshare --version >/dev/null
   ip -Version >/dev/null
 

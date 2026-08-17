@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from contextlib import redirect_stderr, redirect_stdout
+import base64
 import io
 import importlib.util
 import json
@@ -23,6 +24,24 @@ HEAD_SHA = "a" * 40
 BASE_SHA = "b" * 40
 RACE_SHA = "c" * 40
 WORK_ID = "bd-fixture-123"
+
+
+class _FakeHTTPResponse:
+    def __init__(self, payload: dict[str, object], status: int = 201) -> None:
+        self._body = json.dumps(payload, sort_keys=True).encode("utf-8")
+        self.status = status
+
+    def __enter__(self) -> "_FakeHTTPResponse":
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        return None
+
+    def getcode(self) -> int:
+        return self.status
+
+    def read(self, limit: int = -1) -> bytes:
+        return self._body if limit < 0 else self._body[:limit]
 
 
 def _load_module():
@@ -48,6 +67,8 @@ class PublicationPolicyTests(unittest.TestCase):
         self.credentials.mkdir()
         self.policy = self.credentials / "github-publication-policy"
         self.token = self.credentials / "github-publication-token"
+        self.app_key = self.credentials / "github-publication-app-key"
+        self.app_config = self.credentials / "github-publication-app-config"
         self.policy.write_text(
             json.dumps(self._policy(), sort_keys=True),
             encoding="utf-8",
@@ -160,7 +181,12 @@ class PublicationPolicyTests(unittest.TestCase):
             (self.worktree / ".fake-gh-state.json").read_text(encoding="utf-8")
         )
 
-    def _run(self, *, policy: dict[str, object] | None = None) -> dict[str, object]:
+    def _run(
+        self,
+        *,
+        policy: dict[str, object] | None = None,
+        **publish_kwargs: object,
+    ) -> dict[str, object]:
         if policy is not None:
             self.policy.chmod(0o644)
             self.policy.write_text(json.dumps(policy, sort_keys=True), encoding="utf-8")
@@ -177,6 +203,7 @@ class PublicationPolicyTests(unittest.TestCase):
                 git_command=str(FAKE_GIT),
                 gh_command=str(FAKE_GH),
                 beads_cwd=self.base,
+                **publish_kwargs,
             )
 
     def _run_error(self, **kwargs: object) -> MODULE.PublishError:
@@ -628,6 +655,209 @@ class PublicationPolicyTests(unittest.TestCase):
                 MODULE._read_github_token()
         self.assertEqual(context.exception.code, "github-credential-unverified")
 
+    def test_systemd_projected_private_modes_are_exact(self) -> None:
+        self.token.chmod(0o440)
+        with mock.patch.dict(
+            "os.environ",
+            {"CREDENTIALS_DIRECTORY": str(self.credentials)},
+            clear=False,
+        ):
+            self.assertEqual(MODULE._read_github_token(), "fixture-token")
+
+        for mode in (0o600, 0o640, 0o401):
+            with self.subTest(mode=oct(mode)):
+                self.token.chmod(mode)
+                with (
+                    mock.patch.dict(
+                        "os.environ",
+                        {"CREDENTIALS_DIRECTORY": str(self.credentials)},
+                        clear=False,
+                    ),
+                    self.assertRaises(MODULE.PublishError) as context,
+                ):
+                    MODULE._read_github_token()
+                self.assertEqual(context.exception.code, "github-credential-unverified")
+
+    def test_static_token_invalid_does_not_fall_back_to_app(self) -> None:
+        self._write_app_credentials()
+        self.token.chmod(0o600)
+        self.token.write_text("invalid token\n", encoding="utf-8")
+        self.token.chmod(0o400)
+        with mock.patch.object(MODULE.urllib.request, "urlopen") as urlopen:
+            error = self._run_error()
+        self.assertEqual(error.code, "github-credential-invalid")
+        urlopen.assert_not_called()
+
+    def test_missing_static_token_mints_app_token_with_exact_jwt_and_request(self) -> None:
+        self._write_app_credentials()
+        self.token.unlink()
+        fake_openssl = self._fake_openssl()
+        now = 1_700_000_000
+        captured: dict[str, object] = {}
+
+        def urlopen(request: object, *, timeout: float) -> _FakeHTTPResponse:
+            captured["request"] = request
+            captured["timeout"] = timeout
+            return _FakeHTTPResponse(
+                {
+                    "token": "fixture-installation-token",
+                    "expires_at": "2023-11-14T23:13:20Z",
+                    "permissions": {
+                        "metadata": "read",
+                        "contents": "write",
+                        "pull_requests": "write",
+                    },
+                    "repositories": [{"full_name": "vicondoa/d2b"}],
+                }
+            )
+
+        with (
+            mock.patch.object(MODULE.time, "time", return_value=now),
+            mock.patch.object(MODULE.urllib.request, "urlopen", side_effect=urlopen),
+        ):
+            result = self._run(openssl_command=str(fake_openssl))
+
+        self.assertNotIn("fixture-installation-token", json.dumps(result))
+        self.assertEqual(captured["timeout"], MODULE.GITHUB_API_TIMEOUT)
+        request = captured["request"]
+        self.assertEqual(
+            request.full_url,
+            "https://api.github.com/app/installations/456789/access_tokens",
+        )
+        self.assertEqual(request.method, "POST")
+        self.assertEqual(
+            json.loads(request.data.decode("utf-8")),
+            {
+                "repositories": ["d2b"],
+                "permissions": {
+                    "metadata": "read",
+                    "contents": "write",
+                    "pull_requests": "write",
+                },
+            },
+        )
+        self.assertEqual(
+            request.headers["Authorization"].split(" ", 1)[0],
+            "Bearer",
+        )
+        jwt = request.headers["Authorization"].split(" ", 1)[1]
+        header, payload, signature = jwt.split(".")
+        self.assertEqual(
+            json.loads(base64.urlsafe_b64decode(header + "===")),
+            {"alg": "RS256", "typ": "JWT"},
+        )
+        self.assertEqual(
+            json.loads(base64.urlsafe_b64decode(payload + "===")),
+            {"exp": now + 540, "iat": now - 60, "iss": 123456},
+        )
+        self.assertEqual(
+            signature,
+            base64.urlsafe_b64encode(b"fixture-signature").decode().rstrip("="),
+        )
+
+        capture = json.loads(
+            self.app_key.with_name(self.app_key.name + ".openssl-capture").read_text(
+                encoding="utf-8"
+            )
+        )
+        self.assertEqual(
+            capture["argv"],
+            ["dgst", "-sha256", "-sign", str(self.app_key)],
+        )
+        self.assertEqual(capture["stdin"], f"{header}.{payload}")
+        self.assertNotIn("fixture-private-key", json.dumps(capture))
+
+    def test_app_response_permissions_and_repository_are_fail_closed(self) -> None:
+        self._write_app_credentials()
+        self.token.unlink()
+        fake_openssl = self._fake_openssl()
+        now = 1_700_000_000
+        responses = (
+            {
+                "permissions": {
+                    "metadata": "read",
+                    "contents": "admin",
+                    "pull_requests": "write",
+                },
+            },
+            {"expires_at": "2023-11-14T22:13:19Z"},
+            {"expires_at": "2023-11-14T23:13:21Z"},
+            {"token": "fixture token"},
+            {
+                "permissions": {
+                    "metadata": "read",
+                    "contents": "write",
+                    "pull_requests": "write",
+                },
+                "repositories": [{"full_name": "other/repository"}],
+            },
+            {"repositories": None},
+            {"repository_selection": "all"},
+        )
+        for update in responses:
+            with self.subTest(update=update):
+                base = {
+                    "token": "fixture-installation-token",
+                    "expires_at": "2023-11-14T23:13:20Z",
+                    "permissions": {
+                        "metadata": "read",
+                        "contents": "write",
+                        "pull_requests": "write",
+                    },
+                    "repositories": [{"full_name": "vicondoa/d2b"}],
+                }
+                base.update(update)
+                with (
+                    mock.patch.object(MODULE.time, "time", return_value=now),
+                    mock.patch.object(
+                        MODULE.urllib.request,
+                        "urlopen",
+                        return_value=_FakeHTTPResponse(base),
+                    ),
+                ):
+                    error = self._run_error(openssl_command=str(fake_openssl))
+                self.assertEqual(error.code, "github-app-response-invalid")
+
+    def _write_app_credentials(self) -> None:
+        self.app_key.write_text(
+            "-----BEGIN " + "PRIVATE KEY-----\nfixture-private-key\n"
+            "-----END " + "PRIVATE KEY-----\n",
+            encoding="utf-8",
+        )
+        self.app_key.chmod(0o440)
+        self.app_config.write_text(
+            json.dumps(
+                {
+                    "version": 1,
+                    "app_id": 123456,
+                    "installation_id": 456789,
+                    "repository": "vicondoa/d2b",
+                },
+                sort_keys=True,
+            ),
+            encoding="utf-8",
+        )
+        self.app_config.chmod(0o444)
+
+    def _fake_openssl(self) -> pathlib.Path:
+        script = self.base / "fake-openssl"
+        script.write_text(
+            "#!/usr/bin/env python3\n"
+            "import json\n"
+            "import pathlib\n"
+            "import sys\n"
+            "key = pathlib.Path(sys.argv[-1])\n"
+            "capture = key.with_name(key.name + '.openssl-capture')\n"
+            "capture.write_text(json.dumps({\n"
+            "    'argv': sys.argv[1:],\n"
+            "    'stdin': sys.stdin.buffer.read().decode('ascii'),\n"
+            "}), encoding='utf-8')\n"
+            "sys.stdout.buffer.write(b'fixture-signature')\n",
+            encoding="utf-8",
+        )
+        script.chmod(0o755)
+        return script
+
     def test_caller_policy_environment_is_ignored(self) -> None:
         with (
             mock.patch.dict(
@@ -822,6 +1052,69 @@ class PublicationPolicyTests(unittest.TestCase):
             sort_keys=True,
         )
         self.assertNotIn("fixture-token", serialized)
+
+    def test_minted_token_is_absent_from_cli_output(self) -> None:
+        self._write_app_credentials()
+        self.token.unlink()
+        fake_openssl = self._fake_openssl()
+        bin_dir = self.base / "app-bin"
+        bin_dir.mkdir()
+        for name, source in (
+            ("bd", FAKE_BD),
+            ("git", FAKE_GIT),
+            ("gh", FAKE_GH),
+        ):
+            (bin_dir / name).symlink_to(source)
+        now = 1_700_000_000
+        response = _FakeHTTPResponse(
+            {
+                "token": "fixture-installation-token",
+                "expires_at": "2023-11-14T23:13:20Z",
+                "permissions": {
+                    "metadata": "read",
+                    "contents": "write",
+                    "pull_requests": "write",
+                },
+                "repositories": [{"full_name": "vicondoa/d2b"}],
+            }
+        )
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+        original_command_path = MODULE._command_path
+
+        def command_path(value: str, label: str) -> str:
+            if value == "openssl":
+                return str(fake_openssl)
+            return original_command_path(value, label)
+
+        old_cwd = pathlib.Path.cwd()
+        with (
+            mock.patch.dict(
+                "os.environ",
+                {
+                    "CREDENTIALS_DIRECTORY": str(self.credentials),
+                    "PATH": f"{bin_dir}:{pathlib.Path(sys.executable).parent}:{os.defpath}",
+                },
+                clear=False,
+            ),
+            mock.patch.object(MODULE.time, "time", return_value=now),
+            mock.patch.object(
+                MODULE.urllib.request,
+                "urlopen",
+                return_value=response,
+            ),
+            mock.patch.object(MODULE, "_command_path", side_effect=command_path),
+            redirect_stdout(stdout),
+            redirect_stderr(stderr),
+        ):
+            os.chdir(self.base)
+            try:
+                exit_code = MODULE.main([WORK_ID])
+            finally:
+                os.chdir(old_cwd)
+        self.assertEqual(exit_code, 0)
+        self.assertNotIn("fixture-installation-token", stdout.getvalue())
+        self.assertNotIn("fixture-installation-token", stderr.getvalue())
 
     def test_cli_accepts_only_issue_id(self) -> None:
         parser = MODULE._parser()
