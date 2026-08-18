@@ -68,7 +68,7 @@ one source record.
 | --- | --- | --- | --- |
 | Gas City | [gastownhall/gascity](https://github.com/gastownhall/gascity) | `v1.4.1` (`58ef17e3bd685fd5cf7f21286277b208d3324590`) official `linux_amd64` binary | MIT |
 | Gas City packs, including Compound Engineering, Discord, and roles | [gastownhall/gascity-packs](https://github.com/gastownhall/gascity-packs) | `5d2a9d023edbb9ba24fdcff554e89fc3d7da72fe` | No repository-level SPDX or license metadata was exposed by the inspected upstream snapshot; retain upstream notices and verify each imported pack before redistribution |
-| Beads | [gastownhall/beads](https://github.com/gastownhall/beads) | `bf97b73749ac3ef2fca2365b54537ac041ad4293` | MIT |
+| Beads | [steveyegge/beads](https://github.com/steveyegge/beads) | `v1.2.2` (`6c124203e771433a3550c348771a5b5e27fd3c21`) official `linux_amd64` binary | MIT |
 | Dolt | [dolthub/dolt](https://github.com/dolthub/dolt) | `2.1.7` | Apache-2.0 |
 | Copilot CLI | [github/copilot-cli](https://github.com/github/copilot-cli) | `1.0.79` | GitHub Copilot CLI License, a proprietary license; no source modification or standalone redistribution |
 | Copilot CLI packaging | [numtide/llm-agents.nix](https://github.com/numtide/llm-agents.nix) | `387989ee56d550d86d46d9458ad68a55b9e0ca3b` | MIT for the packaging repository; the packaged CLI keeps its own terms |

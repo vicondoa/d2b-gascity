@@ -15,7 +15,7 @@
       flake = false;
     };
     beads = {
-      url = "github:steveyegge/beads/bf97b73749ac3ef2fca2365b54537ac041ad4293";
+      url = "github:steveyegge/beads/v1.2.2";
       flake = false;
     };
     dolt = {
@@ -60,13 +60,6 @@
       goFor = system: go-official.packages.${system}.go_1_26_6;
       nginxFor = system: packageNixpkgsFor.${system}.nginx;
 
-      buildGoModuleFor = system:
-        packageNixpkgsFor.${system}.callPackage
-          (packageNixpkgsFor.${system}.path + "/pkgs/build-support/go/module.nix")
-          {
-            go = goFor system;
-          };
-
       gascityFor = system:
         import ./nix/packages/gascity.nix {
           pkgs = packageNixpkgsFor.${system};
@@ -79,7 +72,7 @@
         import ./nix/packages/beads.nix {
           pkgs = packageNixpkgsFor.${system};
           source = beads;
-          buildGoModule = buildGoModuleFor system;
+          version = "1.2.2";
           revision = (locked "beads").rev;
         };
 
@@ -87,7 +80,7 @@
         import ./nix/packages/dolt.nix {
           pkgs = packageNixpkgsFor.${system};
           source = dolt;
-          buildGoModule = buildGoModuleFor system;
+          version = "2.1.7";
         };
 
       copilotFor = system: llm-agents.packages.${system}.copilot-cli;

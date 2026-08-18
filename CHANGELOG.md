@@ -60,9 +60,10 @@ and this project follows semantic versioning where releases are published.
 - Keep listed role agents at `max_active_sessions = 1` with
   `tmux_alias = "{{.Agent}}"`. Unset max is an unlimited pool, which
   hides live Copilot sessions from the Agents page.
-- Install `gc` from the official Gas City `v1.4.1` linux-amd64 release
-  instead of compiling it. Take Go 1.26.6 from `openserbia/go-flake`
-  and stock nixpkgs Nginx. Cache the Nix store between CI runs.
+- Install `gc`, `bd`, and `dolt` from official GitHub release
+  tarballs instead of compiling them. Take Go 1.26.6 from
+  `openserbia/go-flake` and stock nixpkgs Nginx. Cache the Nix store
+  between CI runs.
   Keep roles on the d2b rig import only so `gc.publisher` is not duplicated.
 - Pass `GH_TOKEN` from the supervisor Copilot credential into every
   Copilot provider so official `gh` publication can authenticate.

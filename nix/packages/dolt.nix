@@ -1,32 +1,37 @@
 { pkgs
+, version
 , source
-, buildGoModule ? pkgs.buildGoModule
 }:
 
-buildGoModule rec {
+pkgs.stdenvNoCC.mkDerivation {
   pname = "dolt";
-  version = "2.1.7";
-  src = source;
+  inherit version;
 
-  modRoot = "./go";
-  subPackages = [ "cmd/dolt" ];
-  vendorHash = "sha256-l0SHq3WTajqGTE5sV6RgLgVLS+i7AhAxfJkJmAvv2ok=";
-  proxyVendor = true;
-  doCheck = false;
+  src = pkgs.fetchurl {
+    url = "https://github.com/dolthub/dolt/releases/download/v${version}/dolt-linux-amd64.tar.gz";
+    hash = "sha256-FZg+gRNB7ZTl1H+/xB0vV9jHqmXu5RHSWjw/1Ud+KOc=";
+  };
 
-  env.CGO_ENABLED = "1";
-  env.GOTOOLCHAIN = "local";
-  buildInputs = [ pkgs.icu ];
+  dontConfigure = true;
+  dontBuild = true;
+
+  installPhase = ''
+    runHook preInstall
+    mkdir -p "$out/bin"
+    install -m755 bin/dolt "$out/bin/dolt"
+    runHook postInstall
+  '';
 
   meta = {
     description = "Relational database with version control and a Git-like CLI";
     homepage = "https://www.dolthub.com/";
     license = pkgs.lib.licenses.asl20;
     mainProgram = "dolt";
-    platforms = pkgs.lib.platforms.linux;
+    platforms = [ "x86_64-linux" ];
   };
 
   passthru = {
+    inherit source;
     sourceRepository = "dolthub/dolt";
   };
 }

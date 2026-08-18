@@ -1,40 +1,41 @@
 { pkgs
-, source
-, buildGoModule ? pkgs.buildGoModule
+, version
 , revision
+, source
 }:
 
-buildGoModule rec {
+pkgs.stdenv.mkDerivation {
   pname = "beads";
-  version = "1.1.1-unstable-20260805";
-  src = source;
+  inherit version;
 
-  subPackages = [ "cmd/bd" ];
-  tags = [ "gms_pure_go" ];
-  vendorHash = "sha256-CW+ba1KYpmBZ1UXHCr2B/EHOr8LDi494BuEDGHABLbk=";
-  proxyVendor = true;
-  doCheck = false;
+  src = pkgs.fetchurl {
+    url = "https://github.com/steveyegge/beads/releases/download/v${version}/beads_${version}_linux_amd64.tar.gz";
+    hash = "sha256-gUAJilHTuB1VSNHF5tsaLZkw5dFB7+Kkv/fQecTTIeg=";
+  };
 
-  env.CGO_ENABLED = "1";
-  env.GOTOOLCHAIN = "local";
-  buildInputs = [ pkgs.icu ];
+  sourceRoot = ".";
+  dontConfigure = true;
+  dontBuild = true;
+  nativeBuildInputs = [ pkgs.autoPatchelfHook ];
+  buildInputs = [ pkgs.stdenv.cc.cc.lib ];
 
-  ldflags = [
-    "-X main.Version=${version}"
-    "-X main.Build=${revision}"
-    "-X main.Commit=${revision}"
-  ];
+  installPhase = ''
+    runHook preInstall
+    mkdir -p "$out/bin"
+    install -m755 bd "$out/bin/bd"
+    runHook postInstall
+  '';
 
   meta = {
     description = "Issue tracker designed for AI-supervised coding workflows";
     homepage = "https://github.com/steveyegge/beads";
     license = pkgs.lib.licenses.mit;
     mainProgram = "bd";
-    platforms = pkgs.lib.platforms.linux;
+    platforms = [ "x86_64-linux" ];
   };
 
   passthru = {
-    inherit revision;
+    inherit revision source;
     sourceRepository = "steveyegge/beads";
   };
 }

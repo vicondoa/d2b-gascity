@@ -13,11 +13,10 @@ also launches Python tests with that runtime's `python3` instead of the
 invoking interpreter.
 
 CI substitutes stock `nginx` from the pinned nixpkgs. Go 1.26.6 comes
-from `openserbia/go-flake` as the official `go.dev` linux-amd64
-binary. `gc` comes from the Gas City `v1.4.1` GitHub release tarball,
-not a from-source Go build. The workflow restores `/nix` from GitHub
-Actions cache so Beads and Dolt are not rebuilt when the flake inputs
-are unchanged.
+from `openserbia/go-flake`. `gc`, `bd`, and `dolt` come from the
+official GitHub release tarballs (`gascity v1.4.1`, `beads v1.2.2`,
+`dolt v2.1.7`), not from-source Go builds. The workflow also restores
+`/nix` from GitHub Actions cache.
 
 Focused commands are available for `make test-policy`, `make test-fixtures`,
 `make test-rollback`, `make test-ingress`, `make test-generated`,
