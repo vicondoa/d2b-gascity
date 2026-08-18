@@ -33,7 +33,7 @@ PORTABLE_FILES = (
     "role-provider-matrix.json",
     "worktree-producer-inventory.json",
 )
-PORTABLE_DIRECTORIES = ("agents", "assets", "formulas", "providers")
+PORTABLE_DIRECTORIES = ("agents", "assets", "formulas", "orders", "providers")
 REQUIRED_INIT_FLAGS = ("--file", "--preserve-existing", "--no-start")
 DOLT_START_READY_TIMEOUT_MS = "120000"
 DOLT_SCHEMA_READY_TIMEOUT_SECONDS = 120.0
@@ -338,6 +338,13 @@ def _materialize_portable(
 ) -> None:
     files = files or _validate_portable_source(source)
     destination.mkdir(parents=True)
+    _restore_portable_files(destination, files)
+
+
+def _restore_portable_files(
+    destination: pathlib.Path,
+    files: dict[str, pathlib.Path],
+) -> None:
     for relative, path in files.items():
         target = destination / relative
         if path.is_dir():
@@ -1026,6 +1033,7 @@ def _init(args: argparse.Namespace) -> int:
             env=env,
             label="gc import install",
         )
+        _restore_portable_files(args.city, portable_files)
         _site_binding(args.city, args.rig)
     except BootstrapError:
         _stop_dolt_server(dolt_process)

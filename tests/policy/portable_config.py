@@ -129,7 +129,7 @@ class PortableConfigTests(unittest.TestCase):
 
     def test_initial_local_pack_has_no_copied_upstream_bodies(self) -> None:
         allowed_names = {"README.md", ".keep"}
-        for directory in ("agents", "assets", "formulas", "providers"):
+        for directory in ("agents", "assets", "formulas", "orders", "providers"):
             root = CITY / directory
             self.assertTrue(root.is_dir(), directory)
             for path in root.rglob("*"):
@@ -138,6 +138,7 @@ class PortableConfigTests(unittest.TestCase):
                     if relative in {
                         "assets/workflows/do-work/prepare-worktree.md",
                         "assets/workflows/build-base/publish.md",
+                        "orders/bd-backup-sync.toml",
                     }:
                         continue
                     self.assertIn(path.name, allowed_names, relative)

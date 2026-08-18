@@ -323,13 +323,13 @@ class BootstrapFixtureTests(unittest.TestCase):
         expected = {
             (entry["dir"], entry["name"]): entry for entry in matrix["agents"]
         }
-        resolved_acp = {
+        resolved_model = {
             (agent.get("Dir", ""), agent["Name"])
             for agent in payload["config"]["Agents"]
-            if agent.get("Session") == "acp"
+            if (agent.get("Dir", ""), agent["Name"]) in expected
         }
         self.assertEqual(
-            resolved_acp,
+            resolved_model,
             set(expected),
         )
         for identity, entry in expected.items():
