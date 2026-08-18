@@ -7,7 +7,7 @@
       "github:NixOS/nixpkgs/f13ff45afd1bb73e640eaa08a7066dbed07e3238";
 
     gascity = {
-      url = "github:gastownhall/gascity/f6741d94861aa14f0253deffbe9efb1cb3a35d92";
+      url = "github:gastownhall/gascity/v1.4.1";
       flake = false;
     };
     gascity-packs = {
@@ -71,7 +71,7 @@
         import ./nix/packages/gascity.nix {
           pkgs = packageNixpkgsFor.${system};
           source = gascity;
-          buildGoModule = buildGoModuleFor system;
+          version = "1.4.1";
           revision = (locked "gascity").rev;
         };
 

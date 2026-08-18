@@ -1,62 +1,27 @@
 { pkgs
-, source
-, buildGoModule ? pkgs.buildGoModule
+, version
 , revision
+, source
 }:
 
-buildGoModule rec {
+pkgs.stdenvNoCC.mkDerivation {
   pname = "gascity";
-  version = "0-unstable-2026-08-14";
-  src = source;
+  inherit version;
 
-  subPackages = [ "cmd/gc" ];
-  vendorHash = "sha256-05Ch0dn0W8OKZaGFq04VQS7QzLkgo//chz0WBjjefrQ=";
-  proxyVendor = true;
+  src = pkgs.fetchurl {
+    url = "https://github.com/gastownhall/gascity/releases/download/v${version}/gascity_${version}_linux_amd64.tar.gz";
+    hash = "sha256-jYyLUR2z/ESTFEWqtcufISUJwIZxBciA1sPQ5uXTPkI=";
+  };
 
-  env.CGO_ENABLED = "0";
-  env.GOTOOLCHAIN = "local";
+  sourceRoot = ".";
+  dontConfigure = true;
+  dontBuild = true;
 
-  nativeCheckInputs = [
-    pkgs.bash
-    pkgs.coreutils
-    pkgs.git
-    pkgs.gnumake
-    pkgs.jq
-    pkgs.procps
-  ];
-
-  postPatch = ''
-    patchShebangs scripts
-  '';
-
-  ldflags = [
-    "-s"
-    "-w"
-    "-X main.version=${version}"
-    "-X main.commit=${revision}"
-    "-X main.date=unknown"
-  ];
-
-  preBuild = ''
-    export GOFLAGS="''${GOFLAGS:-} -buildvcs=false"
-  '';
-
-  doCheck = true;
-  checkPhase = ''
-    runHook preCheck
-    export HOME="$TMPDIR/home"
-    mkdir -p "$HOME"
-    go test -trimpath=false -count=1 \
-      ./internal/config/... \
-      ./internal/formula/... \
-      ./internal/pidutil/... \
-      ./internal/processgroup/... \
-      ./internal/runtime/registry/... \
-      ./internal/runtime/subprocess/... \
-      ./internal/supervisor/... \
-      ./internal/worker \
-      ./scripts/cipolicy/...
-    runHook postCheck
+  installPhase = ''
+    runHook preInstall
+    mkdir -p "$out/bin"
+    install -m755 gc "$out/bin/gc"
+    runHook postInstall
   '';
 
   meta = {
@@ -64,10 +29,10 @@ buildGoModule rec {
     homepage = "https://github.com/gastownhall/gascity";
     license = pkgs.lib.licenses.mit;
     mainProgram = "gc";
-    platforms = pkgs.lib.platforms.linux;
+    platforms = [ "x86_64-linux" ];
   };
 
   passthru = {
-    inherit revision;
+    inherit revision source;
   };
 }

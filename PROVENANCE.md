@@ -66,7 +66,7 @@ one source record.
 
 | Component | Source | Pin | License or terms |
 | --- | --- | --- | --- |
-| Gas City | [gastownhall/gascity](https://github.com/gastownhall/gascity) | `f6741d94861aa14f0253deffbe9efb1cb3a35d92` | MIT |
+| Gas City | [gastownhall/gascity](https://github.com/gastownhall/gascity) | `v1.4.1` (`58ef17e3bd685fd5cf7f21286277b208d3324590`) official `linux_amd64` binary | MIT |
 | Gas City packs, including Compound Engineering, Discord, and roles | [gastownhall/gascity-packs](https://github.com/gastownhall/gascity-packs) | `5d2a9d023edbb9ba24fdcff554e89fc3d7da72fe` | No repository-level SPDX or license metadata was exposed by the inspected upstream snapshot; retain upstream notices and verify each imported pack before redistribution |
 | Beads | [gastownhall/beads](https://github.com/gastownhall/beads) | `bf97b73749ac3ef2fca2365b54537ac041ad4293` | MIT |
 | Dolt | [dolthub/dolt](https://github.com/dolthub/dolt) | `2.1.7` | Apache-2.0 |

@@ -14,9 +14,10 @@ invoking interpreter.
 
 CI substitutes stock `nginx` from the pinned nixpkgs. Go 1.26.6 comes
 from `openserbia/go-flake` as the official `go.dev` linux-amd64
-binary, not a from-source nixpkgs override. The workflow restores
-`/nix` from GitHub Actions cache so Gas City, Beads, and Dolt are not
-rebuilt when the flake inputs are unchanged.
+binary. `gc` comes from the Gas City `v1.4.1` GitHub release tarball,
+not a from-source Go build. The workflow restores `/nix` from GitHub
+Actions cache so Beads and Dolt are not rebuilt when the flake inputs
+are unchanged.
 
 Focused commands are available for `make test-policy`, `make test-fixtures`,
 `make test-rollback`, `make test-ingress`, `make test-generated`,

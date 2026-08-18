@@ -24,7 +24,7 @@ pkgs.runCommand "gas-city-package-smoke" {
   export HOME="$TMPDIR/home"
   mkdir -p "$HOME"
 
-  expectedGascityRevision="f6741d94861aa14f0253deffbe9efb1cb3a35d92"
+  expectedGascityRevision="58ef17e3bd685fd5cf7f21286277b208d3324590"
   expectedGascityPacksRevision="5d2a9d023edbb9ba24fdcff554e89fc3d7da72fe"
   expectedBeadsRevision="bf97b73749ac3ef2fca2365b54537ac041ad4293"
   expectedDoltVersion="2.1.7"

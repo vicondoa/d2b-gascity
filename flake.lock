@@ -109,17 +109,17 @@
     "gascity": {
       "flake": false,
       "locked": {
-        "lastModified": 1786722934,
-        "narHash": "sha256-rBaX9tuA+5utYH75g+oPwsjxEbMJc9UHSVhjp5vJZTE=",
+        "lastModified": 1786835818,
+        "narHash": "sha256-QhK62+uuippG4xEg3mFYMeaN0Xj7Cyrfgf0NmyD+9wA=",
         "owner": "gastownhall",
         "repo": "gascity",
-        "rev": "f6741d94861aa14f0253deffbe9efb1cb3a35d92",
+        "rev": "58ef17e3bd685fd5cf7f21286277b208d3324590",
         "type": "github"
       },
       "original": {
         "owner": "gastownhall",
+        "ref": "v1.4.1",
         "repo": "gascity",
-        "rev": "f6741d94861aa14f0253deffbe9efb1cb3a35d92",
         "type": "github"
       }
     },
