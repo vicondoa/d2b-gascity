@@ -351,7 +351,7 @@ def _run_rollback(env: dict[str, str]) -> None:
 
 
 def _run_generated(env: dict[str, str], *, write: bool = False) -> None:
-    command = [_python(env), str(ROOT / "scripts" / "generate_inventory.py")]
+    command = [_python(env), "-P", str(ROOT / "scripts" / "generate_inventory.py")]
     command.append("--write" if write else "--check")
     _run_command(command, env=env)
 
@@ -360,6 +360,7 @@ def _run_privacy(env: dict[str, str]) -> None:
     _run_command(
         [
             _python(env),
+            "-P",
             str(ROOT / "scripts" / "privacy_scan.py"),
             "--root",
             str(ROOT),
@@ -370,7 +371,13 @@ def _run_privacy(env: dict[str, str]) -> None:
 
 def _run_static(env: dict[str, str]) -> None:
     _run_command(
-        [_python(env), str(ROOT / "scripts" / "static_policy.py"), "--root", str(ROOT)],
+        [
+            _python(env),
+            "-P",
+            str(ROOT / "scripts" / "static_policy.py"),
+            "--root",
+            str(ROOT),
+        ],
         env=env,
     )
 
