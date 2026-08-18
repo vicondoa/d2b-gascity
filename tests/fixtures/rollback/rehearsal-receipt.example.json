@@ -1,0 +1,79 @@
+{
+  "schema": 1,
+  "kind": "d2b-gascity-u10-rehearsal",
+  "host_generated": false,
+  "redacted": true,
+  "network_used": false,
+  "eligible_for_u12": false,
+  "eligibility_reason": "A host-generated redacted receipt with every required row is still required.",
+  "rows": {
+    "root_separation": {
+      "status": "placeholder",
+      "prototype_root": "<prototype-root>",
+      "standalone_root": "/var/lib/d2b-gascity",
+      "distinct": true
+    },
+    "prototype_integrity": {
+      "status": "placeholder",
+      "manifest": "<prototype-integrity-manifest>",
+      "ownership": "root:root",
+      "mode": "0555",
+      "unchanged": true
+    },
+    "old_service_state": {
+      "status": "placeholder",
+      "service": "d2b-gascity.service",
+      "enabled": false,
+      "state": "stopped",
+      "read_only": true
+    },
+    "clean_standalone_root": {
+      "status": "placeholder",
+      "bootstrapped": true,
+      "legacy_state_copied": false,
+      "legacy_state_converted": false,
+      "legacy_state_chowned": false
+    },
+    "new_service_paths": {
+      "status": "placeholder",
+      "writable_paths": [
+        "/var/lib/d2b-gascity"
+      ],
+      "legacy_references": false
+    },
+    "generation_rehearsal": {
+      "status": "placeholder",
+      "sequence": [
+        "old",
+        "new",
+        "old",
+        "new"
+      ],
+      "hashes_ownership_modes_preserved": true
+    },
+    "failed_new_start": {
+      "status": "placeholder",
+      "prior_generation_usable": true,
+      "old_root_unchanged": true
+    },
+    "retained_closures": {
+      "status": "placeholder",
+      "closures": [
+        "<retained-old-closure>",
+        "<retained-new-closure>"
+      ],
+      "garbage_collection_deferred": true
+    },
+    "offline_rollback": {
+      "status": "placeholder",
+      "network_used": false,
+      "old_generation_bootable": true,
+      "new_generation_bootable": true
+    },
+    "expiry_and_destruction": {
+      "status": "host-required",
+      "expires_at": "<rollback-expiry>",
+      "destruction_required": true
+    }
+  }
+}

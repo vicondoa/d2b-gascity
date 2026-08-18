@@ -1,0 +1,416 @@
+{
+  "agents": [
+    {
+      "category": "review-synthesis-triage-analysis",
+      "dir": "d2b",
+      "name": "ce-adversarial-reviewer",
+      "origin": "compound-engineering",
+      "provider": "copilot-review",
+      "session": ""
+    },
+    {
+      "category": "review-synthesis-triage-analysis",
+      "dir": "d2b",
+      "name": "ce-agent-native-reviewer",
+      "origin": "compound-engineering",
+      "provider": "copilot-review",
+      "session": ""
+    },
+    {
+      "category": "review-synthesis-triage-analysis",
+      "dir": "d2b",
+      "name": "ce-api-contract-reviewer",
+      "origin": "compound-engineering",
+      "provider": "copilot-review",
+      "session": ""
+    },
+    {
+      "category": "planning-design-decomposition",
+      "dir": "d2b",
+      "name": "ce-architecture-strategist",
+      "origin": "compound-engineering",
+      "provider": "copilot-planning-grok",
+      "session": ""
+    },
+    {
+      "category": "planning-design-decomposition",
+      "dir": "d2b",
+      "name": "ce-brainstorm",
+      "origin": "compound-engineering",
+      "provider": "copilot-planning-grok",
+      "session": ""
+    },
+    {
+      "category": "review-synthesis-triage-analysis",
+      "dir": "d2b",
+      "name": "ce-code-review-selector",
+      "origin": "compound-engineering",
+      "provider": "copilot-review",
+      "session": ""
+    },
+    {
+      "category": "review-synthesis-triage-analysis",
+      "dir": "d2b",
+      "name": "ce-code-review-synthesizer",
+      "origin": "compound-engineering",
+      "provider": "copilot-review",
+      "session": ""
+    },
+    {
+      "category": "review-synthesis-triage-analysis",
+      "dir": "d2b",
+      "name": "ce-coherence-reviewer",
+      "origin": "compound-engineering",
+      "provider": "copilot-review",
+      "session": ""
+    },
+    {
+      "category": "review-synthesis-triage-analysis",
+      "dir": "d2b",
+      "name": "ce-compound",
+      "origin": "compound-engineering",
+      "provider": "copilot-review",
+      "session": ""
+    },
+    {
+      "category": "review-synthesis-triage-analysis",
+      "dir": "d2b",
+      "name": "ce-correctness-reviewer",
+      "origin": "compound-engineering",
+      "provider": "copilot-review",
+      "session": ""
+    },
+    {
+      "category": "review-synthesis-triage-analysis",
+      "dir": "d2b",
+      "name": "ce-data-migration-reviewer",
+      "origin": "compound-engineering",
+      "provider": "copilot-review",
+      "session": ""
+    },
+    {
+      "category": "review-synthesis-triage-analysis",
+      "dir": "d2b",
+      "name": "ce-deployment-verification-agent",
+      "origin": "compound-engineering",
+      "provider": "copilot-review",
+      "session": ""
+    },
+    {
+      "category": "review-synthesis-triage-analysis",
+      "dir": "d2b",
+      "name": "ce-feasibility-reviewer",
+      "origin": "compound-engineering",
+      "provider": "copilot-review",
+      "session": ""
+    },
+    {
+      "category": "review-synthesis-triage-analysis",
+      "dir": "d2b",
+      "name": "ce-julik-frontend-races-reviewer",
+      "origin": "compound-engineering",
+      "provider": "copilot-review",
+      "session": ""
+    },
+    {
+      "category": "review-synthesis-triage-analysis",
+      "dir": "d2b",
+      "name": "ce-learnings-researcher",
+      "origin": "compound-engineering",
+      "provider": "copilot-review",
+      "session": ""
+    },
+    {
+      "category": "review-synthesis-triage-analysis",
+      "dir": "d2b",
+      "name": "ce-maintainability-reviewer",
+      "origin": "compound-engineering",
+      "provider": "copilot-review",
+      "session": ""
+    },
+    {
+      "category": "review-synthesis-triage-analysis",
+      "dir": "d2b",
+      "name": "ce-performance-reviewer",
+      "origin": "compound-engineering",
+      "provider": "copilot-review",
+      "session": ""
+    },
+    {
+      "category": "planning-design-decomposition",
+      "dir": "d2b",
+      "name": "ce-plan",
+      "origin": "compound-engineering",
+      "provider": "copilot-planning-grok",
+      "session": ""
+    },
+    {
+      "category": "review-synthesis-triage-analysis",
+      "dir": "d2b",
+      "name": "ce-plan-review-synthesizer",
+      "origin": "compound-engineering",
+      "provider": "copilot-review",
+      "session": ""
+    },
+    {
+      "category": "implementation-fix-work",
+      "dir": "d2b",
+      "name": "ce-pr-comment-resolver",
+      "origin": "compound-engineering",
+      "provider": "copilot-code-luna",
+      "session": ""
+    },
+    {
+      "category": "review-synthesis-triage-analysis",
+      "dir": "d2b",
+      "name": "ce-previous-comments-reviewer",
+      "origin": "compound-engineering",
+      "provider": "copilot-review",
+      "session": ""
+    },
+    {
+      "category": "review-synthesis-triage-analysis",
+      "dir": "d2b",
+      "name": "ce-project-standards-reviewer",
+      "origin": "compound-engineering",
+      "provider": "copilot-review",
+      "session": ""
+    },
+    {
+      "category": "review-synthesis-triage-analysis",
+      "dir": "d2b",
+      "name": "ce-reliability-reviewer",
+      "origin": "compound-engineering",
+      "provider": "copilot-review",
+      "session": ""
+    },
+    {
+      "category": "review-synthesis-triage-analysis",
+      "dir": "d2b",
+      "name": "ce-scope-guardian-reviewer",
+      "origin": "compound-engineering",
+      "provider": "copilot-review",
+      "session": ""
+    },
+    {
+      "category": "review-synthesis-triage-analysis",
+      "dir": "d2b",
+      "name": "ce-security-reviewer",
+      "origin": "compound-engineering",
+      "provider": "copilot-review",
+      "session": ""
+    },
+    {
+      "category": "review-synthesis-triage-analysis",
+      "dir": "d2b",
+      "name": "ce-swift-ios-reviewer",
+      "origin": "compound-engineering",
+      "provider": "copilot-review",
+      "session": ""
+    },
+    {
+      "category": "review-synthesis-triage-analysis",
+      "dir": "d2b",
+      "name": "ce-testing-reviewer",
+      "origin": "compound-engineering",
+      "provider": "copilot-review",
+      "session": ""
+    },
+    {
+      "category": "implementation-fix-work",
+      "dir": "d2b",
+      "name": "ce-work",
+      "origin": "compound-engineering",
+      "provider": "copilot-code-luna",
+      "session": ""
+    },
+    {
+      "category": "planning-design-decomposition",
+      "dir": "d2b",
+      "name": "design-author",
+      "origin": "gascity-roles",
+      "provider": "copilot-planning-grok",
+      "session": ""
+    },
+    {
+      "category": "review-synthesis-triage-analysis",
+      "dir": "d2b",
+      "name": "design-implementation-reviewer",
+      "origin": "gascity-roles",
+      "provider": "copilot-review",
+      "session": ""
+    },
+    {
+      "category": "review-synthesis-triage-analysis",
+      "dir": "d2b",
+      "name": "design-test-risk-reviewer",
+      "origin": "gascity-roles",
+      "provider": "copilot-review",
+      "session": ""
+    },
+    {
+      "category": "review-synthesis-triage-analysis",
+      "dir": "d2b",
+      "name": "gap-analyst",
+      "origin": "gascity-roles",
+      "provider": "copilot-review",
+      "session": ""
+    },
+    {
+      "category": "review-synthesis-triage-analysis",
+      "dir": "d2b",
+      "name": "implementation-reviewer",
+      "origin": "gascity-roles",
+      "provider": "copilot-review",
+      "session": ""
+    },
+    {
+      "category": "implementation-fix-work",
+      "dir": "d2b",
+      "name": "implementation-worker",
+      "origin": "gascity-roles",
+      "provider": "copilot-code-luna",
+      "session": ""
+    },
+    {
+      "category": "review-synthesis-triage-analysis",
+      "dir": "d2b",
+      "name": "issue-triager",
+      "origin": "gascity-roles",
+      "provider": "copilot-review",
+      "session": ""
+    },
+    {
+      "category": "planning-design-decomposition",
+      "dir": "d2b",
+      "name": "requirements-planner",
+      "origin": "gascity-roles",
+      "provider": "copilot-planning-grok",
+      "session": ""
+    },
+    {
+      "category": "review-synthesis-triage-analysis",
+      "dir": "d2b",
+      "name": "review-synthesizer",
+      "origin": "gascity-roles",
+      "provider": "copilot-review",
+      "session": ""
+    },
+    {
+      "category": "implementation-fix-work",
+      "dir": "d2b",
+      "name": "publisher",
+      "origin": "gascity-roles",
+      "provider": "copilot-code-luna",
+      "session": ""
+    },
+    {
+      "category": "review-synthesis-triage-analysis",
+      "dir": "d2b",
+      "name": "run-operator",
+      "origin": "gascity-roles",
+      "provider": "copilot-review",
+      "session": ""
+    },
+    {
+      "category": "planning-design-decomposition",
+      "dir": "d2b",
+      "name": "task-decomposer",
+      "origin": "gascity-roles",
+      "provider": "copilot-planning-grok",
+      "session": ""
+    },
+    {
+      "category": "implementation-fix-work",
+      "dir": "",
+      "name": "copilot-code-luna",
+      "origin": "gascity-roles",
+      "provider": "copilot-code-luna",
+      "session": ""
+    },
+    {
+      "category": "planning-design-decomposition",
+      "dir": "",
+      "name": "copilot-planning-grok",
+      "origin": "gascity-roles",
+      "provider": "copilot-planning-grok",
+      "session": ""
+    },
+    {
+      "category": "review-synthesis-triage-analysis",
+      "dir": "",
+      "name": "copilot-review",
+      "origin": "gascity-roles",
+      "provider": "copilot-review",
+      "session": ""
+    },
+    {
+      "category": "review-synthesis-triage-analysis",
+      "dir": "",
+      "name": "copilot-review-luna",
+      "origin": "gascity-roles",
+      "provider": "copilot-review-luna",
+      "session": ""
+    },
+    {
+      "category": "review-synthesis-triage-analysis",
+      "dir": "",
+      "name": "copilot-review-grok",
+      "origin": "gascity-roles",
+      "provider": "copilot-review-grok",
+      "session": ""
+    },
+    {
+      "category": "implementation-fix-work",
+      "dir": "d2b",
+      "name": "copilot-code-luna",
+      "origin": "gascity-roles",
+      "provider": "copilot-code-luna",
+      "session": ""
+    },
+    {
+      "category": "planning-design-decomposition",
+      "dir": "d2b",
+      "name": "copilot-planning-grok",
+      "origin": "gascity-roles",
+      "provider": "copilot-planning-grok",
+      "session": ""
+    },
+    {
+      "category": "review-synthesis-triage-analysis",
+      "dir": "d2b",
+      "name": "copilot-review",
+      "origin": "gascity-roles",
+      "provider": "copilot-review",
+      "session": ""
+    },
+    {
+      "category": "review-synthesis-triage-analysis",
+      "dir": "d2b",
+      "name": "copilot-review-luna",
+      "origin": "gascity-roles",
+      "provider": "copilot-review-luna",
+      "session": ""
+    },
+    {
+      "category": "review-synthesis-triage-analysis",
+      "dir": "d2b",
+      "name": "copilot-review-grok",
+      "origin": "gascity-roles",
+      "provider": "copilot-review-grok",
+      "session": ""
+    }
+  ],
+  "control_agents": [],
+  "categories": {
+    "implementation-fix-work": "copilot-code-luna",
+    "planning-design-decomposition": "copilot-planning-grok",
+    "review-synthesis-triage-analysis": "copilot-review"
+  },
+  "generated_from": {
+    "gascity": "f6741d94861aa14f0253deffbe9efb1cb3a35d92",
+    "gascity_packs": "5d2a9d023edbb9ba24fdcff554e89fc3d7da72fe"
+  },
+  "schema": 1,
+  "source_fixture": "tests/fixtures/composition/resolved-agents.json"
+}

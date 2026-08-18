@@ -1,0 +1,354 @@
+[[rigs]]
+name = "d2b"
+prefix = "d2b"
+default_branch = "v3"
+suspended_on_start = true
+
+[workspace]
+provider = "copilot-review"
+
+[api]
+bind = "127.0.0.1"
+port = 18372
+
+[rigs.imports.roles]
+source = "https://github.com/gastownhall/gascity-packs/tree/main/gascity/roles"
+version = "sha:5d2a9d023edbb9ba24fdcff554e89fc3d7da72fe"
+
+[providers.copilot-planning-grok]
+base = "builtin:copilot"
+args = ["--yolo", "--model", "grok-4.6", "--context", "long_context", "--effort", "high"]
+env = { COPILOT_ALLOW_ALL = "true", COPILOT_GITHUB_TOKEN = "$COPILOT_GITHUB_TOKEN", GH_TOKEN = "$COPILOT_GITHUB_TOKEN" }
+
+[providers.copilot-review]
+base = "builtin:copilot"
+args = ["--yolo", "--model", "grok-4.6", "--context", "long_context", "--effort", "high"]
+env = { COPILOT_ALLOW_ALL = "true", COPILOT_GITHUB_TOKEN = "$COPILOT_GITHUB_TOKEN", GH_TOKEN = "$COPILOT_GITHUB_TOKEN" }
+
+[providers.copilot-review-grok]
+base = "builtin:copilot"
+args = ["--yolo", "--model", "grok-4.6", "--context", "long_context", "--effort", "high"]
+env = { COPILOT_ALLOW_ALL = "true", COPILOT_GITHUB_TOKEN = "$COPILOT_GITHUB_TOKEN", GH_TOKEN = "$COPILOT_GITHUB_TOKEN" }
+
+[providers.copilot-review-luna]
+base = "builtin:copilot"
+args = ["--yolo", "--model", "gpt-5.6-luna", "--context", "long_context", "--effort", "max"]
+env = { COPILOT_ALLOW_ALL = "true", COPILOT_GITHUB_TOKEN = "$COPILOT_GITHUB_TOKEN", GH_TOKEN = "$COPILOT_GITHUB_TOKEN" }
+
+[providers.copilot-code-luna]
+base = "builtin:copilot"
+args = ["--yolo", "--model", "gpt-5.6-luna", "--context", "default", "--effort", "max"]
+env = { COPILOT_ALLOW_ALL = "true", COPILOT_GITHUB_TOKEN = "$COPILOT_GITHUB_TOKEN", GH_TOKEN = "$COPILOT_GITHUB_TOKEN" }
+
+[[patches.rigs]]
+name = "d2b"
+formula_vars = { base_branch = "v3", base_ref = "origin/v3" }
+
+# Exact provider patches for the resolved model-backed Pack v2 graph.
+# session = "" clears pack ACP transport so Gas City drives Copilot in tmux.
+
+[[patches.agent]]
+dir = "d2b"
+name = "ce-adversarial-reviewer"
+provider = "copilot-review"
+session = ""
+
+[[patches.agent]]
+dir = "d2b"
+name = "ce-agent-native-reviewer"
+provider = "copilot-review"
+session = ""
+
+[[patches.agent]]
+dir = "d2b"
+name = "ce-api-contract-reviewer"
+provider = "copilot-review"
+session = ""
+
+[[patches.agent]]
+dir = "d2b"
+name = "ce-architecture-strategist"
+provider = "copilot-planning-grok"
+session = ""
+
+[[patches.agent]]
+dir = "d2b"
+name = "ce-brainstorm"
+provider = "copilot-planning-grok"
+session = ""
+
+[[patches.agent]]
+dir = "d2b"
+name = "ce-code-review-selector"
+provider = "copilot-review"
+session = ""
+
+[[patches.agent]]
+dir = "d2b"
+name = "ce-code-review-synthesizer"
+provider = "copilot-review"
+session = ""
+
+[[patches.agent]]
+dir = "d2b"
+name = "ce-coherence-reviewer"
+provider = "copilot-review"
+session = ""
+
+[[patches.agent]]
+dir = "d2b"
+name = "ce-compound"
+provider = "copilot-review"
+session = ""
+
+[[patches.agent]]
+dir = "d2b"
+name = "ce-correctness-reviewer"
+provider = "copilot-review"
+session = ""
+
+[[patches.agent]]
+dir = "d2b"
+name = "ce-data-migration-reviewer"
+provider = "copilot-review"
+session = ""
+
+[[patches.agent]]
+dir = "d2b"
+name = "ce-deployment-verification-agent"
+provider = "copilot-review"
+session = ""
+
+[[patches.agent]]
+dir = "d2b"
+name = "ce-feasibility-reviewer"
+provider = "copilot-review"
+session = ""
+
+[[patches.agent]]
+dir = "d2b"
+name = "ce-julik-frontend-races-reviewer"
+provider = "copilot-review"
+session = ""
+
+[[patches.agent]]
+dir = "d2b"
+name = "ce-learnings-researcher"
+provider = "copilot-review"
+session = ""
+
+[[patches.agent]]
+dir = "d2b"
+name = "ce-maintainability-reviewer"
+provider = "copilot-review"
+session = ""
+
+[[patches.agent]]
+dir = "d2b"
+name = "ce-performance-reviewer"
+provider = "copilot-review"
+session = ""
+
+[[patches.agent]]
+dir = "d2b"
+name = "ce-plan"
+provider = "copilot-planning-grok"
+session = ""
+
+[[patches.agent]]
+dir = "d2b"
+name = "ce-plan-review-synthesizer"
+provider = "copilot-review"
+session = ""
+
+[[patches.agent]]
+dir = "d2b"
+name = "ce-pr-comment-resolver"
+provider = "copilot-code-luna"
+session = ""
+
+[[patches.agent]]
+dir = "d2b"
+name = "ce-previous-comments-reviewer"
+provider = "copilot-review"
+session = ""
+
+[[patches.agent]]
+dir = "d2b"
+name = "ce-project-standards-reviewer"
+provider = "copilot-review"
+session = ""
+
+[[patches.agent]]
+dir = "d2b"
+name = "ce-reliability-reviewer"
+provider = "copilot-review"
+session = ""
+
+[[patches.agent]]
+dir = "d2b"
+name = "ce-scope-guardian-reviewer"
+provider = "copilot-review"
+session = ""
+
+[[patches.agent]]
+dir = "d2b"
+name = "ce-security-reviewer"
+provider = "copilot-review"
+session = ""
+
+[[patches.agent]]
+dir = "d2b"
+name = "ce-swift-ios-reviewer"
+provider = "copilot-review"
+session = ""
+
+[[patches.agent]]
+dir = "d2b"
+name = "ce-testing-reviewer"
+provider = "copilot-review"
+session = ""
+
+[[patches.agent]]
+dir = "d2b"
+name = "ce-work"
+provider = "copilot-code-luna"
+session = ""
+
+[[patches.agent]]
+dir = "d2b"
+name = "design-author"
+provider = "copilot-planning-grok"
+session = ""
+
+[[patches.agent]]
+dir = "d2b"
+name = "design-implementation-reviewer"
+provider = "copilot-review"
+session = ""
+
+[[patches.agent]]
+dir = "d2b"
+name = "design-test-risk-reviewer"
+provider = "copilot-review"
+session = ""
+
+[[patches.agent]]
+dir = "d2b"
+name = "gap-analyst"
+provider = "copilot-review"
+session = ""
+
+[[patches.agent]]
+dir = "d2b"
+name = "implementation-reviewer"
+provider = "copilot-review"
+session = ""
+
+[[patches.agent]]
+dir = "d2b"
+name = "implementation-worker"
+provider = "copilot-code-luna"
+session = ""
+
+[[patches.agent]]
+dir = "d2b"
+name = "issue-triager"
+provider = "copilot-review"
+session = ""
+
+[[patches.agent]]
+dir = "d2b"
+name = "publisher"
+provider = "copilot-code-luna"
+session = ""
+
+[[patches.agent]]
+dir = "d2b"
+name = "requirements-planner"
+provider = "copilot-planning-grok"
+session = ""
+
+[[patches.agent]]
+dir = "d2b"
+name = "review-synthesizer"
+provider = "copilot-review"
+session = ""
+
+[[patches.agent]]
+dir = "d2b"
+name = "run-operator"
+provider = "copilot-review"
+session = ""
+
+[[patches.agent]]
+dir = "d2b"
+name = "task-decomposer"
+provider = "copilot-planning-grok"
+session = ""
+
+[[patches.agent]]
+dir = ""
+name = "copilot-code-luna"
+provider = "copilot-code-luna"
+session = ""
+
+[[patches.agent]]
+dir = ""
+name = "dog"
+suspended = true
+
+[[patches.agent]]
+dir = ""
+name = "copilot-planning-grok"
+provider = "copilot-planning-grok"
+session = ""
+
+[[patches.agent]]
+dir = ""
+name = "copilot-review"
+provider = "copilot-review"
+session = ""
+
+[[patches.agent]]
+dir = ""
+name = "copilot-review-luna"
+provider = "copilot-review-luna"
+session = ""
+
+[[patches.agent]]
+dir = ""
+name = "copilot-review-grok"
+provider = "copilot-review-grok"
+session = ""
+
+[[patches.agent]]
+dir = "d2b"
+name = "copilot-code-luna"
+provider = "copilot-code-luna"
+session = ""
+
+[[patches.agent]]
+dir = "d2b"
+name = "copilot-planning-grok"
+provider = "copilot-planning-grok"
+session = ""
+
+[[patches.agent]]
+dir = "d2b"
+name = "copilot-review"
+provider = "copilot-review"
+session = ""
+
+[[patches.agent]]
+dir = "d2b"
+name = "copilot-review-luna"
+provider = "copilot-review-luna"
+session = ""
+
+[[patches.agent]]
+dir = "d2b"
+name = "copilot-review-grok"
+provider = "copilot-review-grok"
+session = ""
+

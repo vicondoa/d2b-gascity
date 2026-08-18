@@ -1,0 +1,334 @@
+worker_processes 1;
+user root root;
+pid @BASE@/nginx.pid;
+error_log @BASE@/nginx-error.log warn;
+
+events {
+    worker_connections 256;
+}
+
+http {
+    access_log off;
+    client_body_temp_path @BASE@/nginx/client_body_temp;
+    proxy_temp_path @BASE@/nginx/proxy_temp;
+    fastcgi_temp_path @BASE@/nginx/fastcgi_temp;
+    uwsgi_temp_path @BASE@/nginx/uwsgi_temp;
+    scgi_temp_path @BASE@/nginx/scgi_temp;
+
+    geo $fixture_source_admitted {
+        default 0;
+        127.0.0.2/32 1;
+    }
+
+    map $http_upgrade $fixture_connection_upgrade {
+        default upgrade;
+        "" close;
+    }
+    map $request_uri $fixture_forwarded_uri {
+        default $request_uri;
+        ~^(?<fixture_path>[^?]+)\?(?<fixture_query>.*)$ $fixture_path%3F$fixture_query;
+    }
+    map $request_method $fixture_unsafe_method {
+        default 0;
+        POST 1;
+        PUT 1;
+        PATCH 1;
+        DELETE 1;
+    }
+    map $http_origin $fixture_dashboard_bad_origin {
+        default 1;
+        "" 0;
+        "https://gascity.example.test" 0;
+    }
+    map $http_origin $fixture_dashboard_origin_present {
+        default 1;
+        "" 0;
+    }
+    map $http_sec_fetch_site $fixture_dashboard_fetch_ok {
+        default 0;
+        same-origin 1;
+        none 1;
+    }
+    map "$fixture_unsafe_method:$fixture_dashboard_bad_origin:$fixture_dashboard_fetch_ok" $fixture_dashboard_mutation_denied {
+        default 0;
+        ~^1:1 1;
+        ~^1:0:0 1;
+    }
+    map $http_origin $fixture_auth_bad_origin {
+        default 1;
+        "" 0;
+        "https://auth.gascity.example.test" 0;
+    }
+    map $http_referer $fixture_auth_bad_referer {
+        default 1;
+        "" 0;
+        ~^https://auth\.gascity\.example\.test(/|\?|$) 0;
+    }
+    map $http_origin $fixture_auth_origin_present {
+        default 1;
+        "" 0;
+    }
+    map $http_referer $fixture_auth_referer_present {
+        default 1;
+        "" 0;
+    }
+    map "$fixture_unsafe_method:$fixture_auth_origin_present:$fixture_auth_bad_origin:$fixture_auth_referer_present:$fixture_auth_bad_referer" $fixture_auth_mutation_denied {
+        default 0;
+        ~^1:1:1 1;
+        ~^1:0:0:0 1;
+        ~^1:0:0:1:1 1;
+    }
+    map $http_x_forwarded_for $fixture_login_source {
+        default $http_x_forwarded_for;
+        "" $binary_remote_addr;
+    }
+    map $uri $fixture_login_limit_key {
+        default "";
+        /api/user/login $fixture_login_source;
+    }
+    limit_req_zone $fixture_login_limit_key zone=fixture_login:10m rate=5r/m;
+    limit_req_status 429;
+
+    server {
+        listen 127.0.0.1:__TLS_PORT__ ssl;
+        server_name gascity.example.test;
+        ssl_certificate @CERT@;
+        ssl_certificate_key @KEY@;
+        ssl_protocols TLSv1.2 TLSv1.3;
+
+        location / {
+            proxy_pass http://127.0.0.1:__RELAY_PORT__;
+            proxy_bind 127.0.0.2;
+            proxy_http_version 1.1;
+            proxy_pass_request_body on;
+            proxy_set_header Host $host;
+            proxy_set_header Origin $http_origin;
+            proxy_set_header Referer $http_referer;
+            proxy_set_header Sec-Fetch-Site $http_sec_fetch_site;
+            proxy_set_header X-GC-Request $http_x_gc_request;
+            proxy_set_header Last-Event-ID $http_last_event_id;
+            proxy_set_header Cookie $http_cookie;
+            proxy_set_header X-Forwarded-Host $host;
+            proxy_set_header X-Forwarded-Port 443;
+            proxy_set_header X-Forwarded-Proto https;
+            proxy_set_header X-Forwarded-For $remote_addr;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header Authorization "";
+            proxy_set_header Remote-User "";
+            proxy_set_header X-Remote-User "";
+            proxy_set_header X-Auth-Request-User "";
+            proxy_set_header X-Forwarded-User "";
+            proxy_set_header X-Original-User "";
+            proxy_set_header Upgrade $http_upgrade;
+            proxy_set_header Connection $fixture_connection_upgrade;
+            proxy_buffering off;
+            proxy_request_buffering off;
+            proxy_cache off;
+            proxy_read_timeout 3600s;
+            proxy_send_timeout 3600s;
+            proxy_next_upstream off;
+        }
+    }
+
+    server {
+        listen 127.0.0.1:__TLS_PORT__ ssl;
+        server_name auth.gascity.example.test;
+        ssl_certificate @CERT@;
+        ssl_certificate_key @KEY@;
+        ssl_protocols TLSv1.2 TLSv1.3;
+
+        location / {
+            proxy_pass http://127.0.0.1:__AUTH_PORT__;
+            proxy_bind 127.0.0.2;
+            proxy_http_version 1.1;
+            proxy_pass_request_body on;
+            proxy_set_header Host $host;
+            proxy_set_header Origin $http_origin;
+            proxy_set_header Referer $http_referer;
+            proxy_set_header Sec-Fetch-Site $http_sec_fetch_site;
+            proxy_set_header Cookie $http_cookie;
+            proxy_set_header X-Forwarded-Host $host;
+            proxy_set_header X-Forwarded-Port 443;
+            proxy_set_header X-Forwarded-Proto https;
+            proxy_set_header X-Forwarded-For $remote_addr;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header Authorization "";
+            proxy_set_header Remote-User "";
+            proxy_set_header X-Remote-User "";
+            proxy_set_header X-Auth-Request-User "";
+            proxy_set_header X-Forwarded-User "";
+            proxy_set_header X-Original-User "";
+            proxy_set_header Upgrade $http_upgrade;
+            proxy_set_header Connection $fixture_connection_upgrade;
+            proxy_request_buffering off;
+            proxy_buffering off;
+            proxy_cache off;
+            proxy_read_timeout 30s;
+            proxy_send_timeout 30s;
+            proxy_next_upstream off;
+        }
+    }
+
+    server {
+        listen 127.0.0.1:__AUTH_PORT__ default_server;
+        server_name _;
+        if ($fixture_source_admitted = 0) { return 403; }
+        return 421;
+    }
+
+    server {
+        listen 127.0.0.1:__AUTH_PORT__;
+        server_name auth.gascity.example.test;
+        allow 127.0.0.2;
+        deny all;
+        if ($fixture_source_admitted = 0) { return 403; }
+        if ($http_host != "auth.gascity.example.test") { return 421; }
+        if ($fixture_auth_mutation_denied = 1) { return 403; }
+
+        location / {
+            limit_req zone=fixture_login burst=2 nodelay;
+            proxy_pass http://127.0.0.1:__TINYAUTH_PORT__;
+            proxy_http_version 1.1;
+            proxy_pass_request_body on;
+            proxy_set_header Host auth.gascity.example.test;
+            proxy_set_header Origin $http_origin;
+            proxy_set_header Referer $http_referer;
+            proxy_set_header Sec-Fetch-Site $http_sec_fetch_site;
+            proxy_set_header Cookie $http_cookie;
+            proxy_set_header X-Forwarded-Host auth.gascity.example.test;
+            proxy_set_header X-Forwarded-Port 443;
+            proxy_set_header X-Forwarded-Proto https;
+            proxy_set_header X-Forwarded-For $remote_addr;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-Uri $fixture_forwarded_uri;
+            proxy_set_header X-Original-URI $fixture_forwarded_uri;
+            proxy_set_header Authorization "";
+            proxy_set_header Remote-User "";
+            proxy_set_header X-Remote-User "";
+            proxy_set_header X-Auth-Request-User "";
+            proxy_set_header X-Forwarded-User "";
+            proxy_set_header X-Original-User "";
+            proxy_set_header Upgrade $http_upgrade;
+            proxy_set_header Connection $fixture_connection_upgrade;
+            proxy_request_buffering off;
+            proxy_buffering off;
+            proxy_cache off;
+            proxy_connect_timeout 2s;
+            proxy_read_timeout 30s;
+            proxy_send_timeout 30s;
+            proxy_next_upstream off;
+        }
+    }
+
+    server {
+        listen 127.0.0.1:__RELAY_PORT__ default_server;
+        server_name _;
+        if ($fixture_source_admitted = 0) { return 403; }
+        return 421;
+    }
+
+    server {
+        listen 127.0.0.1:__RELAY_PORT__;
+        server_name gascity.example.test;
+        allow 127.0.0.2;
+        deny all;
+        if ($fixture_source_admitted = 0) { return 403; }
+        if ($http_host != "gascity.example.test") { return 421; }
+        if ($fixture_dashboard_mutation_denied = 1) { return 403; }
+
+        location = /_auth {
+            internal;
+            proxy_pass http://127.0.0.1:__TINYAUTH_PORT__/api/auth/nginx;
+            proxy_http_version 1.1;
+            proxy_pass_request_body off;
+            proxy_set_header Content-Length "";
+            proxy_set_header Host auth.gascity.example.test;
+            proxy_set_header Origin $http_origin;
+            proxy_set_header Referer $http_referer;
+            proxy_set_header Sec-Fetch-Site $http_sec_fetch_site;
+            proxy_set_header Cookie $http_cookie;
+            proxy_set_header X-Forwarded-Host gascity.example.test;
+            proxy_set_header X-Forwarded-Port 443;
+            proxy_set_header X-Forwarded-Proto https;
+            proxy_set_header X-Forwarded-For $remote_addr;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-Uri $fixture_forwarded_uri;
+            proxy_set_header X-Original-URI $fixture_forwarded_uri;
+            proxy_set_header Authorization "";
+            proxy_set_header Remote-User "";
+            proxy_set_header X-Remote-User "";
+            proxy_set_header X-Auth-Request-User "";
+            proxy_set_header X-Forwarded-User "";
+            proxy_buffering off;
+            proxy_cache off;
+            proxy_connect_timeout 2s;
+            proxy_read_timeout 3s;
+            proxy_send_timeout 3s;
+            proxy_next_upstream off;
+        }
+
+        location = /__fixture/sse {
+            auth_request /_auth;
+            auth_request_set $fixture_auth_location $upstream_http_x_tinyauth_location;
+            auth_request_set $fixture_set_cookie $upstream_http_set_cookie;
+            add_header Set-Cookie $fixture_set_cookie always;
+            error_page 401 = @fixture_login;
+            proxy_pass http://127.0.0.1:__HELPER_PORT__/fixture-sse;
+            proxy_http_version 1.1;
+            proxy_pass_request_body on;
+            proxy_set_header Connection "";
+            proxy_set_header Host $http_host;
+            proxy_set_header Last-Event-ID $http_last_event_id;
+            proxy_set_header Cookie $http_cookie;
+            proxy_buffering off;
+            proxy_request_buffering off;
+            proxy_read_timeout 5s;
+            add_header X-D2B-SSE-Buffering off always;
+        }
+
+        location / {
+            auth_request /_auth;
+            auth_request_set $fixture_auth_location $upstream_http_x_tinyauth_location;
+            auth_request_set $fixture_set_cookie $upstream_http_set_cookie;
+            add_header Set-Cookie $fixture_set_cookie always;
+            error_page 401 = @fixture_login;
+            proxy_pass http://127.0.0.1:__SUPERVISOR_PORT__;
+            proxy_http_version 1.1;
+            proxy_pass_request_body on;
+            proxy_set_header Host $http_host;
+            proxy_set_header Origin $http_origin;
+            proxy_set_header Referer $http_referer;
+            proxy_set_header Sec-Fetch-Site $http_sec_fetch_site;
+            proxy_set_header X-GC-Request $http_x_gc_request;
+            proxy_set_header Last-Event-ID $http_last_event_id;
+            proxy_set_header Cookie $http_cookie;
+            proxy_set_header X-Forwarded-Host gascity.example.test;
+            proxy_set_header X-Forwarded-Port 443;
+            proxy_set_header X-Forwarded-Proto https;
+            proxy_set_header X-Forwarded-For $remote_addr;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header Authorization "";
+            proxy_set_header Remote-User "";
+            proxy_set_header X-Remote-User "";
+            proxy_set_header X-Auth-Request-User "";
+            proxy_set_header X-User "";
+            proxy_set_header X-Authenticated-User "";
+            proxy_set_header X-Forwarded-User "";
+            proxy_set_header X-Original-User "";
+            proxy_set_header Upgrade $http_upgrade;
+            proxy_set_header Connection $fixture_connection_upgrade;
+            proxy_buffering off;
+            proxy_request_buffering off;
+            proxy_read_timeout 3600s;
+            proxy_send_timeout 3600s;
+            proxy_next_upstream off;
+            add_header X-Accel-Buffering no always;
+            add_header X-D2B-Relay-Buffering off always;
+        }
+
+        location @fixture_login {
+            add_header Set-Cookie $fixture_set_cookie always;
+            return 302 $fixture_auth_location;
+        }
+    }
+}

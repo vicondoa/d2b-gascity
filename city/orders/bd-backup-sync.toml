@@ -1,0 +1,6 @@
+[order]
+description = "Sync the official Dolt beads backup so reaper bulk prune stays authorized"
+trigger = "cooldown"
+interval = "6h"
+exec = "bd backup sync"
+timeout = "10m"

@@ -1,0 +1,112 @@
+# Provenance
+
+## Extraction source
+
+The standalone repository begins from a clean source snapshot of
+`vicondoa/d2b` at commit `9e0abd0c`. This records source authority only; it
+does not import the d2b repository's full history, commit identities, tags,
+worktrees, or runtime state.
+
+The snapshot is an extraction of Gas City contributor infrastructure, not a
+fork of the d2b product. Every candidate file remains subject to privacy,
+license, and scope review before it is copied.
+
+## Planned extraction allowlist
+
+The planned allowlist is limited to these path classes and their standalone
+counterparts:
+
+### Source path classes
+
+- `nix/gas-city-contributor/**` for portable city and pack assets, provider
+  declarations, operator tooling, and Gas City-specific packaging inputs.
+- `nixos-modules/gas-city-contributor/**` for the deployment module and its
+  options.
+- `pkgs/gascity/**` only for standalone package metadata or build inputs that
+  remain necessary after the upstream package review.
+- `tests/fixtures/gas-city/**`,
+  `tests/host-integration/gas-city-contributor.nix`,
+  `tests/unit/nix/cases/gas-city-contributor-*.nix`,
+  `tests/unit/nix/helpers/gas-city-contributor.nix`, and
+  `tests/unit/smoke/gas-city-package-smoke.nix` for reviewed standalone
+  coverage.
+- `docs/contributing/gas-city*.md`, `docs/adr/0053-*.md`,
+  `docs/adr/0056-*.md`, and selected `docs/plans/**` references for
+  standalone operations and decisions.
+- `changelog.d/gas-city*.md` and `changelog.d/gascity*.md` as source notes,
+  only after privacy and license review.
+
+### Standalone path classes
+
+- Root governance, licensing, provenance, packaging, and changelog files.
+- `.github/workflows/**` for standalone checks and generated updates.
+- `city/{city.toml,pack.toml,packs.lock}`, `city/agents/**`,
+  `city/assets/**`, `city/formulas/**`, and `city/providers/**`.
+- `docs/**` for standalone architecture, bootstrap, dashboard proxy,
+  feasibility, operations, rollback, and plan documentation.
+- `nix/packages/**` and `nix/source-manifest.nix`.
+- `nixos-modules/**` for the standalone module and ingress relay.
+- `operator/proxy/**`.
+- `scripts/**` for bootstrap, provider, operator, publication, and source
+  manifest tooling.
+- `tests/acceptance/**`, `tests/fixtures/**`, `tests/host/**`, `tests/nix/**`,
+  `tests/policy/**`, and `tests/smoke/**`.
+
+These classes are an allowlist, not a request to copy every matching file.
+Generic d2b product paths, d2b process or pinning machinery, the separate
+`pkgs/gascity-dashboard/**` package, private credential fixtures, reports,
+caches, sockets, host overrides, `.gc`, `.beads`, worktrees, and prototype
+state are excluded. The dashboard remains an upstream supervisor concern.
+
+## Upstream sources and licenses
+
+Pins below are the first standalone set named by the plan. Versions and
+revisions are recorded here so future package metadata can be checked against
+one source record.
+
+| Component | Source | Pin | License or terms |
+| --- | --- | --- | --- |
+| Gas City | [gastownhall/gascity](https://github.com/gastownhall/gascity) | `v1.4.1` (`58ef17e3bd685fd5cf7f21286277b208d3324590`) official `linux_amd64` binary | MIT |
+| Gas City packs, including Compound Engineering, Discord, and roles | [gastownhall/gascity-packs](https://github.com/gastownhall/gascity-packs) | `5d2a9d023edbb9ba24fdcff554e89fc3d7da72fe` | No repository-level SPDX or license metadata was exposed by the inspected upstream snapshot; retain upstream notices and verify each imported pack before redistribution |
+| Beads | [steveyegge/beads](https://github.com/steveyegge/beads) | `v1.2.2` (`6c124203e771433a3550c348771a5b5e27fd3c21`) official `linux_amd64` binary | MIT |
+| Dolt | [dolthub/dolt](https://github.com/dolthub/dolt) | `2.1.7` | Apache-2.0 |
+| Copilot CLI | [github/copilot-cli](https://github.com/github/copilot-cli) | `1.0.79` | GitHub Copilot CLI License, a proprietary license; no source modification or standalone redistribution |
+| Copilot CLI packaging | [numtide/llm-agents.nix](https://github.com/numtide/llm-agents.nix) | `387989ee56d550d86d46d9458ad68a55b9e0ca3b` | MIT for the packaging repository; the packaged CLI keeps its own terms |
+| TinyAuth | [tinyauthapp/tinyauth](https://github.com/tinyauthapp/tinyauth) | `5.1.3` | AGPL-3.0 |
+| Nginx | [nginx/nginx](https://github.com/nginx/nginx) | `1.30.4` | BSD-2-Clause |
+| Go 1.26.6 official binary | [golang/go](https://go.dev/dl/go1.26.6.linux-amd64.tar.gz) via [openserbia/go-flake](https://github.com/openserbia/go-flake) | `5ddca63f9a9b313effcd4e7c4e0a6bd09080af0c` | BSD-3-Clause |
+
+The repository [LICENSE](LICENSE) applies to local work. It does not
+override an upstream license, the Copilot CLI terms, or notices that must
+remain with imported material.
+
+## Local ACP deployment shim
+
+The provider wrapper includes a small deployment shim for the pinned Gas City
+ACP sidecar identity contract. It writes only the three runtime identity
+values required by the upstream reconciler, using upstream-compatible
+SHA-256 names and atomic replacement under the service's private
+`$TMPDIR/gc-acp` directory. The NixOS service fixes `TMPDIR=/tmp` inside its
+`PrivateTmp` namespace. It does not modify Gas City source, package inputs, or
+upstream tests, and it does not own sidecar cleanup.
+Upstream ACP `Stop` remains the cleanup owner.
+
+The related orphan behavior is tracked upstream in
+[#4714](https://github.com/gastownhall/gascity/issues/4714). Remove this local
+shim when upstream ACP seeds identity before the wrapper handshake.
+
+## Clean snapshot policy
+
+Only reviewed source files are copied. The following are never copied from
+the d2b checkout or from a deployment host:
+
+- full Git history, identities, tags, or unrelated d2b product code;
+- `.gc`, `.beads`, Dolt databases, worktrees, session state, caches, sockets,
+  service dumps, reports, or logs;
+- credentials, tokens, keys, cookies, password hashes, private paths,
+  authorities, addresses, or host configuration;
+- live prompts, model responses, private pull-request payloads, or other
+  private deployment data.
+
+State is bootstrapped into a new host-local root. Provenance records what may
+be copied, not a license to copy private data.
