@@ -236,7 +236,7 @@ class BootstrapFixtureTests(unittest.TestCase):
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
-        for _ in range(50):
+        for _ in range(200):
             status = subprocess.run(
                 [str(self.gc), "supervisor", "status", "--json"],
                 env=self.env,
@@ -247,7 +247,11 @@ class BootstrapFixtureTests(unittest.TestCase):
             )
             if status.returncode == 0 and '"running":true' in status.stdout.replace(" ", ""):
                 break
+            if self.supervisor.poll() is not None:
+                raise RuntimeError("fixture supervisor exited before becoming ready")
             time.sleep(0.1)
+        else:
+            raise RuntimeError("fixture supervisor did not report running")
 
     def _make_fake_d2b_repository(self) -> pathlib.Path:
         work = self.base / "d2b-source"
