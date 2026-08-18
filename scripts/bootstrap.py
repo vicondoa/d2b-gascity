@@ -277,10 +277,6 @@ def _validate_portable_source(
             "https://github.com/gastownhall/gascity-packs/tree/main/discord",
             PACK_COMMIT,
         ),
-        "gc": (
-            "https://github.com/gastownhall/gascity-packs/tree/main/gascity/roles",
-            PACK_COMMIT,
-        ),
     }
     if set(imports) != set(expected_imports):
         raise BootstrapError("portable root pack has an unexpected import set")

@@ -63,15 +63,10 @@ class PortableConfigTests(unittest.TestCase):
             "https://github.com/gastownhall/gascity-packs/tree/main/discord",
         )
         self.assertEqual(
-            pack["imports"]["gc"]["source"],
-            "https://github.com/gastownhall/gascity-packs/tree/main/gascity/roles",
-        )
-        self.assertEqual(
             pack["imports"]["compound-engineering"]["version"],
             f"sha:{PACK_COMMIT}",
         )
         self.assertEqual(pack["imports"]["discord"]["version"], f"sha:{PACK_COMMIT}")
-        self.assertEqual(pack["imports"]["gc"]["version"], f"sha:{PACK_COMMIT}")
         self.assertEqual(
             pack["imports"]["core"]["version"],
             f"sha:{GASCITY_COMMIT}",
