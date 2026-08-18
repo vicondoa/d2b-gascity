@@ -55,7 +55,7 @@ class PortableConfigTests(unittest.TestCase):
         pack = tomllib.loads((CITY / "pack.toml").read_text())
         self.assertEqual(pack["pack"]["schema"], 2)
         self.assertEqual(
-            pack["imports"]["compound"]["source"],
+            pack["imports"]["compound-engineering"]["source"],
             "https://github.com/gastownhall/gascity-packs/tree/main/compound-engineering",
         )
         self.assertEqual(
@@ -63,10 +63,15 @@ class PortableConfigTests(unittest.TestCase):
             "https://github.com/gastownhall/gascity-packs/tree/main/discord",
         )
         self.assertEqual(
-            pack["imports"]["compound"]["version"],
+            pack["imports"]["gc"]["source"],
+            "https://github.com/gastownhall/gascity-packs/tree/main/gascity/roles",
+        )
+        self.assertEqual(
+            pack["imports"]["compound-engineering"]["version"],
             f"sha:{PACK_COMMIT}",
         )
         self.assertEqual(pack["imports"]["discord"]["version"], f"sha:{PACK_COMMIT}")
+        self.assertEqual(pack["imports"]["gc"]["version"], f"sha:{PACK_COMMIT}")
         self.assertEqual(
             pack["imports"]["core"]["version"],
             f"sha:{GASCITY_COMMIT}",

@@ -265,7 +265,7 @@ def _validate_portable_source(
             "https://github.com/gastownhall/gascity.git//examples/bd",
             GASCITY_COMMIT,
         ),
-        "compound": (
+        "compound-engineering": (
             "https://github.com/gastownhall/gascity-packs/tree/main/compound-engineering",
             PACK_COMMIT,
         ),
@@ -275,6 +275,10 @@ def _validate_portable_source(
         ),
         "discord": (
             "https://github.com/gastownhall/gascity-packs/tree/main/discord",
+            PACK_COMMIT,
+        ),
+        "gc": (
+            "https://github.com/gastownhall/gascity-packs/tree/main/gascity/roles",
             PACK_COMMIT,
         ),
     }

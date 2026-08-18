@@ -62,6 +62,7 @@ and this project follows semantic versioning where releases are published.
   hides live Copilot sessions from the Agents page.
 - Route `d2b/publisher` through the official pack `gc.publisher` role on
   Copilot. The custom publication worker and marker contract are unused.
+  Accept the city-level `gc` roles import in the portable pack contract.
 - Pass `GH_TOKEN` from the supervisor Copilot credential into every
   Copilot provider so official `gh` publication can authenticate.
 - Register a local Dolt beads backup destination and a 6-hour
