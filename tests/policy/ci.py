@@ -45,6 +45,8 @@ class WorkflowPolicyTests(unittest.TestCase):
             text,
             r"(?m)^\s*-\s*run:\s*python3 tests/run.py check\s*$",
         )
+        self.assertIn("actions/setup-python@", text)
+        self.assertIn('python-version: "3.12"', text)
         self.assertNotIn("if: ${{ secrets.", text)
         self.assertNotIn("nix develop", text)
         self.assertNotIn("test_bootstrap.py", text)
