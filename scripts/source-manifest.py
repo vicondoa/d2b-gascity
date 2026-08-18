@@ -15,6 +15,7 @@ INPUTS = (
     ("beads", "beads"),
     ("dolt", "dolt"),
     ("llmAgents", "llm-agents"),
+    ("goOfficial", "go-official"),
     ("nixpkgs", "nixpkgs"),
     ("packageNixpkgs", "nixpkgs-gas-city"),
 )

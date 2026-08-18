@@ -25,6 +25,9 @@
     llm-agents = {
       url = "github:numtide/llm-agents.nix/387989ee56d550d86d46d9458ad68a55b9e0ca3b";
     };
+    go-official = {
+      url = "github:openserbia/go-flake/5ddca63f9a9b313effcd4e7c4e0a6bd09080af0c";
+    };
   };
 
   outputs =
@@ -37,6 +40,7 @@
       beads,
       dolt,
       llm-agents,
+      go-official,
       ...
     }@inputs:
     let
@@ -51,15 +55,9 @@
       lock = builtins.fromJSON (builtins.readFile ./flake.lock);
       locked = name: (builtins.getAttr name lock.nodes).locked;
 
-      # gascity go.mod requires >= 1.26.6; pinned nixpkgs go_1_26 is 1.26.5.
-      goFor = system:
-        (packageNixpkgsFor.${system}.go_1_26).overrideAttrs (_: {
-          version = "1.26.6";
-          src = packageNixpkgsFor.${system}.fetchurl {
-            url = "https://go.dev/dl/go1.26.6.src.tar.gz";
-            hash = "sha256-oHIcVMaIkBRI13rZs+x+p8R0cwdV/4kTgukuy5P/LLE=";
-          };
-        });
+      # Official linux-amd64 Go 1.26.6 binary via openserbia/go-flake.
+      # nixpkgs go_1_26 is still 1.26.5; compiling 1.26.6 from source is too slow.
+      goFor = system: go-official.packages.${system}.go_1_26_6;
       nginxFor = system: packageNixpkgsFor.${system}.nginx;
 
       buildGoModuleFor = system:

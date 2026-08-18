@@ -74,6 +74,7 @@ one source record.
 | Copilot CLI packaging | [numtide/llm-agents.nix](https://github.com/numtide/llm-agents.nix) | `387989ee56d550d86d46d9458ad68a55b9e0ca3b` | MIT for the packaging repository; the packaged CLI keeps its own terms |
 | TinyAuth | [tinyauthapp/tinyauth](https://github.com/tinyauthapp/tinyauth) | `5.1.3` | AGPL-3.0 |
 | Nginx | [nginx/nginx](https://github.com/nginx/nginx) | `1.30.4` | BSD-2-Clause |
+| Go 1.26.6 official binary | [golang/go](https://go.dev/dl/go1.26.6.linux-amd64.tar.gz) via [openserbia/go-flake](https://github.com/openserbia/go-flake) | `5ddca63f9a9b313effcd4e7c4e0a6bd09080af0c` | BSD-3-Clause |
 
 The repository [LICENSE](LICENSE) applies to local work. It does not
 override an upstream license, the Copilot CLI terms, or notices that must
