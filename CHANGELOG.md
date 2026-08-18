@@ -54,6 +54,30 @@ and this project follows semantic versioning where releases are published.
 
 ### Changed
 
+- Export `GC_CITY` and make the city tree readable to
+  `d2b-gascity-operators` so a host operator can run `gc status` from any
+  directory. Supervisor credential files stay mode `0700`.
+- Keep listed role agents at `max_active_sessions = 1` with
+  `tmux_alias = "{{.Agent}}"`. Unset max is an unlimited pool, which
+  hides live Copilot sessions from the Agents page.
+- Route `d2b/publisher` through the official pack `gc.publisher` role on
+  Copilot. The custom publication worker and marker contract are unused.
+- Pass `GH_TOKEN` from the supervisor Copilot credential into every
+  Copilot provider so official `gh` publication can authenticate.
+- Register a local Dolt beads backup destination and a 6-hour
+  `bd backup sync` order so reaper bulk prune is authorized by a real
+  `dolt-backup-state.json`, not a missing embedded `backup_state.json`.
+- Bind the Compound Engineering import as `compound-engineering` and add
+  city-scoped `gc.run-operator` / `gc.publisher` agents so official
+  `compound-build` formula targets resolve and the publish step can run.
+- Admit `localhost` and `127.0.0.1` in supervisor `allowed_hosts`, and let
+  configured operator uids reach loopback `8372`, so the embedded dashboard
+  works on this host. The external TinyAuth hostname stays required for
+  remote TLS access.
+- Give Compound Engineering and roles agents official session bounds so
+  they appear on `gc status` and the dashboard Agents page: implementation
+  workers `min = 0` / `max = 20`, `ce-pr-comment-resolver` `max = 10`,
+  and every other slung role `max = 1`. Unbounded templates stay unlisted.
 - Drive Copilot through official Gas City tmux: inherit `builtin:copilot`
   (`copilot --yolo` plus model flags), set `COPILOT_ALLOW_ALL` so folder-trust
   does not block the ready prompt, clear pack ACP transport, and leave the

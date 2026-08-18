@@ -325,7 +325,7 @@ in
       core.networking.firewall.extraCommands;
     assert lib.hasInfix "type filter hook output priority 0; policy accept;"
       core.networking.firewall.extraCommands;
-    assert lib.hasInfix "tcp dport 8372 meta skuid != { 41080 } drop"
+    assert lib.hasInfix "tcp dport 8372 meta skuid != { 41080, 1000 } drop"
       core.networking.firewall.extraCommands;
     assert lib.hasInfix
       "tcp dport 18372 meta skuid != 41080 drop"
@@ -396,6 +396,9 @@ in
     assert !(core.services.d2bGasCity ? supervisor);
     assert lib.hasInfix "bind = \"127.0.0.1\"" coreSupervisorText;
     assert lib.hasInfix "port = 8372" coreSupervisorText;
+    assert lib.hasInfix
+      "allowed_hosts = [\"localhost\", \"127.0.0.1\"]"
+      coreSupervisorText;
     assert apiProxy.ExecStart
       == "${pkgs.systemd}/lib/systemd/systemd-socket-proxyd 127.0.0.1:8372";
     assert apiProxy.User == "d2b-gascity";
@@ -558,7 +561,7 @@ in
       "GC_SUPERVISOR_SYSTEMD_UNIT=d2b-gascity.service"
       (stringValue remote.systemd.services.d2b-gascity.serviceConfig.Environment);
     assert lib.hasInfix
-      "allowed_hosts = [\"gascity.example.test\"]"
+      "allowed_hosts = [\"localhost\", \"127.0.0.1\", \"gascity.example.test\"]"
       remoteSupervisorText;
     assert lib.hasInfix "port = 8372" remoteSupervisorText;
     assert lib.hasInfix "appurl: https://auth.gascity.example.test" tinyauthText;
@@ -600,7 +603,7 @@ in
       remote.networking.firewall.extraCommands;
     assert lib.hasInfix "tcp dport 8375 meta skuid != 41081 drop"
       remote.networking.firewall.extraCommands;
-    assert lib.hasInfix "tcp dport 8372 meta skuid != { 41080, 41081 } drop"
+    assert lib.hasInfix "tcp dport 8372 meta skuid != { 41080, 41081, 1000 } drop"
       remote.networking.firewall.extraCommands;
     assert lib.hasInfix
       "tcp dport 18372 meta skuid != 41080 drop"

@@ -306,17 +306,12 @@
       "scope": "rig"
     },
     {
-      "classification": "control/maintenance-subprocess",
+      "description": "Publisher for authorized pushes, PR creation, and publication surfaces",
       "dir": "d2b",
-      "lifecycle": "one_shot",
-      "model_backed": false,
+      "model_backed": true,
       "name": "publisher",
       "origin": "gascity-roles",
-      "provider": "publication-worker",
-      "prompt_mode": "none",
-      "session": "tmux",
-      "scope": "rig",
-      "start_command": "d2b-gascity-publication-worker"
+      "scope": "rig"
     },
     {
       "description": "Requirements planner for repo-aware problem framing and acceptance criteria",

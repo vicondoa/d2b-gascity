@@ -7,8 +7,6 @@ wrapper owns only the process boundary and fixed profile arguments.
 The `copilot-review` provider reads the machine-local readiness selection.
 The explicit `copilot-planning-grok`, `copilot-review-grok`, and
 `copilot-review-luna` names remain available for direct diagnostics. The
-`publication-worker` provider is deliberately different:
-it is non-ACP, uses `prompt_mode = "none"`, and starts the packaged
-`d2b-gascity-publication-worker` one-shot subprocess. It never invokes a model
-or receives a model-provided executable path. No provider declaration copies
-imported agents or formulas.
+d2b publisher is the official pack `gc.publisher` role on
+`copilot-code-luna`. No provider declaration copies imported agents or
+formulas.

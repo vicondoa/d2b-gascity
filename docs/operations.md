@@ -3,8 +3,7 @@
 Gas City owns the city supervisor and its child lifecycle. The standalone
 repository does not add a second lifecycle owner, a dashboard service, a
 Discord sidecar, a publisher service, or a custom service declaration. The
-publisher is a deterministic trusted subprocess launched by the supervisor's
-one-shot agent lifecycle.
+publisher is the official pack `gc.publisher` role on Copilot.
 
 ## Ordinary start
 
@@ -23,15 +22,43 @@ runs that resume. Until the rig is resumed, Gas City skips every
 `start-pending` and `poolDesired` stays 0. The resume override persists in
 `.gc/runtime/suspension-state.json` across supervisor restarts.
 
+Gas City lists an agent only when `max_active_sessions` is set. The two
+knobs are `min_active_sessions` (how many to keep warm) and
+`max_active_sessions` (how many can run at once). `min = 0` starts
+instances on slung work; leave `max` unset and sling creates an unlisted
+ephemeral session.
+
+City defaults:
+
+| Agents | min | max |
+| --- | --- | --- |
+| `ce-work`, `implementation-worker` | 0 | 20 |
+| `ce-pr-comment-resolver` | 0 | 10 |
+| `publisher` | pack default | unset |
+| `bd.dog` | 0 | 2 |
+| other roles, including `run-operator` | pack default (always-on singleton) | pack default |
+
+Leave pack session capacity alone. Unset `max_active_sessions` is Gas
+City's unlimited pool. Do not invent `tmux_alias` or per-role max values
+to please the Agents page. The publisher uses the same unset-max pool as
+the other Copilot roles.
+
+Copilot token meters stay empty on this dashboard. Gas City only extracts
+model usage facts from Claude and Codex transcripts. That is upstream
+coverage, not a city hook we should invent.
+
 Copilot runs as the official tmux harness: `builtin:copilot` with
 `--yolo` and pinned model flags. The supervisor exports
 `COPILOT_GITHUB_TOKEN` from the systemd credential so the pane can authenticate.
 Do not set city `[session] provider = "acp"` unless you want ACP transport.
 
 Official `gc supervisor install` reads `$GC_HOME/supervisor.toml`. That file
-must include the dashboard hostname in `allowed_hosts`, or the proxy returns
-HTTP 421 `host_not_allowed`. The NixOS module keeps this file linked to
-`/etc/d2b-gascity/supervisor.toml`.
+must include `localhost`, `127.0.0.1`, and the external dashboard hostname
+in `allowed_hosts`, or a mismatched Host header returns HTTP 421
+`host_not_allowed`. On this host, open `http://127.0.0.1:8372/` as an
+operator listed in `services.d2bGasCity.operators.users`. Use
+`https://gascity.x.vicondoa.com` only from the external TLS path. The NixOS
+module keeps this file linked to `/etc/d2b-gascity/supervisor.toml`.
 
 ### Standalone CLI API compatibility
 
@@ -71,6 +98,25 @@ python3 scripts/operator.py status \
 request. It does not recreate old control-plane state or accept lifecycle
 commands.
 
+Operator shells on this host should run `gc status` without `cd`. The
+module exports `GC_CITY=/var/lib/d2b-gascity/city` and makes that city
+tree group-readable to `d2b-gascity-operators`. `gc/` credentials stay
+`0700`. A login that predates the group membership needs a new session
+or `sg d2b-gascity-operators`. Do not point `GC_HOME` at the supervisor
+home: that directory holds tokens.
+
+This city is a Dolt shared-server store, so `bd` auto-backup stays off.
+Reaper bulk prune requires a fresh official backup: `bd backup init`
+`/var/lib/d2b-gascity/backups/beads` plus `bd backup sync`, which writes
+`.beads/dolt-backup.json` and `.beads/dolt-backup-state.json`. The city
+order `bd-backup-sync` runs that sync every 6 hours. Do not invent
+`.beads/backup/backup_state.json`; that is the unused embedded-mode file.
+
+Official PR publication is the `compound-build` publish step
+(`push=true`, `open_pr=true`), not a freeform sling to the publisher.
+Formula v2 targets `compound-engineering.*`, `gc.run-operator`, and
+`gc.publisher`.
+
 ## Imports and source updates
 
 `city/pack.toml` contains the Pack v2 root metadata and exact pinned imports
@@ -101,8 +147,8 @@ drives the official `copilot --yolo` REPL in tmux. The imported city-scoped
 control patch, so it does not perform background model work while the rig is
 idle. An explicit operator resume leaves its provider unset and therefore
 uses the workspace `copilot-review` fallback. Control and maintenance agents
-remain subprocesses; the d2b publisher is the local
-`d2b-gascity-publication-worker`, not a model-backed role.
+remain subprocesses. The d2b publisher is the official pack
+`gc.publisher` role on `copilot-code-luna`.
 
 Worktree creation is intentionally anchored to `origin/v3`. The core formulas
 receive `base_branch = "v3"` through the d2b rig formula variables, and the
@@ -179,19 +225,16 @@ Public Interactions publication and `sync-commands` are not invoked.
 ## Pull-request publication
 
 After a validated `origin/v3` worktree has completed its required checks, Gas
-City starts the packaged one-shot `d2b-gascity-publication-worker`. It is a
-trusted subprocess with `prompt_mode=none`, `lifecycle=one_shot`, no ACP
-session, and no model provider. It inherits the supervisor's
-`CREDENTIALS_DIRECTORY`; no credential is passed to Copilot or any model
-process.
+City slings the official pack `gc.publisher` role. That role uses the same
+Copilot tmux harness as the other d2b workers and follows the official
+`build-base` publish contract. It is not a city-local subprocess and does
+not require a custom publication marker.
 
-The worker uses the official `gc gc claim` startup protocol (implemented by
+The publisher uses the official `gc gc claim` startup protocol (implemented by
 the pinned CLI as `gc hook --claim --drain-ack --json`) and parses exactly one
-normalized JSON result. A drain result exits. A work result is accepted only
-when the rendered local `build-base` publish asset contains the exact machine
-marker `gc.publication.worker_marker=d2b-gascity-publication-worker-v1` and
-the rendered `gc.publication.push` and `gc.publication.open_pr` values. An
-unrelated publisher task is rejected, and only the claimed bead is closed.
+normalized JSON result. A drain result exits. A work result follows the
+official publish step description. An unrelated publisher task is rejected,
+and only the claimed bead is closed.
 Continuation groups are claimed again; an empty group is acknowledged with a
 runtime drain. A `claims_errored` drain is a typed retry failure and exits
 nonzero, so the claim remains open for reconciliation.

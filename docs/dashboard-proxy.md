@@ -41,8 +41,13 @@ equivalent to:
 [supervisor]
 bind = "127.0.0.1"
 port = 8372
-allowed_hosts = ["gascity.example.test"]
+allowed_hosts = ["localhost", "127.0.0.1", "gascity.example.test"]
 ```
+
+`localhost` and `127.0.0.1` are always listed so a host operator can open
+the embedded dashboard on loopback. The external hostname is still required
+for the TinyAuth TLS path. Loopback `8372` admits the supervisor uid and
+`services.d2bGasCity.operators.users`; it is not the public ingress.
 
 The hostname is supplied by host-local NixOS configuration. The target file
 does not set `allowed_origins`, `allow_mutations`, `write_auth_*`, or

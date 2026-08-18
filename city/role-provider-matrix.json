@@ -297,6 +297,14 @@
       "session": ""
     },
     {
+      "category": "implementation-fix-work",
+      "dir": "d2b",
+      "name": "publisher",
+      "origin": "gascity-roles",
+      "provider": "copilot-code-luna",
+      "session": ""
+    },
+    {
       "category": "review-synthesis-triage-analysis",
       "dir": "d2b",
       "name": "run-operator",
@@ -393,17 +401,7 @@
       "session": ""
     }
   ],
-  "control_agents": [
-    {
-      "classification": "control/maintenance-subprocess",
-      "dir": "d2b",
-      "lifecycle": "one_shot",
-      "name": "publisher",
-      "provider": "publication-worker",
-      "prompt_mode": "none",
-      "start_command": "d2b-gascity-publication-worker"
-    }
-  ],
+  "control_agents": [],
   "categories": {
     "implementation-fix-work": "copilot-code-luna",
     "planning-design-decomposition": "copilot-planning-grok",

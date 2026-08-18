@@ -66,9 +66,11 @@ the configured operator group.
 
 ## Supervisor configuration
 
-The supervisor always binds to the fixed `127.0.0.1:8372` listener. Remote
-dashboard mode requires a host-supplied hostname, which is emitted as the sole
-`allowed_hosts` entry. The generated file never sets `allowed_origins`,
+The supervisor always binds to the fixed `127.0.0.1:8372` listener.
+`allowed_hosts` always includes `localhost` and `127.0.0.1` so operators
+listed in `services.d2bGasCity.operators.users` can open the embedded
+dashboard on loopback. Remote dashboard mode also emits the host-supplied
+external hostname. The generated file never sets `allowed_origins`,
 `allow_mutations`, `write_auth_*`, or `read_auth_*`. There is no non-loopback
 supervisor option.
 
@@ -163,7 +165,7 @@ is added and the service remains valid.
 
 ## Pull-request publication credentials
 
-The one-shot `d2b-gascity-publication-worker` is the only publication path.
+The official pack `gc.publisher` role is the only publication path.
 The service projects the exact policy credential and exactly one authentication
 mode into `CREDENTIALS_DIRECTORY`: the legacy static
 `github-publication-token`, or the preferred
@@ -250,7 +252,7 @@ Both relay listener ports are admitted only on the configured interface and
 trusted external proxy CIDRs. Nginx evaluates a source-admission `geo` map in
 rewrite phase before Host handling and retains `allow`/`deny` as defense in
 depth. A loopback owner policy permits the supervisor port to be reached by
-the Gas City identity and relay identity only. The separate API compatibility
+the Gas City identity, the relay identity, and configured operator uids. The separate API compatibility
 port is admitted only to the Gas City uid 41080. TinyAuth's raw loopback port
 accepts connections only from the relay identity. The shared Gas City identity
 remains a deliberate trust boundary because upstream children legitimately use

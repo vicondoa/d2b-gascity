@@ -21,11 +21,20 @@ let
     + lib.replaceStrings [ "\\" "\"" ] [ "\\\\" "\\\"" ] value
     + "\"";
 
+  localDashboardHosts = [ "localhost" "127.0.0.1" ];
+  supervisorHosts =
+    localDashboardHosts
+    ++ lib.optional
+      (cfg.dashboard.remote.hostname != null)
+      cfg.dashboard.remote.hostname;
   supervisorHost =
-    if cfg.dashboard.remote.hostname == null then
-      ""
-    else
-      "\nallowed_hosts = [${quoteToml cfg.dashboard.remote.hostname}]";
+    "\nallowed_hosts = [${lib.concatMapStringsSep ", " quoteToml supervisorHosts}]";
+  loopbackDashboardUids =
+    [ 41080 ]
+    ++ lib.optional cfg.dashboard.remote.enable 41081
+    ++ map (name: config.users.users.${name}.uid) cfg.operators.users;
+  loopbackDashboardUidSet =
+    lib.concatMapStringsSep ", " toString loopbackDashboardUids;
 
   supervisorConfigText = ''
     [supervisor]
@@ -49,11 +58,14 @@ let
   ];
 
   stateDirectories = [
-    "d /var/lib/d2b-gascity 0750 d2b-gascity d2b-gascity -"
-    "d /var/lib/d2b-gascity/city 0700 d2b-gascity d2b-gascity -"
-    "d /var/lib/d2b-gascity/rigs 0750 d2b-gascity d2b-gascity -"
-    "d /var/lib/d2b-gascity/rigs/d2b 0700 d2b-gascity d2b-gascity -"
+    "d /var/lib/d2b-gascity 0750 d2b-gascity d2b-gascity-operators -"
+    "d /var/lib/d2b-gascity/city 0750 d2b-gascity d2b-gascity-operators -"
+    "d /var/lib/d2b-gascity/city/.beads 0750 d2b-gascity d2b-gascity-operators -"
+    "d /var/lib/d2b-gascity/rigs 0750 d2b-gascity d2b-gascity-operators -"
+    "d /var/lib/d2b-gascity/rigs/d2b 0750 d2b-gascity d2b-gascity-operators -"
     "d /var/lib/d2b-gascity/gc 0700 d2b-gascity d2b-gascity -"
+    "d /var/lib/d2b-gascity/backups 0700 d2b-gascity d2b-gascity -"
+    "d /var/lib/d2b-gascity/backups/beads 0700 d2b-gascity d2b-gascity -"
     "L+ /var/lib/d2b-gascity/gc/supervisor.toml - - - - /etc/d2b-gascity/supervisor.toml"
     "d /var/lib/d2b-gascity/home 0700 d2b-gascity d2b-gascity -"
     "d /var/lib/d2b-gascity/config 0700 d2b-gascity d2b-gascity -"
@@ -93,7 +105,7 @@ ${remoteInputRules}
 
       chain output {
         type filter hook output priority 0; policy accept;
-        oifname "lo" tcp dport ${toString supervisorPort} meta skuid != { 41080${lib.optionalString cfg.dashboard.remote.enable ", 41081"} } drop
+        oifname "lo" tcp dport ${toString supervisorPort} meta skuid != { ${loopbackDashboardUidSet} } drop
         oifname "lo" tcp dport ${toString apiProxyPort} meta skuid != 41080 drop
 ${remoteOutputRules}
 ${lib.optionalString (cfg.dolt.fixedPort != null)
@@ -144,6 +156,10 @@ in
     };
 
     environment.systemPackages = [ effectivePackage ];
+    environment.variables.GC_CITY = cityRoot;
+    environment.etc."profile.d/d2b-gascity-city.sh".text = ''
+      export GC_CITY=${cityRoot}
+    '';
     environment.etc."d2b-gascity/supervisor.toml" = {
       text = supervisorConfigText;
       mode = "0444";

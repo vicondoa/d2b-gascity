@@ -34,8 +34,9 @@ class CompositionPolicyTests(unittest.TestCase):
             non_model = {
                 ("", "dog"),
                 ("", "control-dispatcher"),
+                ("", "gc.publisher"),
+                ("", "gc.run-operator"),
                 ("d2b", "control-dispatcher"),
-                ("d2b", "publisher"),
             }
             normalized = []
             for agent in agents:
@@ -84,7 +85,6 @@ class CompositionPolicyTests(unittest.TestCase):
         })
         self.assertNotIn(("", "dog"), classified)
         self.assertNotIn(("", "control-dispatcher"), classified)
-        self.assertNotIn(("d2b", "publisher"), classified)
 
     def test_every_model_agent_has_exact_tmux_patch_and_control_agents_do_not(self) -> None:
         city = tomllib.loads((CITY / "city.toml").read_text(encoding="utf-8"))
@@ -109,7 +109,6 @@ class CompositionPolicyTests(unittest.TestCase):
         for identity in (
             ("", "control-dispatcher"),
             ("d2b", "control-dispatcher"),
-            ("d2b", "publisher"),
         ):
             self.assertNotIn(identity, patches)
 
@@ -179,7 +178,7 @@ class CompositionPolicyTests(unittest.TestCase):
         self.assertEqual(workspace["provider"], "copilot-review")
         self.assertIn(workspace["provider"], city["providers"])
 
-    def test_publisher_is_a_deterministic_control_subprocess(self) -> None:
+    def test_publisher_is_the_official_pack_role(self) -> None:
         city = tomllib.loads((CITY / "city.toml").read_text(encoding="utf-8"))
         publisher = next(
             patch
@@ -191,39 +190,20 @@ class CompositionPolicyTests(unittest.TestCase):
             {
                 "dir": "d2b",
                 "name": "publisher",
-                "provider": "publication-worker",
-                "session": "tmux",
-                "start_command": "d2b-gascity-publication-worker",
-                "lifecycle": "one_shot",
-                "max_active_sessions": 1,
+                "provider": "copilot-code-luna",
+                "session": "",
             },
         )
         matrix = json.loads(MATRIX.read_text(encoding="utf-8"))
-        self.assertEqual(
-            matrix["control_agents"],
-            [
-                {
-                    "classification": "control/maintenance-subprocess",
-                    "dir": "d2b",
-                    "lifecycle": "one_shot",
-                    "name": "publisher",
-                    "provider": "publication-worker",
-                    "prompt_mode": "none",
-                    "start_command": "d2b-gascity-publication-worker",
-                }
-            ],
-        )
+        self.assertEqual(matrix["control_agents"], [])
         fixture = json.loads(AGENT_FIXTURE.read_text(encoding="utf-8"))
         resolved = next(
             agent
             for agent in fixture["agents"]
             if agent["dir"] == "d2b" and agent["name"] == "publisher"
         )
-        self.assertFalse(resolved["model_backed"])
-        self.assertEqual(
-            resolved["classification"],
-            "control/maintenance-subprocess",
-        )
+        self.assertTrue(resolved["model_backed"])
+        self.assertEqual(resolved["origin"], "gascity-roles")
 
         resolved_config = os.environ.get("U6_RESOLVED_CONFIG")
         if resolved_config:
@@ -233,30 +213,9 @@ class CompositionPolicyTests(unittest.TestCase):
                 for agent in raw["config"]["Agents"]
                 if agent.get("Dir") == "d2b" and agent.get("Name") == "publisher"
             )
-            self.assertEqual(
-                {
-                    key: publisher[key]
-                    for key in (
-                        "Provider",
-                        "Session",
-                        "StartCommand",
-                        "Lifecycle",
-                        "MaxActiveSessions",
-                    )
-                },
-                {
-                    "Provider": "publication-worker",
-                    "Session": "tmux",
-                    "StartCommand": "d2b-gascity-publication-worker",
-                    "Lifecycle": "one_shot",
-                    "MaxActiveSessions": 1,
-                },
-            )
-            provider = raw["config"]["Providers"]["publication-worker"]
-            self.assertEqual(provider["PromptMode"], "none")
-            self.assertFalse(provider["SupportsACP"])
-            effective_prompt_mode = publisher.get("PromptMode") or provider["PromptMode"]
-            self.assertEqual(effective_prompt_mode, "none")
+            self.assertEqual(publisher["Provider"], "copilot-code-luna")
+            self.assertEqual(publisher.get("Session", ""), "")
+            self.assertNotIn("publication-worker", raw["config"]["Providers"])
 
     def test_roles_are_rig_scoped_and_base_branch_is_v3(self) -> None:
         city = tomllib.loads((CITY / "city.toml").read_text(encoding="utf-8"))
@@ -431,14 +390,10 @@ class CompositionPolicyTests(unittest.TestCase):
             step for step in resolved["steps"] if step["id"] == "compound-build.publish"
         )
         self.assertEqual(publish["metadata"]["gc.run_target"], "gc.publisher")
-        self.assertIn("d2b-gascity-publish-pr", publish["description"])
-        self.assertIn("gc.publication.expected_head_sha", publish["description"])
-        self.assertIn(
-            "gc.publication.worker_marker=d2b-gascity-publication-worker-v1",
-            publish["description"],
-        )
-        self.assertIn("gc.publication.push={{push}}", publish["description"])
-        self.assertIn("gc.publication.open_pr={{open_pr}}", publish["description"])
+        self.assertIn("gc.build.publish_status=published|noop|failed", publish["description"])
+        self.assertIn("gc.build.publish_action=push|pr|push_pr|noop|failed", publish["description"])
+        self.assertNotIn("d2b-gascity-publication-worker", publish["description"])
+        self.assertNotIn("worker_marker", publish["description"])
 
     def test_discord_helper_uses_official_gateway_only_seams(self) -> None:
         helper = (ROOT / "scripts" / "discord-import.py").read_text(encoding="utf-8")
