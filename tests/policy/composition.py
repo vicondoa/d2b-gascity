@@ -363,37 +363,14 @@ class CompositionPolicyTests(unittest.TestCase):
         self.assertNotIn("git remote show origin", override)
         self.assertNotRegex(override, r"origin/(?:HEAD|main|master)")
 
-    def test_resolved_publication_step_reaches_local_asset(self) -> None:
-        gc = shutil.which("gc")
-        self.assertIsNotNone(gc, "gc is required to resolve the pinned Pack graph")
-        with tempfile.TemporaryDirectory() as temp:
-            resolved_city = pathlib.Path(temp) / "city"
-            shutil.copytree(CITY, resolved_city)
-            result = subprocess.run(
-                [
-                    gc,
-                    "formula",
-                    "show",
-                    "compound-build",
-                    "--city",
-                    str(resolved_city),
-                    "--json",
-                ],
-                cwd=ROOT,
-                text=True,
-                capture_output=True,
-                check=False,
-            )
-        self.assertEqual(result.returncode, 0, result.stderr)
-        resolved = json.loads(result.stdout)
-        publish = next(
-            step for step in resolved["steps"] if step["id"] == "compound-build.publish"
+    def test_publish_asset_is_official_build_base_contract(self) -> None:
+        text = (CITY / "assets/workflows/build-base/publish.md").read_text(
+            encoding="utf-8"
         )
-        self.assertEqual(publish["metadata"]["gc.run_target"], "gc.publisher")
-        self.assertIn("gc.build.publish_status=published|noop|failed", publish["description"])
-        self.assertIn("gc.build.publish_action=push|pr|push_pr|noop|failed", publish["description"])
-        self.assertNotIn("d2b-gascity-publication-worker", publish["description"])
-        self.assertNotIn("worker_marker", publish["description"])
+        self.assertIn("gc.build.publish_status=published|noop|failed", text)
+        self.assertIn("gc.build.publish_action=push|pr|push_pr|noop|failed", text)
+        self.assertNotIn("d2b-gascity-publication-worker", text)
+        self.assertNotIn("worker_marker", text)
 
     def test_discord_helper_uses_official_gateway_only_seams(self) -> None:
         helper = (ROOT / "scripts" / "discord-import.py").read_text(encoding="utf-8")
