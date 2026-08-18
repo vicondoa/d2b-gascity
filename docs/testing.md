@@ -12,11 +12,12 @@ development-shell tools. After the runner builds the contributor runtime, it
 also launches Python tests with that runtime's `python3` instead of the
 invoking interpreter.
 
-CI must substitute stock `go_1_26` and `nginx` from the pinned nixpkgs.
-Do not override their `src` or version: that makes a private derivation
-and compiles Go and Nginx from tarballs on every run. The workflow also
-restores `/nix` from GitHub Actions cache so Gas City, Beads, and Dolt
-are not rebuilt from source when the flake inputs are unchanged.
+CI substitutes stock `nginx` from the pinned nixpkgs. Do not override
+its `src`: that compiles Nginx from a tarball on every run. Go stays
+at 1.26.6 because Gas City's `go.mod` requires it and nixpkgs
+`go_1_26` is still 1.26.5. The workflow restores `/nix` from GitHub
+Actions cache so that Go toolchain, Gas City, Beads, and Dolt are not
+rebuilt from source when the flake inputs are unchanged.
 
 Focused commands are available for `make test-policy`, `make test-fixtures`,
 `make test-rollback`, `make test-ingress`, `make test-generated`,

@@ -287,7 +287,7 @@ class DashboardTopologyTests(unittest.TestCase):
         docs = read("docs/dashboard-proxy.md")
 
         self.assertNotIn("nginx-1.30.2.tar.gz", flake)
-        self.assertNotIn("go1.26.6.src.tar.gz", flake)
+        self.assertIn("go1.26.6.src.tar.gz", flake)
         self.assertIn("go_1_26", flake)
         self.assertIn('expectedTinyAuthVersion="5.1.3"', smoke)
         self.assertIn('expectedNginxVersion="1.30.4"', smoke)

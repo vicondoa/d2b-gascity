@@ -51,7 +51,15 @@
       lock = builtins.fromJSON (builtins.readFile ./flake.lock);
       locked = name: (builtins.getAttr name lock.nodes).locked;
 
-      goFor = system: packageNixpkgsFor.${system}.go_1_26;
+      # gascity go.mod requires >= 1.26.6; pinned nixpkgs go_1_26 is 1.26.5.
+      goFor = system:
+        (packageNixpkgsFor.${system}.go_1_26).overrideAttrs (_: {
+          version = "1.26.6";
+          src = packageNixpkgsFor.${system}.fetchurl {
+            url = "https://go.dev/dl/go1.26.6.src.tar.gz";
+            hash = "sha256-oHIcVMaIkBRI13rZs+x+p8R0cwdV/4kTgukuy5P/LLE=";
+          };
+        });
       nginxFor = system: packageNixpkgsFor.${system}.nginx;
 
       buildGoModuleFor = system:
