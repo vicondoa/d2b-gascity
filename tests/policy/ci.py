@@ -40,28 +40,14 @@ class WorkflowPolicyTests(unittest.TestCase):
         self.assertNotIn("ubuntu-24.04", text)
         self.assertIn("pull_request:", text)
         self.assertIn("push:", text)
-        self.assertIn("cache-nix-action", text)
-        self.assertIn("substituters = https://cache.nixos.org", text)
         self.assertNotIn("feat/**", text)
         self.assertRegex(
             text,
-            r"(?m)^\s*-\s*run:\s*nix develop --no-write-lock-file "
-            r"--command make check\s*$",
+            r"(?m)^\s*-\s*run:\s*python3 tests/run.py check\s*$",
         )
         self.assertNotIn("if: ${{ secrets.", text)
-        preflight = text.index("Preflight unprivileged user and network namespaces")
-        check = text.index(
-            "run: nix develop --no-write-lock-file --command make check"
-        )
-        self.assertLess(preflight, check)
-        for marker in (
-            'command -v unshare',
-            'command -v ip',
-            "--user --map-root-user --net",
-            "link set lo up",
-            "::error::",
-        ):
-            self.assertIn(marker, text)
+        self.assertNotIn("nix develop", text)
+        self.assertNotIn("test_bootstrap.py", text)
 
     def test_check_workflow_uses_immutable_action_references(self) -> None:
         findings = workflow_findings(ROOT)

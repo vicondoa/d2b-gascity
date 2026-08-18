@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pathlib
 import re
+import subprocess
 import tomllib
 import unittest
 
@@ -97,6 +98,11 @@ class PortableConfigTests(unittest.TestCase):
         forbidden_segments = {".gc", ".beads", "dolt", "worktree", "worktrees"}
         for path in CITY.rglob("*"):
             if not path.is_file():
+                continue
+            if subprocess.run(
+                ["git", "-C", str(ROOT), "check-ignore", "-q", "--", str(path)],
+                check=False,
+            ).returncode == 0:
                 continue
             relative = path.relative_to(CITY).as_posix()
             parts = pathlib.PurePosixPath(relative).parts

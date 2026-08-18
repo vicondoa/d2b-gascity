@@ -60,10 +60,9 @@ and this project follows semantic versioning where releases are published.
 - Keep listed role agents at `max_active_sessions = 1` with
   `tmux_alias = "{{.Agent}}"`. Unset max is an unlimited pool, which
   hides live Copilot sessions from the Agents page.
-- Install `gc`, `bd`, and `dolt` from official GitHub release
-  tarballs instead of compiling them. Take Go 1.26.6 from
-  `openserbia/go-flake` and stock nixpkgs Nginx. Cache the Nix store
-  between CI runs.
+- Keep the default `make check` / PR gate on portable Python
+  policy tests. Live `test_bootstrap.py`, pack-cache seeding, and
+  `nix develop` stay out of CI so the job can finish in minutes.
   Keep roles on the d2b rig import only so `gc.publisher` is not duplicated.
 - Pass `GH_TOKEN` from the supervisor Copilot credential into every
   Copilot provider so official `gh` publication can authenticate.

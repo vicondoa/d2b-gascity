@@ -1,16 +1,16 @@
 # Repository checks
 
-`make check` is the private pull-request-equivalent check. It runs the local
-Python policy and fixture graph, the credential-free ACP proof with the fake
-Copilot, the exact ingress fixture in its network namespace, privacy and
-generated-drift checks, and `nix flake check`. The runner builds one contributor
-runtime per process, seeds one pack cache inside a mode-0700 OS temporary root
-outside the repository, and removes that exact root before exit.
-GitHub Actions invokes it as
-`nix develop --no-write-lock-file --command make check` so CI uses the pinned
-development-shell tools. After the runner builds the contributor runtime, it
-also launches Python tests with that runtime's `python3` instead of the
-invoking interpreter.
+`make check` is the pull-request check. It runs the portable Python
+policy, generated-inventory, privacy, and static workflow tests. It
+does not build the contributor runtime, seed a pack cache, or start a
+Gas City supervisor. GitHub Actions runs `python3 tests/run.py check`
+with a 5-minute timeout.
+
+Live supervisor fixtures, ingress, rollback, and `nix flake check`
+stay behind `make test-fixtures`, `make test-ingress`,
+`make test-rollback`, and `make check-nix`. Those commands still
+build one contributor runtime and seed one pack cache in a mode-0700
+temporary root outside the repository.
 
 CI substitutes stock `nginx` from the pinned nixpkgs. Go 1.26.6 comes
 from `openserbia/go-flake`. `gc`, `bd`, and `dolt` come from the

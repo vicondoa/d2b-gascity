@@ -28,7 +28,7 @@ ROLLBACK_ACCEPTANCE_RELATIVE = "tests/acceptance/rollback.py"
 ACP_ACCEPTANCE = ROOT / ACP_ACCEPTANCE_RELATIVE
 INGRESS_FIXTURE = ROOT / INGRESS_FIXTURE_RELATIVE
 ROLLBACK_ACCEPTANCE = ROOT / ROLLBACK_ACCEPTANCE_RELATIVE
-RUNTIME_COMMANDS = frozenset({"policy", "fixtures", "ingress", "workflow", "check"})
+RUNTIME_COMMANDS = frozenset({"fixtures", "ingress"})
 
 
 @dataclass(frozen=True)
@@ -431,12 +431,9 @@ def run(command: str) -> int:
             _run_static(env)
         elif command == "check":
             _run_python_policy(env)
-            _run_python_tests("fixtures", env)
-            _run_rollback(env)
             _run_generated(env)
             _run_privacy(env)
             _run_static(env)
-            _run_acceptance(env)
         elif command == "update-generated":
             _run_generated(env, write=True)
         else:

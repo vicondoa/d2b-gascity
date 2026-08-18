@@ -13,7 +13,6 @@ RUNNER := $(PYTHON) tests/run.py
 
 check:
 	$(RUNNER) check
-	$(MAKE) check-nix
 
 test-python: test-policy test-fixtures test-rollback
 

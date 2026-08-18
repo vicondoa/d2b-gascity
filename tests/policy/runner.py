@@ -113,6 +113,29 @@ class RunnerOwnershipPolicyTests(unittest.TestCase):
                 ensure_pack_cache.assert_not_called()
                 run_operation.assert_called_once()
 
+    def test_check_skips_runtime_fixtures_and_pack_setup(self) -> None:
+        with (
+            mock.patch.object(runner, "_ensure_runtime") as ensure_runtime,
+            mock.patch.object(runner, "_ensure_pack_cache") as ensure_pack_cache,
+            mock.patch.object(runner, "_run_python_policy") as policy,
+            mock.patch.object(runner, "_run_generated") as generated,
+            mock.patch.object(runner, "_run_privacy") as privacy,
+            mock.patch.object(runner, "_run_static") as static,
+            mock.patch.object(runner, "_run_python_tests") as fixtures,
+            mock.patch.object(runner, "_run_acceptance") as ingress,
+            mock.patch.object(runner, "_run_rollback") as rollback,
+        ):
+            self.assertEqual(runner.run("check"), 0)
+        ensure_runtime.assert_not_called()
+        ensure_pack_cache.assert_not_called()
+        policy.assert_called_once()
+        generated.assert_called_once()
+        privacy.assert_called_once()
+        static.assert_called_once()
+        fixtures.assert_not_called()
+        ingress.assert_not_called()
+        rollback.assert_not_called()
+
     def test_per_run_roots_are_external_unique_private_and_exactly_cleaned(self) -> None:
         first_id, first = runner._create_run_root()
         second_id, second = runner._create_run_root()
