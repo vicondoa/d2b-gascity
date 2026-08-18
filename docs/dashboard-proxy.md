@@ -79,7 +79,7 @@ access-phase defense in depth.
 
 ## Pins and credential handling
 
-The standalone source manifest pins TinyAuth `5.1.3` and Nginx `1.30.2`.
+The standalone source manifest pins TinyAuth `5.1.3` and Nginx `1.30.4`.
 Only host-local configuration supplies the public authorities, private relay
 address, trusted proxy CIDRs, users file, and authentication state. Do not
 put those values in this repository.

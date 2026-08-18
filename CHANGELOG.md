@@ -60,8 +60,8 @@ and this project follows semantic versioning where releases are published.
 - Keep listed role agents at `max_active_sessions = 1` with
   `tmux_alias = "{{.Agent}}"`. Unset max is an unlimited pool, which
   hides live Copilot sessions from the Agents page.
-- Route `d2b/publisher` through the official pack `gc.publisher` role on
-  Copilot. The custom publication worker and marker contract are unused.
+- Substitute stock nixpkgs Go and Nginx in CI and cache the Nix store.
+  Overriding their sources compiled both from tarballs on every check.
   Keep roles on the d2b rig import only so `gc.publisher` is not duplicated.
 - Pass `GH_TOKEN` from the supervisor Copilot credential into every
   Copilot provider so official `gh` publication can authenticate.

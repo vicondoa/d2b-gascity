@@ -40,6 +40,9 @@ class WorkflowPolicyTests(unittest.TestCase):
         self.assertNotIn("ubuntu-24.04", text)
         self.assertIn("pull_request:", text)
         self.assertIn("push:", text)
+        self.assertIn("cache-nix-action", text)
+        self.assertIn("substituters = https://cache.nixos.org", text)
+        self.assertNotIn("feat/**", text)
         self.assertRegex(
             text,
             r"(?m)^\s*-\s*run:\s*nix develop --no-write-lock-file "

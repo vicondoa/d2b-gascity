@@ -5,15 +5,15 @@ on:
   push:
     branches:
       - main
-      - feat/**
 
 permissions:
   contents: read
+  actions: write
 
 jobs:
   check:
     runs-on: ubuntu-22.04
-    timeout-minutes: 45
+    timeout-minutes: 15
     steps:
       - name: Check out source
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.0
@@ -22,6 +22,18 @@ jobs:
         with:
           extra_nix_config: |
             extra-experimental-features = nix-command flakes
+            substituters = https://cache.nixos.org
+            trusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY=
+      - name: Cache Nix store
+        uses: nix-community/cache-nix-action@42506e270a07908a6cb6f5ab7ba9b2e60056d6be
+        with:
+          primary-key: nix-${{ runner.os }}-${{ hashFiles('flake.lock', 'flake.nix', 'nix/**/*.nix') }}
+          restore-prefixes-first-match: nix-${{ runner.os }}-
+          gc-max-store-size-linux: 6442450944
+          purge: true
+          purge-prefixes: nix-${{ runner.os }}-
+          purge-created: 0
+          purge-primary-key: never
       - name: Preflight unprivileged user and network namespaces
         run: |
           set -euo pipefail

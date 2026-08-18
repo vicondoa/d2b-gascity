@@ -73,7 +73,7 @@ one source record.
 | Copilot CLI | [github/copilot-cli](https://github.com/github/copilot-cli) | `1.0.79` | GitHub Copilot CLI License, a proprietary license; no source modification or standalone redistribution |
 | Copilot CLI packaging | [numtide/llm-agents.nix](https://github.com/numtide/llm-agents.nix) | `387989ee56d550d86d46d9458ad68a55b9e0ca3b` | MIT for the packaging repository; the packaged CLI keeps its own terms |
 | TinyAuth | [tinyauthapp/tinyauth](https://github.com/tinyauthapp/tinyauth) | `5.1.3` | AGPL-3.0 |
-| Nginx | [nginx/nginx](https://github.com/nginx/nginx) | `1.30.2` | BSD-2-Clause |
+| Nginx | [nginx/nginx](https://github.com/nginx/nginx) | `1.30.4` | BSD-2-Clause |
 
 The repository [LICENSE](LICENSE) applies to local work. It does not
 override an upstream license, the Copilot CLI terms, or notices that must

@@ -51,23 +51,8 @@
       lock = builtins.fromJSON (builtins.readFile ./flake.lock);
       locked = name: (builtins.getAttr name lock.nodes).locked;
 
-      goFor = system:
-        (packageNixpkgsFor.${system}.go_1_26).overrideAttrs (_: {
-          version = "1.26.6";
-          src = packageNixpkgsFor.${system}.fetchurl {
-            url = "https://go.dev/dl/go1.26.6.src.tar.gz";
-            hash = "sha256-oHIcVMaIkBRI13rZs+x+p8R0cwdV/4kTgukuy5P/LLE=";
-          };
-        });
-
-      nginxFor = system:
-        (packageNixpkgsFor.${system}.nginx).overrideAttrs (_: {
-          version = "1.30.2";
-          src = packageNixpkgsFor.${system}.fetchurl {
-            url = "https://nginx.org/download/nginx-1.30.2.tar.gz";
-            hash = "sha256-ffMJCQf8o8wORW1twAzrIw2nTqiAJs7/Cv/CnbvZrEw=";
-          };
-        });
+      goFor = system: packageNixpkgsFor.${system}.go_1_26;
+      nginxFor = system: packageNixpkgsFor.${system}.nginx;
 
       buildGoModuleFor = system:
         packageNixpkgsFor.${system}.callPackage

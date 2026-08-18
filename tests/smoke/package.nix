@@ -28,10 +28,10 @@ pkgs.runCommand "gas-city-package-smoke" {
   expectedGascityPacksRevision="5d2a9d023edbb9ba24fdcff554e89fc3d7da72fe"
   expectedBeadsRevision="bf97b73749ac3ef2fca2365b54537ac041ad4293"
   expectedDoltVersion="2.1.7"
-  expectedGoVersion="1.26.6"
+  expectedGoVersion="1.26.5"
   expectedCopilotVersion="1.0.79"
   expectedTinyAuthVersion="5.1.3"
-  expectedNginxVersion="1.30.2"
+  expectedNginxVersion="1.30.4"
   expectedLlmAgentsRevision="387989ee56d550d86d46d9458ad68a55b9e0ca3b"
 
   test "${gascityRevision}" = "$expectedGascityRevision"

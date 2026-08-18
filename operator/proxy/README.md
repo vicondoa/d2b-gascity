@@ -34,7 +34,7 @@ host-local deployment inputs. The residual interception risk on a
 misconfigured private network is documented in
 [`docs/dashboard-proxy.md`](../../docs/dashboard-proxy.md).
 
-The same-host relay uses TinyAuth `5.1.3` and Nginx `1.30.2`. The module
+The same-host relay uses TinyAuth `5.1.3` and Nginx `1.30.4`. The module
 renders the equivalent config from pinned package inputs; this file is a
 generic reviewable template, not a place for real addresses, users, hashes,
 or secrets.

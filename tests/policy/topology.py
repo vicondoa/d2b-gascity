@@ -286,9 +286,11 @@ class DashboardTopologyTests(unittest.TestCase):
         fixture = read("tests/fixtures/ingress/run.py")
         docs = read("docs/dashboard-proxy.md")
 
-        self.assertIn("nginx-1.30.2.tar.gz", flake)
+        self.assertNotIn("nginx-1.30.2.tar.gz", flake)
+        self.assertNotIn("go1.26.6.src.tar.gz", flake)
+        self.assertIn("go_1_26", flake)
         self.assertIn('expectedTinyAuthVersion="5.1.3"', smoke)
-        self.assertIn('expectedNginxVersion="1.30.2"', smoke)
+        self.assertIn('expectedNginxVersion="1.30.4"', smoke)
         for needle in (
             "securecookie: true",
             "subdomainsenabled: true",
