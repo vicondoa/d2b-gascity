@@ -12,21 +12,31 @@ authorized owner for a private reporting route.
 
 - Native Gas City owns the city, service, retry, stop, and persistent
   per-user lifecycle.
-- The `gc` binary, optional Copilot and `gh` binaries, and optional proxy
+- The `gc`, `codex`, and `gh` binaries, Codex Router, and optional proxy
   adapters are supplied externally by the host or the separate
   `vicondoa/gascity.nix` distribution.
 - The host supplies the user-owned supervisor configuration link, proxy
   configuration, authorities, addresses, credentials, identifiers, and
   runtime state. Those values stay outside this repository.
-- Proxy services are host-owned optional integrations. They must fail closed
-  when authentication or their required binary is absent, and their
-  degradation must not prevent the core city from remaining usable.
-- Builtin Copilot receives its site-local token through host configuration.
-  The city does not store model transcripts or token material.
+- The host-managed Codex Router owns the Copilot Requests credential and the
+  active account-visible model. The city does not store router URLs, model
+  IDs, Copilot token variables, model transcripts, or token material.
+- Slack Full is an imported source-only pack. Its `slack` `proxy_process`
+  remains under native Gas City lifecycle; the city must not add a second
+  Slack service or relay. The adapter is allowed only the Slack variables
+  from the operator-owned mode-`0600` environment file.
+- Slack Events ingress is host-owned and public. Slack signing verification
+  and workspace checks must pass before an event is accepted. The proof is
+  restricted to an operator-verified one-to-one DM, not a general
+  authorization layer for rooms or multi-party conversations.
+- Proxy services must fail closed when authentication or their required
+  binary is absent, and their degradation must not prevent the core city from
+  remaining usable.
 - Discord operation is gateway-only. App credentials and guild, channel, and
   user mappings are site-local; no public Interactions endpoint is published.
-- The official publication identity is scoped to `vicondoa/d2b` content and
-  pull-request write only. It must not merge, force-push, or bypass rules.
+- The d2b publication identity is separate from Copilot Requests and Slack.
+  It is scoped to `vicondoa/d2b` content and pull-request write only. It must
+  not merge, force-push, or bypass rules.
 
 ## Protected data
 
@@ -36,6 +46,8 @@ Never commit or attach:
 - private host values, authorities, addresses, users, channels, or hashes;
 - `.gc`, `.beads`, Dolt, databases, worktrees, sessions, sockets, logs,
   reports, service dumps, or copied runtime state;
+- materialized Slack adapter or CLI binaries, build outputs, or imported pack
+  runtime state;
 - live prompts, model responses, private pull-request payloads, or
   unredacted logs.
 
@@ -52,7 +64,10 @@ Do not copy host state into the portable city.
 
 ## Installation boundary
 
-Install the runtime and configure optional proxy binaries through the private
-`vicondoa/gascity.nix` repository or another compatible host source. Follow
-that repository's documentation for host configuration; do not duplicate
-host module details or embed host values here.
+Install the runtime, configure Codex Router, and configure optional proxy
+binaries through the private `vicondoa/gascity.nix` repository or another
+compatible host source. Keep
+`${XDG_CONFIG_HOME:-$HOME/.config}/gc-slack-adapter/env` outside the
+repository at mode `0600`, source it in the same shell as `gc start`, and
+inherit only Slack adapter variables plus host routing values. Do not
+duplicate host module details or embed host values here.

@@ -1,45 +1,47 @@
+[workspace]
+name = "d2b-gascity"
+provider = "codex"
+
+[providers]
+[providers.codex]
+base = "builtin:codex"
+
+[providers.codex.option_defaults]
+model = ""
+
 [[rigs]]
 name = "d2b"
 prefix = "d2b"
 default_branch = "v3"
-
+[rigs.imports]
 [rigs.imports.roles]
 source = "https://github.com/gastownhall/gascity-packs/tree/main/gascity/roles"
 version = "sha:5d2a9d023edbb9ba24fdcff554e89fc3d7da72fe"
 
-[workspace]
-provider = "copilot-planning-grok"
-
-[providers.copilot-planning-grok]
-base = "builtin:copilot"
-args = ["--yolo", "--model", "grok-4.6", "--context", "long_context", "--effort", "high"]
-env = { COPILOT_ALLOW_ALL = "true", COPILOT_GITHUB_TOKEN = "$COPILOT_GITHUB_TOKEN", GH_TOKEN = "$COPILOT_GITHUB_TOKEN" }
-
-[providers.copilot-code-luna]
-base = "builtin:copilot"
-args = ["--yolo", "--model", "gpt-5.6-luna", "--context", "default", "--effort", "max"]
-env = { COPILOT_ALLOW_ALL = "true", COPILOT_GITHUB_TOKEN = "$COPILOT_GITHUB_TOKEN", GH_TOKEN = "$COPILOT_GITHUB_TOKEN" }
-
-[[patches.rigs]]
-name = "d2b"
-formula_vars = { base_branch = "v3", base_ref = "origin/v3" }
+[patches]
 
 [[patches.agent]]
 dir = "d2b"
 name = "ce-pr-comment-resolver"
-provider = "copilot-code-luna"
+provider = "codex"
 
 [[patches.agent]]
 dir = "d2b"
 name = "ce-work"
-provider = "copilot-code-luna"
+provider = "codex"
 
 [[patches.agent]]
 dir = "d2b"
 name = "implementation-worker"
-provider = "copilot-code-luna"
+provider = "codex"
 
 [[patches.agent]]
 dir = "d2b"
 name = "publisher"
-provider = "copilot-code-luna"
+provider = "codex"
+
+[[patches.rigs]]
+name = "d2b"
+[patches.rigs.formula_vars]
+base_branch = "v3"
+base_ref = "origin/v3"

@@ -6,11 +6,13 @@ There is no repository-specific wrapper.
 
 ## Install the runtime
 
-Install the pinned `gc` runtime and any optional `copilot`, `gh`, TinyAuth,
-Nginx, or proxy adapter binaries through the separate private
+Install the pinned `gc` and `codex` runtimes, `gh`, TinyAuth, Nginx, and any
+other optional proxy binaries through the separate private
 `vicondoa/gascity.nix` repository or another compatible host source. This
 repository contains no Nix packaging. Follow the sibling repository's
-documentation for host configuration and optional proxy setup.
+documentation for host configuration and optional proxy setup. The city uses
+Gas City's stock Codex provider; the host's Codex Router selects the active
+Copilot model.
 
 The core distribution is inert: installation does not start a supervisor,
 city, proxy, or custom service. Optional proxy binaries may be absent; the
@@ -26,8 +28,24 @@ gc init --file city.toml --preserve-existing --no-start .
 ```
 
 The host supplies a rendered supervisor configuration. Before the first
-start, create the user-owned link at the native `GC_HOME` location. Use the
-path supplied by the host; do not copy the rendered file into this
+start, source the operator-owned Slack environment file in the same shell
+that starts Gas City:
+
+```text
+SLACK_ENV="${XDG_CONFIG_HOME:-$HOME/.config}/gc-slack-adapter/env"
+test -f "$SLACK_ENV"
+chmod 600 "$SLACK_ENV"
+. "$SLACK_ENV"
+```
+
+The file is host-local and must contain only the Slack adapter variables plus
+the host values `GC_CITY_NAME=d2b-gascity`, `GC_CITY_PATH`, and the existing
+supervisor value for `GC_API_BASE_URL`. Do not use the Slack pack's alternate
+API default. Keep Codex Router, Copilot Requests, and d2b pull-request
+credentials out of this file.
+
+Create the user-owned supervisor link at the native `GC_HOME` location. Use
+the path supplied by the host; do not copy the rendered file into this
 repository:
 
 ```text
@@ -67,6 +85,52 @@ If optional proxy adapters are not installed, the proxy services should be
 visibly degraded while core city status remains usable. Do not add a
 replacement process or wrapper.
 
+## Codex Router and credential boundaries
+
+Gas City launches the native `codex` command. Codex Router is a separate
+operator-owned process that supplies the active Copilot model through Codex's
+normal configuration path. Keep its Copilot Requests credential in the
+router's protected provider state and choose the model from the live account
+catalog. Do not put router URLs, model IDs, Copilot token variables, or
+`GH_TOKEN=$COPILOT_GITHUB_TOKEN` in `city.toml`.
+
+Use the operator's existing GitHub and git authorization for d2b branch and
+pull-request publication. It is separate from the Copilot Requests
+credential, and neither credential belongs in the Slack environment file or
+the portable city. This credential separation is deliberate and must remain
+visible in host setup reviews.
+
+## Slack Full import
+
+The root Pack v2 imports the pinned stock Slack Full Pack:
+
+```text
+source = "https://github.com/gastownhall/gascity-packs/tree/main/slack-full"
+version = "sha:5d2a9d023edbb9ba24fdcff554e89fc3d7da72fe"
+```
+
+The imported pack owns its `slack` `proxy_process` service. Do not add a
+city-owned Slack service, a second supervisor, or a custom relay.
+
+Slack Full carries source-only Go binaries. After the pack is materialized,
+build them in that materialized pack using the upstream instructions:
+
+```text
+(cd "$GC_PACK_DIR/adapter" && go build -o gc-slack-adapter)
+(cd "$GC_PACK_DIR/cli" && go build -o gc-slack-cli .)
+```
+
+These binaries and any pack runtime state remain materialized or ignored.
+Do not copy them into this repository or commit them.
+
+After the city and Slack service are running, create the coordinator session
+through the native session path, verify the operator's one-to-one DM, and
+bind it with `gc slack bind-dm`. Attach the imported
+`template-fragments/slack-v0.template.md` fragment to that coordinator.
+Use the turn-bound `gc slack reply-current` path for replies. Do not use
+room, launcher, mapping, file-transfer, or direct-adapter flows for the
+clarification proof.
+
 ## Discord gateway import
 
 Use the official command with site-local credentials and mappings only:
@@ -90,10 +154,11 @@ site-local credential rotation.
 
 ## Compound Engineering
 
-The city uses builtin Copilot, the official Compound Engineering and roles
-assets, and official publication. The two local workflow assets select
-`origin/v3` for worktrees and `v3` for pull requests. A bounded native launch
-uses `gc.run-operator` and the official `compound-build` formula:
+The city uses native Codex through the host router, the official Compound
+Engineering and roles assets, and official publication. The two local
+workflow assets select `origin/v3` for worktrees and `v3` for pull requests.
+A bounded native launch uses `gc.run-operator` and the official
+`compound-build` formula:
 
 ```text
 gc sling gc.run-operator <bead-id> --on compound-build \

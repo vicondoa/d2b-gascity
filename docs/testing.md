@@ -8,9 +8,17 @@ make check
 ```
 
 `make check` runs the same standard-library test module. It validates the
-root Pack v2 layout, the d2b `v3` rig declaration, canonical import pins,
-the two `v3` workflow overrides, proxy service declarations, source privacy,
-and the native init and rig-binding path when `GC_BIN` is available.
+root Pack v2 layout, the d2b `v3` rig declaration, the stock Codex provider,
+canonical import pins including Slack Full, the two `v3` workflow overrides,
+proxy service declarations, source privacy, credential separation, and the
+native init and rig-binding path when `GC_BIN` is available.
+
+The focused checks also assert that Slack remains an imported source-only
+pack: no Slack service or built adapter binary is authored by the city. They
+cover host environment inheritance (`GC_CITY_NAME`, `GC_CITY_PATH`, and the
+host-supplied `GC_API_BASE_URL`), the stock `slack-v0` fragment and
+`gc slack reply-current` path, and the removal of the old
+`GH_TOKEN=$COPILOT_GITHUB_TOKEN` coupling.
 
 ## Optional native smoke
 
@@ -20,10 +28,11 @@ Set `GC_BIN` to the pinned or host-supplied native executable:
 GC_BIN=/path/to/gc python3 tests/test_city.py
 ```
 
-The smoke uses temporary generic homes and repositories. It runs
-`gc init --file city.toml --preserve-existing --no-start .`, checks the
-authored files, performs native import/config validation, binds a fixture rig,
-and confirms that the rig path stays in ignored `.gc/site.toml` state.
+The smoke uses temporary generic homes and repositories and a dummy `codex`
+executable. It runs `gc init --file city.toml --preserve-existing --no-start
+.`, checks the authored files, performs native import/config validation, binds
+a fixture rig, and confirms that the rig path stays in ignored
+`.gc/site.toml` state.
 
 ## CI inputs
 
@@ -35,14 +44,24 @@ live model, Discord, or GitHub activity.
 
 ## Manual live smokes
 
-Authenticated ingress and credentialed Compound Engineering to a pull request
-are live, redacted acceptance smokes. They require site-local optional
-binaries, credentials, and network access and are not committed test code,
-fixtures, reports, prompts, responses, or pull-request payloads.
+Authenticated ingress, routed Codex, Slack clarification, and credentialed
+Compound Engineering to a pull request are live, redacted acceptance smokes.
+They require site-local optional binaries, credentials, and network access and
+are not committed test code, fixtures, reports, prompts, responses, or
+pull-request payloads. The focused suite never starts Slack, Codex Router, or
+an external pull-request flow.
 
 - Ingress: with host-provided proxy configuration, verify listeners are absent
   before `gc start`, authentication fails closed, authenticated SPA/API/SSE
   access works, and listeners disappear after `gc stop`.
+- Slack: source the mode-`0600`
+  `${XDG_CONFIG_HOME:-$HOME/.config}/gc-slack-adapter/env` file in the same
+  shell as `gc start`; verify the host-supplied `GC_CITY_NAME`,
+  `GC_CITY_PATH`, and `GC_API_BASE_URL` values are inherited by the imported
+  `proxy_process`. Bind only the operator-verified one-to-one DM, attach the
+  stock `slack-v0` fragment, and verify one question and one
+  `gc slack reply-current` answer. Do not use Slack mocks or add delivery
+  verification.
 - Compound Engineering: run the bounded `gc sling gc.run-operator` example
   from [operations.md](operations.md), verify the worktree starts at
   `origin/v3`, and verify the official pull request targets `v3` in

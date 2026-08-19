@@ -7,10 +7,12 @@ d2b product repository.
 ## Repository boundary
 
 This repository owns the root Pack v2 city, the d2b rig declaration, the
-official Compound Engineering and Discord imports, the two narrow `v3`
-workflow overrides, and focused portable-city checks. It contains no Nix
-distribution or host deployment module. Install `gc` and any optional
-integration or proxy binaries through the separate private
+official Compound Engineering, Discord, and pinned Slack Full imports, the
+two narrow `v3` workflow overrides, and focused portable-city checks. The
+city uses Gas City's stock Codex provider; Codex Router and its active
+Copilot model are host-owned. This repository contains no Nix distribution or
+host deployment module. Install `gc`, `codex`, and any optional integration
+or proxy binaries through the separate private
 `vicondoa/gascity.nix` repository or another compatible source.
 
 ## Layout
@@ -36,18 +38,21 @@ machine-local values stay outside tracked files.
 ## Native workflow
 
 Follow [docs/operations.md](docs/operations.md) for native initialization,
-the user-owned supervisor configuration link, lifecycle commands, rig binding,
-gateway-only Discord import, service diagnosis, and the bounded official
-Compound Engineering flow. [docs/testing.md](docs/testing.md) describes the
-focused checks and the two manual live smokes.
+the user-owned supervisor configuration link, host environment inheritance,
+Codex Router and credential boundaries, Slack Full binding, lifecycle
+commands, rig binding, gateway-only Discord import, service diagnosis, and
+the bounded official Compound Engineering flow. [docs/testing.md](docs/testing.md)
+describes the focused checks and the manual live smokes.
 
 ## Governance and privacy
 
 Keep one logical change per commit and human ownership of merges. Use ASCII
 hyphens. Never commit private authorities, addresses, users, channels,
 credential paths or hashes, runtime state, live prompts or responses, or
-private pull-request payloads. Generic placeholders and `127.0.0.1` are
-allowed. Review the staged file list and complete diff before committing.
+private pull-request payloads. Keep Copilot Requests, d2b publication, and
+Slack credentials separate and host-owned. Generic placeholders and
+`127.0.0.1` are allowed. Review the staged file list and complete diff before
+committing.
 
 ## License and provenance
 

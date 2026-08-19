@@ -41,9 +41,14 @@ allowed. `.gitignore` is a convenience, not a security boundary.
 - Coding uses Luna with `max` effort.
 - Review falls back to Luna only when Grok is explicitly unsupported or
   unavailable.
-- Use builtin Copilot, official Compound Engineering, official Discord
-  gateway operation, and official publication. Do not add alternate
-  transport or publication machinery.
+- Use the stock Gas City Codex provider through the host-managed Codex Router,
+  the official Compound Engineering and pinned Slack Full and Discord gateway
+  packs, and official publication. Do not add Copilot CLI profiles, alternate
+  transport, a city-owned Slack service, a custom relay, or publication
+  machinery.
+- Keep Copilot Requests, d2b publication, and Slack credentials separate.
+  Only Slack adapter variables may be inherited by the native Slack
+  supervisor. Do not restore the `GH_TOKEN=$COPILOT_GITHUB_TOKEN` coupling.
 
 ## Validation
 

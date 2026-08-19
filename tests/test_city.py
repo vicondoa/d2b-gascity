@@ -15,6 +15,9 @@ import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 PACK_COMMIT = "5d2a9d023edbb9ba24fdcff554e89fc3d7da72fe"
+SLACK_PACK_SOURCE = (
+    "https://github.com/gastownhall/gascity-packs/tree/main/slack-full"
+)
 GASCITY_COMMIT = "f895c0ff47d6ee9334ed282a416387eb5b084d24"
 GASCITY_VERSION = "1.4.1"
 GASCITY_ARCHIVE_SHA256 = (
@@ -43,12 +46,6 @@ RUNTIME_PATHS = (
     ".state",
     "run",
 )
-OPTIONAL_ADAPTERS = (
-    "gascity-tinyauth-service",
-    "gascity-nginx-service",
-)
-
-
 def _git(command: list[str], *, cwd: pathlib.Path, env: dict[str, str]) -> None:
     result = subprocess.run(
         ["git", *command],
@@ -181,7 +178,9 @@ class RootPortableCityTests(unittest.TestCase):
         ):
             self.assertFalse((ROOT / relative).exists(), relative)
 
-    def test_city_has_one_pathless_d2b_rig_and_minimal_providers(self) -> None:
+    def test_city_has_one_pathless_d2b_rig_and_stock_codex_provider(
+        self,
+    ) -> None:
         path = ROOT / "city.toml"
         text = path.read_text(encoding="utf-8")
         config = tomllib.loads(text)
@@ -210,46 +209,26 @@ class RootPortableCityTests(unittest.TestCase):
 
         self.assertEqual(
             set(config["providers"]),
-            {"copilot-planning-grok", "copilot-code-luna"},
+            {"codex"},
         )
-        expected_args = {
-            "copilot-planning-grok": [
-                "--yolo",
-                "--model",
-                "grok-4.6",
-                "--context",
-                "long_context",
-                "--effort",
-                "high",
-            ],
-            "copilot-code-luna": [
-                "--yolo",
-                "--model",
-                "gpt-5.6-luna",
-                "--context",
-                "default",
-                "--effort",
-                "max",
-            ],
-        }
         self.assertEqual(
             config["workspace"],
-            {"provider": "copilot-planning-grok"},
+            {"name": "d2b-gascity", "provider": "codex"},
         )
-        for name, args in expected_args.items():
-            provider = config["providers"][name]
-            self.assertEqual(provider["base"], "builtin:copilot")
-            self.assertEqual(provider["args"], args)
-            self.assertEqual(
-                provider["env"],
-                {
-                    "COPILOT_ALLOW_ALL": "true",
-                    "COPILOT_GITHUB_TOKEN": "$COPILOT_GITHUB_TOKEN",
-                    "GH_TOKEN": "$COPILOT_GITHUB_TOKEN",
-                },
-            )
-            self.assertNotIn("command", provider)
-            self.assertNotIn("acp_command", provider)
+        provider = config["providers"]["codex"]
+        self.assertEqual(provider["base"], "builtin:codex")
+        self.assertEqual(provider["option_defaults"], {"model": ""})
+        for key in ("args", "command", "env"):
+            self.assertNotIn(key, provider)
+        for marker in (
+            "builtin:copilot",
+            "COPILOT_GITHUB_TOKEN",
+            "GH_TOKEN",
+            "--model",
+            "gpt-",
+            "grok-",
+        ):
+            self.assertNotIn(marker, text)
 
         patches = config["patches"]
         self.assertEqual(
@@ -270,7 +249,7 @@ class RootPortableCityTests(unittest.TestCase):
                 {
                     "dir": "d2b",
                     "name": name,
-                    "provider": "copilot-code-luna",
+                    "provider": "codex",
                 }
                 for name in (
                     "ce-pr-comment-resolver",
@@ -316,12 +295,24 @@ class RootPortableCityTests(unittest.TestCase):
                 "bd": f"sha:{GASCITY_COMMIT}",
                 "compound-engineering": f"sha:{PACK_COMMIT}",
                 "discord": f"sha:{PACK_COMMIT}",
+                "slack-full": f"sha:{PACK_COMMIT}",
             },
+        )
+        self.assertEqual(
+            pack["imports"]["slack-full"],
+            {"source": SLACK_PACK_SOURCE, "version": f"sha:{PACK_COMMIT}"},
         )
 
         self.assertEqual(len(pack["service"]), 2)
         services = {service["name"]: service for service in pack["service"]}
         self.assertEqual(set(services), {"proxy-tinyauth", "proxy-nginx"})
+        self.assertNotIn("slack", services)
+        for relative in (
+            "slack-full",
+            "gc-slack-adapter",
+            "gc-slack-cli",
+        ):
+            self.assertFalse((ROOT / relative).exists(), relative)
         for service in services.values():
             self.assertEqual(service["kind"], "proxy_process")
             self.assertEqual(service["publish_mode"], "private")
@@ -347,6 +338,7 @@ class RootPortableCityTests(unittest.TestCase):
                 "https://github.com/gastownhall/"
                 "gascity-packs/tree/main/discord"
             ): PACK_COMMIT,
+            SLACK_PACK_SOURCE: PACK_COMMIT,
             (
                 "https://github.com/gastownhall/"
                 "gascity-packs/tree/main/gascity/roles"
@@ -387,6 +379,39 @@ class RootPortableCityTests(unittest.TestCase):
             self.assertIn(marker, publish)
         self.assertIn("never merge", publish.lower())
         self.assertIn("never force-push", publish.lower())
+
+    def test_docs_record_host_inheritance_and_slack_credential_boundaries(
+        self,
+    ) -> None:
+        docs = "\n".join(
+            (ROOT / relative).read_text(encoding="utf-8")
+            for relative in (
+                "docs/operations.md",
+                "docs/testing.md",
+                "README.md",
+                "SECURITY.md",
+                "AGENTS.md",
+                "PROVENANCE.md",
+            )
+        )
+        for marker in (
+            SLACK_PACK_SOURCE,
+            "sha:" + PACK_COMMIT,
+            "gc-slack-adapter/env",
+            "0600",
+            "GC_CITY_NAME",
+            "GC_CITY_PATH",
+            "GC_API_BASE_URL",
+            "slack-v0",
+            "gc slack reply-current",
+            "gc-slack-adapter",
+            "gc-slack-cli",
+            "Copilot Requests",
+            "GH_TOKEN",
+        ):
+            self.assertIn(marker, docs)
+        self.assertIn("source-only", docs.lower())
+        self.assertIn("credential separation", docs.lower())
 
     def test_discord_import_has_no_public_site_mapping(self) -> None:
         text = "\n".join(
@@ -551,18 +576,13 @@ class RootPortableCityTests(unittest.TestCase):
                     encoding="utf-8",
                 )
 
-                copilot = tool_bin / "copilot"
+                codex = tool_bin / "codex"
                 true = shutil.which("true")
                 self.assertIsNotNone(true)
-                copilot.symlink_to(true)
+                codex.symlink_to(true)
                 env["PATH"] = os.pathsep.join(
                     (str(tool_bin), env.get("PATH", ""))
                 )
-                for adapter in OPTIONAL_ADAPTERS:
-                    self.assertIsNone(
-                        shutil.which(adapter, path=env["PATH"]),
-                        adapter,
-                    )
 
                 def run_gc(*args: str) -> subprocess.CompletedProcess[str]:
                     try:
