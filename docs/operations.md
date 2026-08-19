@@ -1,359 +1,124 @@
 # Operations
 
-Gas City owns the city supervisor and its child lifecycle. The standalone
-repository does not add a second lifecycle owner, a dashboard service, a
-Discord sidecar, a publisher service, or a custom service declaration. The
-publisher is the official pack `gc.publisher` role on Copilot.
+This repository is the portable city source. Native Gas City owns the
+supervisor, city, imported service, retry, stop, and per-user state lifecycle.
+There is no repository-specific wrapper.
 
-## Ordinary start
+## Install the runtime
 
-Bootstrap is not an ordinary-start hook. After a later deployment unit
-installs the root service, the service starts the packaged supervisor with
-`gc supervisor run`. It then performs delegated registration and
-reconciliation using the machine-local site binding. Ordinary start must not
-copy the prototype, rewrite portable files, or create a second user
-supervisor.
+Install the pinned `gc` runtime and any optional `copilot`, `gh`, TinyAuth,
+Nginx, or proxy adapter binaries through the separate private
+`vicondoa/gascity.nix` repository or another compatible host source. This
+repository contains no Nix packaging. Follow the sibling repository's
+documentation for host configuration and optional proxy setup.
 
-Bootstrap adds the `d2b` rig with `gc rig add --start-suspended` so init
-does not launch agents. After the supervisor is up, official activation is
-`gc rig resume d2b` from the city directory. `register-existing --allow-start`
-runs that resume. Until the rig is resumed, Gas City skips every
-`d2b/...` agent: `gc sling` can route beads, but sessions stay
-`start-pending` and `poolDesired` stays 0. The resume override persists in
-`.gc/runtime/suspension-state.json` across supervisor restarts.
+The core distribution is inert: installation does not start a supervisor,
+city, proxy, or custom service. Optional proxy binaries may be absent; the
+city remains usable while those services report a degraded state.
 
-Gas City lists an agent only when `max_active_sessions` is set. The two
-knobs are `min_active_sessions` (how many to keep warm) and
-`max_active_sessions` (how many can run at once). `min = 0` starts
-instances on slung work; leave `max` unset and sling creates an unlisted
-ephemeral session.
+## Initialize and start
 
-City defaults:
-
-| Agents | min | max |
-| --- | --- | --- |
-| `ce-work`, `implementation-worker` | 0 | 20 |
-| `ce-pr-comment-resolver` | 0 | 10 |
-| `publisher` | pack default | unset |
-| `bd.dog` | 0 | 2 |
-| other roles, including `run-operator` | pack default (always-on singleton) | pack default |
-
-Leave pack session capacity alone. Unset `max_active_sessions` is Gas
-City's unlimited pool. Do not invent `tmux_alias` or per-role max values
-to please the Agents page. The publisher uses the same unset-max pool as
-the other Copilot roles.
-
-Copilot token meters stay empty on this dashboard. Gas City only extracts
-model usage facts from Claude and Codex transcripts. That is upstream
-coverage, not a city hook we should invent.
-
-Copilot runs as the official tmux harness: `builtin:copilot` with
-`--yolo` and pinned model flags. The supervisor exports
-`COPILOT_GITHUB_TOKEN` from the systemd credential so the pane can authenticate.
-Do not set city `[session] provider = "acp"` unless you want ACP transport.
-
-Official `gc supervisor install` reads `$GC_HOME/supervisor.toml`. That file
-must include `localhost`, `127.0.0.1`, and the external dashboard hostname
-in `allowed_hosts`, or a mismatched Host header returns HTTP 421
-`host_not_allowed`. On this host, open `http://127.0.0.1:8372/` as an
-operator listed in `services.d2bGasCity.operators.users`. Use
-`https://gascity.x.vicondoa.com` only from the external TLS path. The NixOS
-module keeps this file linked to `/etc/d2b-gascity/supervisor.toml`.
-
-### Standalone CLI API compatibility
-
-Upstream #5262 can classify the supervisor-hosted controller socket as a
-standalone endpoint when `gc session submit` runs in a separate CLI process.
-The deployment therefore keeps the portable city configuration pointed at a
-loopback compatibility endpoint:
-
-```toml
-[api]
-bind = "127.0.0.1"
-port = 18372
-```
-
-The NixOS module socket-activates native
-`systemd-socket-proxyd` on `127.0.0.1:18372` and forwards bytes to the
-supervisor's `127.0.0.1:8372` listener. Only uid 41080 may connect through the
-loopback output firewall rule. The proxy has no lifecycle relationship with
-`d2b-gascity.service`: it does not start, stop, or supervise Gas City, and it
-is not the public or authenticated dashboard ingress. Remove this shim when
-upstream identity-aware routing lands.
-
-The U3 operator check is explicit-path and state-preserving. If the supervisor
-was stopped when the check began, a successful check enforces a stopped city
-and a failed check best-effort restores it; a supervisor already running under
-valid system delegation or the fixture guard is left running:
+From a checkout of this repository, initialize in place so authored root
+files are preserved:
 
 ```text
-python3 scripts/operator.py status \
-  --state-root <state-root> \
-  --city <city-root> \
-  --rig <d2b-v3-checkout> \
-  --gc <packaged-runtime>/bin/gc
+gc init --file city.toml --preserve-existing --no-start .
 ```
 
-`scripts/operator.py validate-request` only validates a small JSON status
-request. It does not recreate old control-plane state or accept lifecycle
-commands.
-
-Operator shells on this host should run `gc status` without `cd`. The
-module exports `GC_CITY=/var/lib/d2b-gascity/city` and makes that city
-tree group-readable to `d2b-gascity-operators`. `gc/` credentials stay
-`0700`. A login that predates the group membership needs a new session
-or `sg d2b-gascity-operators`. Do not point `GC_HOME` at the supervisor
-home: that directory holds tokens.
-
-This city is a Dolt shared-server store, so `bd` auto-backup stays off.
-Reaper bulk prune requires a fresh official backup: `bd backup init`
-`/var/lib/d2b-gascity/backups/beads` plus `bd backup sync`, which writes
-`.beads/dolt-backup.json` and `.beads/dolt-backup-state.json`. The city
-order `bd-backup-sync` runs that sync every 6 hours. Do not invent
-`.beads/backup/backup_state.json`; that is the unused embedded-mode file.
-
-Official PR publication is the `compound-build` publish step
-(`push=true`, `open_pr=true`), not a freeform sling to the publisher.
-Formula v2 targets `compound-engineering.*`, `gc.run-operator`, and
-`gc.publisher`.
-
-## Imports and source updates
-
-`city/pack.toml` contains the Pack v2 root metadata and exact pinned imports
-for the current Gas City core and Beads packs, Compound Engineering, and
-Discord. The d2b rig composes the current gascity roles pack at rig scope.
-`packs.lock` records the complete resolved closure.
-
-Use the packaged runtime for validation:
+The host supplies a rendered supervisor configuration. Before the first
+start, create the user-owned link at the native `GC_HOME` location. Use the
+path supplied by the host; do not copy the rendered file into this
+repository:
 
 ```text
-gc import check --city <city-root>
-gc config show --city <city-root> --validate
-gc lint <city-root>
-gc doctor --city <city-root>
+GC_HOME="${GC_HOME:-$HOME/.gc}"
+ln -s /path/from-host/supervisor.toml "$GC_HOME/supervisor.toml"
+gc start
 ```
 
-Upstream warnings from a stopped city, unavailable providers, or absent
-supervisor are diagnostic context, not permission to weaken the portable
-contract. Provider-specific readiness and local patches remain placeholders
-until their owning units define them.
+The first manual `gc start` may install and enable Gas City's native user
+supervisor and linger. That persistence is native behavior. Subsequent login
+or reboot recovery of a still-registered city is supported upstream; it is
+not a second host-wide lifecycle.
 
-The resolved model-backed role graph is classified in
-`city/role-provider-matrix.json`. The matrix is generated from the pinned
-Pack v2 imports and every classified agent is patched to a portable planning,
-review, or coding Copilot provider. Pack ACP transport is cleared so Gas City
-drives the official `copilot --yolo` REPL in tmux. The imported city-scoped
-`bd.dog` agent is not in that matrix and has only the exact suspended-only
-control patch, so it does not perform background model work while the rig is
-idle. An explicit operator resume leaves its provider unset and therefore
-uses the workspace `copilot-review` fallback. Control and maintenance agents
-remain subprocesses. The d2b publisher is the official pack
-`gc.publisher` role on `copilot-code-luna`.
+## Bind the d2b rig
 
-Worktree creation is intentionally anchored to `origin/v3`. The core formulas
-receive `base_branch = "v3"` through the d2b rig formula variables, and the
-single higher-precedence Gas City worktree asset is recorded in
-`city/worktree-producer-inventory.json`. The local asset cites the upstream
-path and commit and replaces only remote-default branch discovery.
-The inventory also records the exact current d2b `origin/v3` proof revision,
-`db036097d05ede39009b912805a48f6ef8a74751`, in the local fake-repository
-fixture. That fixture models only the `main` remote default, the `v3` branch,
-and its revision marker; it does not copy d2b source or repository process
-artifacts.
-
-Discord operation is gateway-only in this city. The repository configures no
-external publication edge, so the imported `discord-interactions` and
-`discord-admin` processes may remain behind the supervisor without being
-externally reachable. Do not patch those upstream service definitions or add a
-Discord daemon.
-
-### ACP identity sidecars
-
-The Copilot wrapper has a deployment shim for the pinned upstream ACP
-identity contract. A provider `run` seeds only the non-empty
-`GC_SESSION_ID`, `GC_INSTANCE_TOKEN`, and `GC_RUNTIME_EPOCH` values after a
-non-empty `GC_SESSION_NAME`, using the upstream SHA-256 sidecar names. The
-NixOS module sets `TMPDIR=/tmp` and leaves tmux/PTY ownership to Gas City, so
-the wrapper's Python `tempfile.gettempdir()` and upstream Go `os.TempDir()`
-resolve the same `/tmp/gc-acp` directory.
-
-The wrapper atomically replaces files and does not delete them. Upstream ACP
-`Stop` owns sidecar cleanup, while the next incarnation overwrites stale
-values. This is a local deployment shim rather than an upstream source patch.
-The related orphan behavior is tracked in
-upstream [#4714](https://github.com/gastownhall/gascity/issues/4714). Remove
-the shim after upstream ACP seeds the identity itself.
-
-Use the stopped helper with a root- or systemd-owned credential file:
+The root `city.toml` declares exactly one pathless rig named `d2b`, with
+prefix `d2b` and default branch `v3`. Bind a checkout with native Gas City:
 
 ```text
-d2b-gascity-discord-import \
-  --gc <runtime>/bin/gc \
-  --state-root <state-root> \
-  --city <city-root> \
-  --token-file <credential-file> \
-  --application-id <application-id> \
-  --public-key <64-hex-public-key> \
-  --guild-id <guild-id> \
-  --channel-id <channel-id> \
-  --operator-role-id <operator-role-id> \
-  --operator-user-id <user-id>=<qualified-session>
+gc rig add /path/to/d2b --name d2b --city .
+gc status
 ```
 
-The helper always supplies non-empty `--guild-allowlist`,
-`--channel-allowlist`, and `--role-allowlist` values to the official
-`gc discord import-app` command. The dedicated host-configured operator role
-is the room boundary and must be assigned only to authorized operator users.
-Direct operator DMs are explicit `gc discord bind-dm` bindings, one per
-`--operator-user-id` mapping. Re-running the helper with the same application
-ID imports a rotated token; restart the official gateway through the normal
-Gas City operator path after rotation:
+The product checkout path is written to live `.gc/site.toml` only. Native
+rig setup may add supported bookkeeping to the d2b checkout, but it does not
+add a city, provider, pack, or service configuration there.
+
+Use native service diagnosis and restart:
 
 ```text
-gc service restart discord-gateway --city <city-root>
+gc service list
+gc service doctor
+gc service restart <service-name>
 ```
 
-The helper validates the city path and uses it as the subprocess cwd for both
-commands. Its global `--city` option is helper-only and is not forwarded into
-the Pack v2 scripts.
+If optional proxy adapters are not installed, the proxy services should be
+visibly degraded while core city status remains usable. Do not add a
+replacement process or wrapper.
 
-The helper passes the token through `/dev/stdin`, never argv or its output. It
-requires an owner-only state root, rejects unsafe credential files, paths, IDs,
-and session names before invoking `gc`, and does not echo child diagnostics.
-Public Interactions publication and `sync-commands` are not invoked.
+## Discord gateway import
 
-## Pull-request publication
-
-After a validated `origin/v3` worktree has completed its required checks, Gas
-City slings the official pack `gc.publisher` role. That role uses the same
-Copilot tmux harness as the other d2b workers and follows the official
-`build-base` publish contract. It is not a city-local subprocess and does
-not require a custom publication marker.
-
-The publisher uses the official `gc gc claim` startup protocol (implemented by
-the pinned CLI as `gc hook --claim --drain-ack --json`) and parses exactly one
-normalized JSON result. A drain result exits. A work result follows the
-official publish step description. An unrelated publisher task is rejected,
-and only the claimed bead is closed.
-Continuation groups are claimed again; an empty group is acknowledged with a
-runtime drain. A `claims_errored` drain is a typed retry failure and exits
-nonzero, so the claim remains open for reconciliation.
-
-The narrow prepare-worktree asset records and verifies on the real source
-anchor the absolute `work_dir`, `gc.publication.base_ref=origin/v3`, and the
-fresh `gc.publication.base_sha`. For enabled PR publication, the worker reads
-`gc.input_convoy_id` from the workflow root. If that bead is a synthetic
-drain-unit convoy, it uses `gc.drain_member_id` and never writes source state
-to the synthetic bead. After claim, it verifies the source worktree is clean,
-computes current `HEAD`, and sets `gc.publication.expected_head_sha` only when
-the source anchor does not already contain it. A retry must match the existing
-value exactly; a changed `HEAD` is rejected without overwriting the anchor.
-The worker then invokes
-`d2b-gascity-publish-pr <source-anchor-id>` from the source worktree.
-
-The helper reads the immutable source anchor metadata
-`work_dir`, `gc.publication.expected_head_sha`, `gc.publication.base_sha`, and
-`gc.publication.base_ref=origin/v3`. It records the URL, SHA, and derived
-branch with repeated `bd update <issue-id> --set-metadata key=value` options,
-then performs an exact `bd show` readback before emitting its safe JSON record.
-The worker records that URL, SHA, and branch plus the upstream-required
-`gc.build.publish_*` metadata on both the workflow root and claimed step. It
-writes a safe artifact under `GC_ARTIFACT_DIR` when available and never copies
-child diagnostics or credentials into metadata, artifacts, or output.
-
-The helper is hard-coded to `vicondoa/d2b` with base `v3` and accepts no
-repository, base, branch, SHA, push-mode, merge, or bypass controls. It
-refreshes and verifies `origin/v3`, proves the recorded base is an ancestor of
-the clean expected head, and performs at most one create-only update of the
-derived `gascity/*` branch. It rejects Git replacement refs and nonempty graft
-files before mutation. After credential-free worktree validation, it imports
-the exact head into a mode-0700 temporary bare repository and performs every
-credentialed fetch, `ls-remote`, and push from that repository using the
-verified direct HTTPS URL. Closed, merged, duplicate, conflicting, or
-malformed records stop publication.
-
-Before any network operation, the helper reads every fetch and push URL with
-`git remote get-url --all origin` and `git remote get-url --push --all origin`.
-Each side must have exactly one identical, credential-free HTTPS URL for
-`https://github.com/vicondoa/d2b` or its `.git` spelling. It uses that verified
-URL directly for fetch, `ls-remote`, and push with the dedicated token
-environment. Child Git configuration disables hooks, helpers, proxy use, TLS overrides, and
-`push.followTags`;
-the only push is one SHA-to-`refs/heads/gascity/<work-id>` refspec without
-force or force-with-lease.
-
-Host configuration sets
-`services.d2bGasCity.credentials.githubPublicationPolicyFile` plus exactly one
-authentication mode: the compatibility
-`githubPublicationTokenFile`, or both
-`githubPublicationAppKeyFile` and `githubPublicationAppConfigFile`. The
-systemd unit projects fixed names
-`github-publication-policy`, `github-publication-token`,
-`github-publication-app-key`, and `github-publication-app-config`, and systemd
-provides their directory through `CREDENTIALS_DIRECTORY`. The helper reads
-only those names; arbitrary caller-selected paths and environment overrides
-are not accepted. The App config is an exact versioned JSON object, using
-placeholders for host-local identifiers:
-
-```json
-{
-  "version": 1,
-  "app_id": 123456,
-  "installation_id": 789012,
-  "repository": "vicondoa/d2b"
-}
-```
-
-The app-key projection is a PEM private key with exact `0400` or `0440`
-permissions. A missing static token may fall back to on-demand installation
-token minting; an unreadable or invalid static token never falls back. Each
-mint creates a short-lived RS256 app JWT, signs it with the packaged OpenSSL
-binary through credential-path input, requests only metadata read plus
-contents and pull-requests write for `d2b`, and validates the response before
-using it. There is no refresh timer, token cache, persistence, or supervisor
-restart requirement.
-
-Host acceptance requires an administrator to review the repository rules and
-the least-privilege publication identity against the exact policy, keep the
-policy source non-writable, and keep the app-key source private. The helper
-gives `gh` the dedicated publication token and gives Git remote operations a
-GitHub authorization header through a child-only Git configuration. Both
-subprocess environments use a nonexistent home, disabled terminal prompts,
-system-config suppression, a minimal path, and no ambient GitHub, SSH, or
-unrelated secret variables.
-
-The documented host acceptance check is performed before installing the
-attestation:
+Use the official command with site-local credentials and mappings only:
 
 ```text
-gh api repos/vicondoa/d2b --jq '{name: .full_name, permissions: .permissions}'
-gh api 'repos/vicondoa/d2b/branches/v3/protection'
-gh api 'repos/vicondoa/d2b/rulesets?includes_parents=true'
-stat -c 'uid=%u mode=%a' "$configured_publication_policy_source"
-stat -c 'uid=%u mode=%a' "$configured_publication_app_key_source"
+gc discord import-app \
+  --application-id "$DISCORD_APPLICATION_ID" \
+  --public-key "$DISCORD_PUBLIC_KEY" \
+  --bot-token-file /dev/stdin \
+  --guild-allowlist "$DISCORD_GUILD_ID" \
+  --channel-allowlist "$DISCORD_CHANNEL_ID" \
+  --role-allowlist "$DISCORD_ROLE_ID" \
+  < "$DISCORD_TOKEN_FILE"
 ```
 
-The first three reads are run with the dedicated publication identity and
-must document create-only `gascity/*` branches, no `v3` update, no force
-update, no merge or queue authority, and no bypass actor. The final check
-must report the expected host ownership and no write bits. Do not copy any
-credential into the repository or encode a fixed deployment path or host
-identifier in source.
-Pack-native behavior includes application and public-key validation, role,
-guild, and channel policy, signed-interaction timestamp rejection at the
-pack's retention window, duplicate interaction receipts, bot/self filtering
-in the gateway, and two retries for Discord API rate-limit responses. The
-pack does not provide a configurable inbound rate limiter or a direct room
-user allowlist; the host role plus explicit DM bindings are the supported
-substitute.
+Keep the token file, application values, and guild, channel, role, or user
+mappings outside the repository. This is gateway-only operation: do not
+publish a public Interactions endpoint or add a public route. Restart the
+official gateway service through native Gas City service commands after a
+site-local credential rotation.
 
-## Machine-local state
+## Compound Engineering
 
-The repository contains no rig path, `.gc/site.toml`, cities registry, Beads
-metadata, Dolt database, credential, host unit, or service state. The
-explicit state root and city path supplied to bootstrap are deployment
-inputs. In the NixOS deployment, `--state-root` is the service's
-`GC_HOME`, `/var/lib/d2b-gascity/gc`; bootstrap therefore keeps Dolt at
-`/var/lib/d2b-gascity/gc/dolt` and the global Git config at
-`/var/lib/d2b-gascity/gc/gitconfig`. Keep these paths outside the portable
-source and protect them with the host's normal ownership and backup policy.
+The city uses builtin Copilot, the official Compound Engineering and roles
+assets, and official publication. The two local workflow assets select
+`origin/v3` for worktrees and `v3` for pull requests. A bounded native launch
+uses `gc.run-operator` and the official `compound-build` formula:
+
+```text
+gc sling gc.run-operator <bead-id> --on compound-build \
+  --var artifact_root=<site-local-artifact-root> \
+  --var interaction_mode=autonomous \
+  --var review_mode=agent \
+  --var drain_policy=separate \
+  --var push=true \
+  --var open_pr=true
+```
+
+Use a small non-sensitive work item and a site-local artifact root. The
+credential must be scoped to `vicondoa/d2b` content and pull-request writes
+only. Stop without changing the remote default or adding a replacement
+worker if the worktree or pull request is not for `vicondoa/d2b` and `v3`.
+Never merge automatically. Do not store prompts, model responses, pull
+request payloads, or live evidence in the repository.
+
+## Stop
+
+Stop and unregister the city with native Gas City:
+
+```text
+gc stop
+```
+
+Native stop closes the city and its managed services. Do not add a custom
+shutdown hook or host lifecycle service.

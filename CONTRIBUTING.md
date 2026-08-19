@@ -1,63 +1,52 @@
 # Contributing
 
-This repository is private infrastructure for one Gas City city and one
-`vicondoa/d2b` rig on `v3`. Contributions must keep the standalone boundary
-clear and must not turn this repository into a second d2b product tree.
+This repository is private infrastructure for one portable Gas City city and
+one `vicondoa/d2b` rig on `v3`. Keep the repository a city source, not a
+second d2b product tree or a host deployment repository.
 
 ## Before changing files
 
 Read:
 
-1. [README.md](README.md) for product scope.
-2. [AGENTS.md](AGENTS.md) for local agent and contributor rules.
-3. [SECURITY.md](SECURITY.md) for trust boundaries and reporting.
-4. [PROVENANCE.md](PROVENANCE.md) for the source snapshot and license
-   boundary.
-5. The applicable section of the plan under `docs/plans/`.
+1. [README.md](README.md) for scope and layout.
+2. [AGENTS.md](AGENTS.md) for local rules.
+3. [SECURITY.md](SECURITY.md) for trust boundaries.
+4. [PROVENANCE.md](PROVENANCE.md) for source and license boundaries.
+5. [docs/operations.md](docs/operations.md) and
+   [docs/testing.md](docs/testing.md).
+6. The applicable plan section under `docs/plans/`.
 
-Use portable configuration in Git. Keep machine-local site bindings,
-credentials, runtime state, reports, sockets, prompts, responses, and host
-configuration outside the repository.
+Do not edit the plan to record progress. Do not touch the separate
+`vicondoa/gascity.nix` repository from this checkout.
 
 ## Change discipline
 
 - Make one logical change per commit.
-- Do not edit the plan to mark work complete.
-- Keep upstream code and notices attributable to their upstream source.
+- Keep merges, branch protection, and release decisions human-owned.
 - Use ASCII hyphens only.
-- Do not add Speckit, the d2b panel or signoff system, d2b wave or delivery
-  sequencing, or d2b pinning-hardening workflows.
-- A human owns merge, branch protection, and release decisions.
+- Preserve upstream licenses and notices.
+- Keep portable values in Git and site bindings, credentials, runtime state,
+  logs, prompts, responses, and host configuration outside the repository.
 
 ## Validation and evidence
 
-Run the smallest relevant validation for the files changed. Before staging,
-inspect `git status --short`, the staged file list, and the complete diff.
-Check that no ignored or untracked runtime artifact is being included.
+Run the smallest relevant check:
 
-## Checks
-
-The complete local gate is:
-
-```bash
+```text
+python3 tests/test_city.py
 make check
+GC_BIN=/path/to/gc python3 tests/test_city.py
 ```
 
-The repository-local runner owns deterministic discovery, one contributor
-runtime, the U3 pack cache, ingress namespace execution, scratch cleanup, and
-process-leak detection. Use `make test-policy`, `make test-fixtures`,
-`make test-ingress`, `make test-generated`, `make test-privacy`, or
-`make check-nix` when narrowing a failure. See [docs/testing.md](docs/testing.md)
-for the Nix-sandbox boundary and manual credential-backed acceptance.
+The `GC_BIN` command is optional and performs the native initialization and
+rig-binding smoke when the pinned executable and its dependencies are
+available. CI downloads and verifies the exact upstream archive pins before
+running the focused check. Authenticated ingress and credentialed
+Compound Engineering to a pull request are live, redacted smokes, not test
+code or committed reports.
 
-Evidence must be redacted and limited to revisions, safe counts, timings,
-and pass or fail results. Never commit live prompts or responses, tokens,
-cookies, host-specific values, service environments, private databases,
-private worktrees, or unredacted logs.
-
-The repository-local privacy scanner is enforcing. Generic fixtures and
-RFC1918/RFC5737 addresses are allowed only in tests; live credentials and
-host-private values remain manual and must never enter evidence.
+Before staging, inspect `git status --short`, the staged file list, and the
+complete diff. Remove any private values or runtime artifacts.
 
 ## Model lanes
 

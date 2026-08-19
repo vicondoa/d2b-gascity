@@ -1,67 +1,55 @@
 # d2b-gascity
 
-Private Gas City infrastructure for one city and one `vicondoa/d2b` rig on
-branch `v3`.
+`d2b-gascity` is the source repository for one portable Gas City city and
+one `vicondoa/d2b` rig on branch `v3`. It is city configuration, not a second
+d2b product repository.
 
-## Scope
+## Repository boundary
 
-This repository is the standalone owner for the Gas City contributor
-deployment. It will contain the portable city and Pack v2 configuration,
-runtime packaging, NixOS deployment module, operator tooling, tests, and
-deployment documentation needed by that one rig.
+This repository owns the root Pack v2 city, the d2b rig declaration, the
+official Compound Engineering and Discord imports, the two narrow `v3`
+workflow overrides, and focused portable-city checks. It contains no Nix
+distribution or host deployment module. Install `gc` and any optional
+integration or proxy binaries through the separate private
+`vicondoa/gascity.nix` repository or another compatible source.
 
-The repository is infrastructure, not a second d2b product repository. It
-does not contain d2b product code, a second city, or a second rig. The target
-rig is fixed to:
+## Layout
 
-- repository: `vicondoa/d2b`
-- base branch: `v3`
+```text
+.
+|-- city.toml
+|-- pack.toml
+|-- packs.lock
+|-- assets/workflows/
+|   |-- build-base/publish.md
+|   `-- do-work/prepare-worktree.md
+|-- docs/
+|   |-- operations.md
+|   `-- testing.md
+`-- tests/test_city.py
+```
 
-The standalone repository starts from a clean source snapshot. It does not
-carry the full d2b Git history or prototype runtime state. See
-[PROVENANCE.md](PROVENANCE.md) for the extraction boundary and source
-licenses.
+The repository itself is the portable city source. Native Gas City state,
+rig paths, Beads and Dolt data, worktrees, credentials, logs, and other
+machine-local values stay outside tracked files.
 
-## State and privacy
+## Native workflow
 
-Portable files belong in Git. Machine-local site bindings, credentials,
-runtime state, reports, sockets, host configuration, live prompts and
-responses, and private deployment values do not. They must be supplied by
-the host through supported configuration or transient projection. The
-literal `127.0.0.1` is allowed in generic topology documentation and tests;
-host-specific authorities, addresses, paths, and identifiers are not.
+Follow [docs/operations.md](docs/operations.md) for native initialization,
+the user-owned supervisor configuration link, lifecycle commands, rig binding,
+gateway-only Discord import, service diagnosis, and the bounded official
+Compound Engineering flow. [docs/testing.md](docs/testing.md) describes the
+focused checks and the two manual live smokes.
 
-The ignore rules are a convenience, not a security boundary. Review the
-staged file list and diff before every commit.
+## Governance and privacy
 
-## Contribution rules
+Keep one logical change per commit and human ownership of merges. Use ASCII
+hyphens. Never commit private authorities, addresses, users, channels,
+credential paths or hashes, runtime state, live prompts or responses, or
+private pull-request payloads. Generic placeholders and `127.0.0.1` are
+allowed. Review the staged file list and complete diff before committing.
 
-Read [CONTRIBUTING.md](CONTRIBUTING.md), [AGENTS.md](AGENTS.md),
-[SECURITY.md](SECURITY.md), and [PROVENANCE.md](PROVENANCE.md) before
-changing the repository. In particular:
+## License and provenance
 
-- Keep each commit to one logical change.
-- Merges are human-owned.
-- Use ASCII hyphens in source, documentation, configuration, and messages.
-- Planning and primary review use Grok `grok-4.6` with `high` effort and
-  `long_context`.
-- Coding uses Luna with `max` effort.
-- Review falls back to Luna only when Grok is explicitly unsupported or
-  unavailable.
-- Do not introduce Speckit, the d2b panel or signoff system, d2b wave or
-  delivery sequencing, or d2b pinning-hardening workflows here.
-
-## Validation
-
-Run `make check` for the complete repository-local check graph. It is
-credential-free and does not use a d2b test harness, panel, Speckit, or Rust
-toolchain. Focused targets and the manual credential boundary are documented
-in [docs/testing.md](docs/testing.md). Nix sandbox checks stay limited to
-deterministic repository policy; real ACP feasibility and live host acceptance
-are explicit manual commands only.
-
-## License
-
-Local repository content is provided under the Apache License, Version 2.0.
-Third-party sources keep their own licenses and notices. See
-[LICENSE](LICENSE) and [PROVENANCE.md](PROVENANCE.md).
+Local content is Apache-2.0. Imported upstream sources retain their licenses
+and notices. See [LICENSE](LICENSE) and [PROVENANCE.md](PROVENANCE.md).

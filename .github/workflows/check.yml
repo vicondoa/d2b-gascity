@@ -12,7 +12,7 @@ permissions:
 jobs:
   check:
     runs-on: ubuntu-22.04
-    timeout-minutes: 5
+    timeout-minutes: 10
     steps:
       - name: Check out source
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.0
@@ -20,5 +20,47 @@ jobs:
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.12"
-      - run: python3 tests/run.py check
-        name: Run portable policy checks
+      - name: Download official Gas City
+        shell: bash
+        run: |
+          set -euo pipefail
+          gc_archive="$RUNNER_TEMP/gascity_1.4.1_linux_amd64.tar.gz"
+          gc_dir="$RUNNER_TEMP/gascity-1.4.1"
+          gc_url="https://github.com/gastownhall/gascity/releases/download/v1.4.1/gascity_1.4.1_linux_amd64.tar.gz"
+          curl --fail --location --silent --show-error \
+            --output "$gc_archive" "$gc_url"
+          printf '%s  %s\n' \
+            "8d8c8b511db3fc44931445aab5cb9f212509c0867105c880d6c3d0e6e5d33e42" \
+            "$gc_archive" | sha256sum --check --strict -
+          mkdir -p "$gc_dir"
+          tar --extract --gzip --file "$gc_archive" --directory "$gc_dir"
+          test -x "$gc_dir/gc"
+
+          bd_archive="$RUNNER_TEMP/beads_1.2.2_linux_amd64.tar.gz"
+          bd_dir="$RUNNER_TEMP/beads-1.2.2"
+          bd_url="https://github.com/steveyegge/beads/releases/download/v1.2.2/beads_1.2.2_linux_amd64.tar.gz"
+          curl --fail --location --silent --show-error \
+            --output "$bd_archive" "$bd_url"
+          printf '%s  %s\n' \
+            "8140098a51d3b81d5548d1c5e6db1a2d9930e5d141efe2a4bff7d079c4d321e8" \
+            "$bd_archive" | sha256sum --check --strict -
+          mkdir -p "$bd_dir"
+          tar --extract --gzip --file "$bd_archive" --directory "$bd_dir"
+          test -x "$bd_dir/bd"
+
+          dolt_archive="$RUNNER_TEMP/dolt-linux-amd64.tar.gz"
+          dolt_dir="$RUNNER_TEMP/dolt-2.1.7"
+          dolt_url="https://github.com/dolthub/dolt/releases/download/v2.1.7/dolt-linux-amd64.tar.gz"
+          curl --fail --location --silent --show-error \
+            --output "$dolt_archive" "$dolt_url"
+          printf '%s  %s\n' \
+            "15983e811341ed94e5d47fbfc41d2f57d8c7aa65eee511d25a3c3fd5477e28e7" \
+            "$dolt_archive" | sha256sum --check --strict -
+          mkdir -p "$dolt_dir"
+          tar --extract --gzip --file "$dolt_archive" --directory "$dolt_dir"
+          test -x "$dolt_dir/dolt-linux-amd64/bin/dolt"
+
+          echo "GC_BIN=$gc_dir/gc" >> "$GITHUB_ENV"
+          echo "PATH=$bd_dir:$dolt_dir/dolt-linux-amd64/bin:$gc_dir:$PATH" >> "$GITHUB_ENV"
+      - run: python3 tests/test_city.py
+        name: Run focused portable city check

@@ -2,74 +2,57 @@
 
 ## Repository status
 
-This is a private infrastructure repository. Do not disclose its contents,
-deployment details, or security reports publicly. Do not open a public issue
-for a suspected vulnerability.
-
-Report suspected vulnerabilities through the repository's access-controlled
-maintainer or security channel. If that channel is unavailable, ask an
-authorized repository owner for a private reporting route. Do not include
-secrets or private deployment data in the report.
+This is private infrastructure. Do not disclose repository contents,
+deployment details, credentials, or security reports publicly. Report a
+suspected vulnerability through the repository's access-controlled
+maintainer or security channel. If that route is unavailable, ask an
+authorized owner for a private reporting route.
 
 ## Trust boundaries
 
-- Git content is reviewed input to packaging, NixOS evaluation, operator
-  tooling, and Gas City workflows. Treat imported packs and generated input
-  as untrusted until checked.
-- The Gas City supervisor is the lifecycle owner. Ingress authentication and
-  reverse-proxy transport are separate infrastructure boundaries and must
-  not become alternate lifecycle owners.
-- Host-local configuration supplies authorities, addresses, credentials,
-  identifiers, site bindings, and runtime state. These values stay outside
-  Git and outside generated source artifacts.
-- The d2b rig is the single intended target and uses `v3`. Publication must
-  not gain authority to update, merge, force, or bypass protection on that
-  branch.
-- Publication accepts either the compatibility static token or a complete
-  GitHub App key/config pair, never both. The exact server policy remains
-  mandatory for either mode. App installation tokens are minted per
-  publication attempt with only metadata read, contents write, and pull
-  requests write for `vicondoa/d2b`.
-
-## Local API compatibility boundary
-
-The standalone API compatibility shim for upstream #5262 listens only on
-`127.0.0.1:18372` and forwards bytes to the supervisor at
-`127.0.0.1:8372` with native `systemd-socket-proxyd`. The nftables output rule
-admits only uid 41080. Ordinary host users therefore cannot use this route to
-bypass dashboard authentication. The shim is not public ingress and is not a
-Gas City lifecycle owner: it never starts, stops, or reconciles the
-supervisor. Do not widen its bind, UID gate, or role. Remove it when upstream
-identity-aware routing is available.
+- Native Gas City owns the city, service, retry, stop, and persistent
+  per-user lifecycle.
+- The `gc` binary, optional Copilot and `gh` binaries, and optional proxy
+  adapters are supplied externally by the host or the separate
+  `vicondoa/gascity.nix` distribution.
+- The host supplies the user-owned supervisor configuration link, proxy
+  configuration, authorities, addresses, credentials, identifiers, and
+  runtime state. Those values stay outside this repository.
+- Proxy services are host-owned optional integrations. They must fail closed
+  when authentication or their required binary is absent, and their
+  degradation must not prevent the core city from remaining usable.
+- Builtin Copilot receives its site-local token through host configuration.
+  The city does not store model transcripts or token material.
+- Discord operation is gateway-only. App credentials and guild, channel, and
+  user mappings are site-local; no public Interactions endpoint is published.
+- The official publication identity is scoped to `vicondoa/d2b` content and
+  pull-request write only. It must not merge, force-push, or bypass rules.
 
 ## Protected data
 
 Never commit or attach:
 
-- credentials, tokens, GitHub App private keys, cookies, password hashes, or
-  secret-bearing environment files;
-- private host values, authorities, addresses, paths, user or channel IDs,
-  or host configuration;
-- `.gc`, `.beads`, Dolt, worktree, session, database, socket, cache, report,
-  service dump, or prototype state;
+- credentials, tokens, keys, cookies, password hashes, or credential paths;
+- private host values, authorities, addresses, users, channels, or hashes;
+- `.gc`, `.beads`, Dolt, databases, worktrees, sessions, sockets, logs,
+  reports, service dumps, or copied runtime state;
 - live prompts, model responses, private pull-request payloads, or
   unredacted logs.
 
-Generic placeholders, planted non-sensitive prompts, and `127.0.0.1` in
-generic topology tests are acceptable. File permissions and `.gitignore` do
-not replace review of the staged file list and diff.
+Generic placeholders and `127.0.0.1` in generic topology tests are
+acceptable. File permissions and `.gitignore` do not replace staged-file and
+diff review.
 
 ## Reporting guidance
 
 Use a redacted reproduction with the affected revision, safe counts or
-timings, and pass or fail results. Remove credentials, cookies, private
-authorities, host paths, identifiers, prompts, responses, and log payloads
-before sharing. Do not attempt to reproduce a report by copying prototype
-state into the standalone root.
+timings, and pass or fail results. Remove credentials, private authorities,
+host paths, identifiers, prompts, responses, and payloads before sharing.
+Do not copy host state into the portable city.
 
-## Scope limits
+## Installation boundary
 
-This file defines the U1 repository boundary. Later units must prove
-packaging, provider, ingress, publication, restart, and rollback controls
-before those capabilities are treated as ready. A missing proof is a stop
-condition, not permission to weaken a boundary.
+Install the runtime and configure optional proxy binaries through the private
+`vicondoa/gascity.nix` repository or another compatible host source. Follow
+that repository's documentation for host configuration; do not duplicate
+host module details or embed host values here.
