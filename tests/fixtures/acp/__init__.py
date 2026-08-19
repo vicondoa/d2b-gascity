@@ -1,1 +1,0 @@
-"""Hermetic Copilot ACP fixtures."""

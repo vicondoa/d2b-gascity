@@ -1,49 +1,50 @@
-# Repository checks
+# Testing
 
-`make check` is the pull-request check. It runs the portable Python
-policy, generated-inventory, privacy, and static workflow tests. It
-does not build the contributor runtime, seed a pack cache, or start a
-Gas City supervisor. GitHub Actions runs `python3 tests/run.py check`
-with a 5-minute timeout.
+The repository has one focused, credential-free check:
 
-Live supervisor fixtures, ingress, rollback, and `nix flake check`
-stay behind `make test-fixtures`, `make test-ingress`,
-`make test-rollback`, and `make check-nix`. Those commands still
-build one contributor runtime and seed one pack cache in a mode-0700
-temporary root outside the repository.
+```text
+python3 tests/test_city.py
+make check
+```
 
-CI substitutes stock `nginx` from the pinned nixpkgs. Go 1.26.6 comes
-from `openserbia/go-flake`. `gc`, `bd`, and `dolt` come from the
-official GitHub release tarballs (`gascity v1.4.1`, `beads v1.2.2`,
-`dolt v2.1.7`), not from-source Go builds. The workflow also restores
-`/nix` from GitHub Actions cache.
+`make check` runs the same standard-library test module. It validates the
+root Pack v2 layout, the d2b `v3` rig declaration, canonical import pins,
+the two `v3` workflow overrides, proxy service declarations, source privacy,
+and the native init and rig-binding path when `GC_BIN` is available.
 
-Focused commands are available for `make test-policy`, `make test-fixtures`,
-`make test-rollback`, `make test-ingress`, `make test-generated`,
-`make test-privacy`, `make test-workflow`, and `make check-nix`.
-`make test-rollback` runs the credential-free separate-root old-new-old-new
-fixture. `make test-vm` builds the named
-`vmChecks.x86_64-linux.d2b-gascity` output and is intentionally outside the
-default cross-system flake checks.
-The fixture suite also starts native `systemd-socket-proxyd` with a local
-credential-free HTTP backend and checks method/body and SSE forwarding.
+## Optional native smoke
 
-The Nix checks cover deterministic generated drift, tracked-file privacy, and
-static workflow policy. Bootstrap and ingress fixtures that need package
-installation or a user/network namespace run through Make and CI rather than
-inside a Nix sandbox. This is an explicit boundary, not a skipped check.
-The privacy scanner also inspects staged Git index blobs and symlink targets,
-so a safe working tree does not hide staged private content.
+Set `GC_BIN` to the pinned or host-supplied native executable:
 
-Real ACP feasibility, live providers, deployment acceptance, and host
-rollback remain manual. The repository rollback fixture runs in `make check`,
-but actual `nixos-rebuild` cutover, retained-closure rollback, and the
-redacted host receipt remain manual U10 evidence. BuildBuddy is out of scope
-for U9 and this rollback surface: no local acceleration or credential test is
-introduced here; its separate integration and failure policy remain owned by
-the later delivery boundary.
+```text
+GC_BIN=/path/to/gc python3 tests/test_city.py
+```
 
-Generated inventory is reproduced with `make update-generated`. The workflow
-`.github/workflows/update-generated.yml` runs that target through the same
-pinned development shell, is manual-only, and emits a patch artifact before
-failing deliberately so it never silently mutates the default branch.
+The smoke uses temporary generic homes and repositories. It runs
+`gc init --file city.toml --preserve-existing --no-start .`, checks the
+authored files, performs native import/config validation, binds a fixture rig,
+and confirms that the rig path stays in ignored `.gc/site.toml` state.
+
+## CI inputs
+
+CI downloads exact pinned Linux archives for Gas City `v1.4.1`, Beads `v1.2.2`,
+and Dolt `2.1.7`, verifies their SHA-256 values, and runs the focused test.
+The workflow is [`.github/workflows/check.yml`](../.github/workflows/check.yml).
+It does not require credentials, network access to a private repository, or
+live model, Discord, or GitHub activity.
+
+## Manual live smokes
+
+Authenticated ingress and credentialed Compound Engineering to a pull request
+are live, redacted acceptance smokes. They require site-local optional
+binaries, credentials, and network access and are not committed test code,
+fixtures, reports, prompts, responses, or pull-request payloads.
+
+- Ingress: with host-provided proxy configuration, verify listeners are absent
+  before `gc start`, authentication fails closed, authenticated SPA/API/SSE
+  access works, and listeners disappear after `gc stop`.
+- Compound Engineering: run the bounded `gc sling gc.run-operator` example
+  from [operations.md](operations.md), verify the worktree starts at
+  `origin/v3`, and verify the official pull request targets `v3` in
+  `vicondoa/d2b`. Stop on any mismatch and retain only redacted pass/fail
+  notes outside the repository.
