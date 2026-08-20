@@ -7,17 +7,17 @@ artifact_contract: ce-unified-plan/v1
 artifact_readiness: implementation-ready
 product_contract_source: ce-brainstorm
 execution: code
-deepened: 2026-08-19
+deepened: 2026-08-20
 ---
 
 # Codex Router Copilot Slack Setup - Plan
 
 ## Goal Capsule
 
-- **Objective:** Move the d2b Gas City setup from direct Copilot CLI agents to Gas City's native Codex provider routed through Codex Router and GitHub Copilot models, add stock Slack Full Pack question-and-answer scaffolding, and prove one real Compound Engineering request can open a d2b pull request.
+- **Objective:** Move the d2b Gas City setup from direct Copilot CLI agents to Gas City's native Codex provider routed through Codex Router and GitHub Copilot models, add stock Slack Full Pack question-and-answer scaffolding, publish the dashboard through free Cloudflare Tunnel and Access, retire TinyAuth/Nginx where the native dashboard path remains compatible, and prove one real Compound Engineering request can open a d2b pull request.
 - **Product authority:** `d2b-gascity` owns the portable city composition and workflows. The separate `gascity.nix` distribution owns host installation, runtime dependencies, router setup, and host-local values, and changes to that sibling repository are in scope.
-- **Open blockers:** The operator must configure a Copilot Requests credential, a pull-request credential, and Slack app/channel values through host-local setup. The exact Copilot model is selected from the operator's live account catalog rather than assumed by the city.
-- **Stop conditions:** Stop if the stock Gas City Codex provider or Slack Full Pack cannot complete the proof without adding a custom relay or second lifecycle owner.
+- **Open blockers:** The operator must configure a Copilot Requests credential, a pull-request credential, Slack app/channel values, and a Cloudflare zone/tunnel through host-local setup. The exact Copilot model is selected from the operator's live account catalog rather than assumed by the city.
+- **Stop conditions:** Stop if the stock Gas City Codex provider or Slack Full Pack cannot complete the proof without adding a custom relay or second lifecycle owner, or if the dashboard cannot be safely served through the free Cloudflare path without retaining the current proxy stack.
 - **Execution profile:** Cross-repository packaging and configuration work with a small runtime smoke proof. Do not add a verification harness.
 - **Tail ownership:** The implementation owns changes in `d2b-gascity`, `gascity.nix`, and the permitted host configuration. Shipping must preserve the repository-specific ownership and privacy boundaries.
 
@@ -25,7 +25,7 @@ deepened: 2026-08-19
 
 ### Summary
 
-Provide one simple, user-owned Gas City workflow in which `codex` remains the agent command, Codex Router supplies the selected GitHub Copilot model, and Slack Full Pack carries one clarification exchange for a Compound Engineering run. The runtime proof is a small change against d2b `v3` that results in an opened pull request and no merge.
+Provide one simple, user-owned Gas City workflow in which `codex` remains the agent command, Codex Router supplies the selected GitHub Copilot model, free Cloudflare Tunnel and Access protect the dashboard without a home inbound port, and Slack Full Pack carries one clarification exchange for a Compound Engineering run. The runtime proof is a small change against d2b `v3` that results in an opened pull request and no merge.
 
 ### Problem Frame
 
@@ -42,6 +42,7 @@ This plan owns the integrated host and city setup plus one end-to-end runtime pr
 - **Slack clarification path:** Depends on the running city and provides the human answer channel for the proof request.
 - **Role-specific model lanes:** Deferred until the single-model proof shows that separate planning and coding models are necessary.
 - **Slack-first operation:** Deferred; the proof uses Slack without making it mandatory for every future `gc` run.
+- **Cloudflare ingress:** Enables the dashboard path and its operator authentication; it does not become a second Gas City lifecycle owner.
 
 ### Key Decisions
 
@@ -51,6 +52,7 @@ This plan owns the integrated host and city setup plus one end-to-end runtime pr
 - **Keep the city portable and the host distribution responsible for installation:** (session-settled: user-directed - chosen over an all-in-one repository: keep host values and state outside the city) Governs R1, R4, and R5.
 - **Keep Gas City's native per-user lifecycle:** (session-settled: user-directed - chosen over a second system-wide lifecycle owner: preserve the operator UID and native state behavior) Governs R1, R4, and R5.
 - **Do not add a custom relay:** (session-settled: user-directed - chosen over custom lifecycle glue: use upstream Gas City and pack capabilities) Governs R5, R6, and R8.
+- **Use free Cloudflare for public dashboard ingress:** Keep the tunnel connector and Access policy in host configuration, use Access only for the human dashboard hostname, and keep Slack on its own signed webhook route because Slack cannot complete an Access login. Governs R11-R14.
 
 ### Actors
 
@@ -80,6 +82,10 @@ This plan owns the integrated host and city setup plus one end-to-end runtime pr
 - R8. A Compound Engineering request must start from the configured city, use the routed Copilot model, ask one clarification question in the bound Slack conversation, and continue after the operator answers.
 - R9. The proof must use a small safe change in `vicondoa/d2b` based on the current `v3` remote tip and open a pull request with base `v3` without merging it.
 - R10. Validation must be runtime-focused: basic `gc` status/start checks and one real end-to-end request are sufficient, with no broad verification harness or delivery-verification code.
+- R11. The host distribution must expose `cloudflared` while host configuration owns the outbound tunnel token, hostname routes, and Cloudflare Access settings outside the repositories.
+- R12. The dashboard must be reachable through a free Cloudflare Tunnel with no inbound home firewall or router port, and Cloudflare Access must require an allowlisted operator identity before forwarding dashboard traffic.
+- R13. The final dashboard path should not depend on TinyAuth or Nginx; retain either only when direct native Gas City dashboard, API, and SSE behavior fails the runtime smoke and the reason is recorded.
+- R14. Slack Events must use a separate Cloudflare route that does not require Access login, preserves the adapter's Slack signing/workspace checks, and applies a free-tier edge gate such as a high-entropy path before traffic enters the home tunnel when the edge supports it.
 
 ### Key Flows
 
@@ -160,17 +166,20 @@ This plan owns the integrated host and city setup plus one end-to-end runtime pr
 
 ### Product Contract Preservation
 
-Product Contract unchanged. This section adds implementation decisions, sequencing, and verification without changing the confirmed product behavior or scope.
+Product Contract changed: R11-R14 add free Cloudflare Tunnel/Access ingress and the staged TinyAuth/Nginx retirement requested after the original Product Contract was approved. Existing R1-R10 meaning is preserved.
 
 ### Key Technical Decisions
 
 - KTD1. **Expose Codex Router as a pinned source and prerequisite set:** `gascity.nix` may provide the exact Codex Router source, Codex CLI, Node, Python/uv, Git, and optional Go dependencies, but the upstream installer owns the writable operator checkout, user service, and router state. (session-settled: user-directed - chosen over a Nix-owned router service: preserve the stock per-user lifecycle) Governs R1 and R4.
 - KTD2. **Use the stock Gas City Codex provider:** Define `providers.codex` from `builtin:codex`, set its model option to the empty Default choice, and persist the curated Copilot model as the active Codex model through Codex Router's stock control path. Do not set a wrapper command, Copilot model ID, router URL, or provider credential in the city. (session-settled: user-directed - chosen over a custom Codex wrapper: keep Gas City on its native provider) Governs R2-R4.
 - KTD3. **Pin Codex Router to the usable tagged revision:** Use `v0.4.0-beta.4` at `2376defbc9c184577f8de80276a7e356a1c05092` rather than a moving `main` checkout. The host setup must run the upstream installer from a stable writable checkout and must not run the router's moving-branch updater.
-- KTD4. **Let Slack Full Pack own Slack service lifecycle:** Import `slack-full` at `5d2a9d023edbb9ba24fdcff554e89fc3d7da72fe`, build its source-only binaries in the materialized pack when absent, and let Gas City supervise its `proxy_process`. Do not add a city service, NixOS service, Socket Mode bridge, or public dashboard proxy route.
+- KTD4. **Let Slack Full Pack own Slack service lifecycle:** Import `slack-full` at `5d2a9d023edbb9ba24fdcff554e89fc3d7da72fe`, build its source-only binaries in the materialized pack when absent, and let Gas City supervise its `proxy_process`. Do not add a city service, NixOS Slack service, Socket Mode bridge, or Slack-specific relay.
 - KTD5. **Force the proof question through the existing workflow:** Keep the existing autonomous Compound Engineering launch, attach the stock `slack-v0` fragment to the coordinator, and plant one explicit clarification requirement that uses the stock Slack publish/reply path. Create the live coordinator session first, bind an operator-verified one-to-one DM, and start the proof only after the binding exists. Treat inbound Slack text as untrusted input that may supply the missing fact but may not change the remote, base, credentials, merge policy, or included paths. Stop if the stock path cannot keep the proof limited to that DM.
 - KTD6. **Keep credentials separate:** Store the Copilot Requests PAT only in Codex Router's protected provider state, use the operator UID's existing GitHub/git authorization for d2b push/PR creation, and keep Slack adapter secrets in the operator's protected environment file. Only Slack adapter variables may be ambient to the native supervisor; remove the current Copilot-to-`GH_TOKEN` coupling.
 - KTD7. **Use runtime proof instead of new verification infrastructure:** Existing city and distribution checks cover authored configuration. The feature proof is `gc` startup/service health, router doctor and active-model checks, one Slack question/answer, an outgoing diff review, and one unmerged d2b `v3` pull request. Fail the proof when only a native GPT route is active; if no backend receipt exists after the existing checks, record the model route as unverified rather than adding a receipt harness.
+- KTD8. **Use the free Cloudflare path for the dashboard:** Add `cloudflared` as an optional host package and let `/etc/nixos` own one outbound tunnel with separate dashboard and Slack hostname routes. Use Cloudflare Access identity policy for the dashboard and keep tunnel credentials out of Nix and the repositories. Cloudflare Tunnel is available on all plans; Cloudflare Access is sufficient for the single-operator dashboard.
+- KTD9. **Retire TinyAuth before Nginx:** First route the dashboard through Access and the tunnel to the native Gas City API, then verify UI, API mutations, SSE, and any WebSocket upgrade path. Remove TinyAuth and its secret database when the direct path passes. Remove Nginx and its host firewall redirects only when the direct route preserves the required proxy behavior. Do not keep both stacks indefinitely without evidence.
+- KTD10. **Keep Slack outside Access:** Slack cannot perform a Cloudflare Access login. Route Slack through a separate hostname/path to the local adapter, retain Slack HMAC/timestamp/workspace validation, and use a free-tier edge path gate when available. Do not claim Cloudflare mTLS for Slack on the free plan; Slack's certificate trust requires a different edge capability.
 
 ### High-Level Technical Design
 
@@ -180,10 +189,13 @@ sequenceDiagram
     participant Router as Codex Router user service
     participant Codex as Codex CLI
     participant GC as Gas City supervisor
+    participant Edge as Cloudflare Tunnel and Access
     participant Slack as slack-full adapter
     participant GitHub as GitHub and d2b
 
     Host->>Router: Install stable checkout and curate Copilot model
+    Host->>Edge: Start outbound tunnel connector
+    Edge->>GC: Access-authenticated dashboard request
     Host->>GC: Start city with Slack env inherited
     GC->>Slack: Supervise proxy_process and extmsg adapter
     GC->>Codex: Start native Codex agent
@@ -194,20 +206,23 @@ sequenceDiagram
     GC->>GitHub: Push authorized branch and open v3 PR
 ```
 
-The router and Gas City supervisor are separate user-owned processes with separate responsibilities. The city never starts or stops the router. Slack public Events ingress remains host-owned and separate from the dashboard proxy.
+The router, Cloudflare connector, and Gas City supervisor are separate host processes with separate responsibilities. The city never starts or stops the router or tunnel. Cloudflare Access protects the dashboard hostname; Slack uses a separate signed webhook route. TinyAuth and Nginx are migration targets, not new lifecycle owners.
 
 ### Implementation Constraints and Sequencing
 
 1. Complete U1 before selecting host packages in U2. The distribution must expose the pinned router source and prerequisites without owning router state.
 2. U3 may proceed independently from U1 and U2 because its authored checks use a dummy `codex` executable and do not start the host.
-3. Complete U2 and U3 before U4. The host must expose `codex`, the router must have an active curated model, and the city must import the pinned Slack pack before any live setup.
-4. Run U4 only with operator-provided credentials and host ingress. Keep all runtime evidence redacted and outside tracked files.
+3. Complete U2 and U3 before U5. The host must expose `codex`, the router must have an active curated model, and the city must import the pinned Slack pack before ingress migration.
+4. Complete U5 before U4. The dashboard and Slack routes must be reachable through the selected free Cloudflare design before the end-to-end proof starts.
+5. Run U4 only with operator-provided credentials and host ingress. Keep all runtime evidence redacted and outside tracked files.
 
 ### System-Wide Impact
 
 - **User lifecycle:** Gas City remains a native per-user supervisor. Codex Router adds its own native per-user service and state, but no new Gas City lifecycle owner.
 - **Authentication:** Copilot model inference, GitHub PR publication, and Slack ingress use separate credential boundaries. No credential is rendered into Nix, city TOML, or tracked documentation.
 - **Ingress:** Slack Events requires a host-provided public HTTPS endpoint. It must not be routed through TinyAuth or the existing dashboard Nginx path.
+- **Dashboard ingress:** Cloudflare Tunnel provides outbound-only origin connectivity. Cloudflare Access is the dashboard authentication boundary. The host remains closed to inbound Internet traffic.
+- **Proxy retirement:** TinyAuth and Nginx are not required authentication owners after Access is proven, but Nginx may remain temporarily as a local compatibility proxy if direct Gas City routing fails the dashboard/API/SSE smoke.
 - **Agent behavior:** Only the Compound Engineering coordinator receives the Slack binding for the proof. Other agents remain unbound and use the existing workflow.
 - **Trust boundary:** This is a single-operator host setup, not a multi-tenant Slack-to-agent service. The operator must verify the bound DM counterpart and review outgoing proof content before publication.
 
@@ -217,6 +232,9 @@ The router and Gas City supervisor are separate user-owned processes with separa
 - Copilot models are account- and policy-specific. The router may expose no eligible model or may reject the selected account; the proof must stop with the upstream doctor/setup result.
 - `slack-full` is a preview pack and ships source-only adapter and CLI binaries. Missing binaries or missing inherited environment must leave the Slack service degraded rather than trigger a second service.
 - Slack Events ingress depends on host TLS/Funnel configuration. A localhost-only adapter cannot complete the proof.
+- Cloudflare Access may protect the dashboard but cannot authenticate Slack's Events request. Dashboard and Slack routes must remain separate.
+- The current Nginx layer carries host routing, mutation-origin checks, streaming settings, and TinyAuth integration. Removing it without testing direct Gas City routing can break dashboard mutations or SSE.
+- Cloudflare Tunnel and Access configuration is host-specific. Tunnel tokens, Access policies, Cloudflare API credentials, and hostname values must remain outside `gascity.nix` and the city.
 - Slack request signing authenticates the Slack app request, not the human author. A one-to-one operator DM and an operator preflight check are required because the stock pack is not a general authorization layer.
 - GitHub fine-grained credentials have different scopes and owners for Copilot Requests and d2b PR publication. A missing or mixed credential must fail closed.
 - The same operator account owns the router, Gas City agents, and Slack adapter. Keep non-Slack credentials out of the supervisor environment and inspect the outgoing diff and PR metadata before publication.
@@ -229,6 +247,8 @@ The router and Gas City supervisor are separate user-owned processes with separa
 - Document the bind-after-sling order: start the city and Slack service, create the live coordinator session through the stock session path, bind and confirm its one-to-one DM, attach the stock `slack-v0` fragment, then run the planted proof request.
 - Document that the proof uses only `gc slack bind-dm`, inbound Events, and stock publish/reply. Do not run `sync-commands`, `bind-room`, `map-channel`, `map-rig`, launcher, or file-transfer flows.
 - Document a pre-publication review of the outgoing diff, branch, commit messages, PR title/body, and generated artifacts. Abort if they contain Slack text, prompts, model output, private paths, credentials, or runtime identifiers outside the intended proof change.
+- Document the free Cloudflare setup as host work: one outbound `cloudflared` connector, one Access-protected dashboard hostname, and a separate Slack webhook hostname/path. Do not put tunnel tokens or Access identity configuration in the city.
+- Document the retirement gate: disable TinyAuth first, prove dashboard login/API/SSE through Access, then remove Nginx and its firewall redirects only after direct native routing passes.
 
 ### Planning Sources
 
@@ -236,26 +256,28 @@ The router and Gas City supervisor are separate user-owned processes with separa
 - Gas City 1.4.1 provider and Pack v2 behavior: `internal/worker/builtin/profiles.go`, `internal/config/resolve.go`, and `docs/reference/specs/pack-spec.md`.
 - Slack Full Pack pinned behavior: [pack declaration](https://github.com/gastownhall/gascity-packs/blob/5d2a9d023edbb9ba24fdcff554e89fc3d7da72fe/slack-full/pack.toml) and [operator flow](https://github.com/gastownhall/gascity-packs/blob/5d2a9d023edbb9ba24fdcff554e89fc3d7da72fe/slack-full/README.md).
 - GitHub credential boundaries: [Copilot authentication](https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/authenticate-copilot-cli) and [Slack request verification](https://docs.slack.dev/authentication/verifying-requests-from-slack).
+- Free Cloudflare ingress and dashboard authentication: [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/), [Access self-hosted applications](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/self-hosted-public-app/), and [Cloudflare free-tier mTLS limitations](https://developers.cloudflare.com/learning-paths/mtls/concepts/mtls-cloudflare/).
 - Existing local patterns: `nixosModules/default.nix`, `nix/runtime.nix`, `tests/module.nix`, `tests/package.nix`, `city.toml`, `pack.toml`, and `tests/test_city.py`.
 
 ## Implementation Units
 
 ### U1. Adding pinned Codex Router distribution support
 
-- **Goal:** Extend `gascity.nix` with the Codex CLI, Codex Router source pin, and prerequisites needed for the upstream operator installer without adding a router service or activation hook.
-- **Requirements:** R1, R4, KTD1, KTD3.
+- **Goal:** Extend `gascity.nix` with the Codex CLI, Codex Router source pin, Cloudflare connector package, and prerequisites needed for the upstream operator installer without adding a router or tunnel service.
+- **Requirements:** R1, R4, R11, KTD1, KTD3, KTD8.
 - **Dependencies:** None.
 - **Target repository:** `gascity.nix`.
 - **Files:** `flake.nix`, `nix/packages/codex-router.nix`, `nix/runtime.nix`, `nixosModules/default.nix`, `tests/module.nix`, `tests/package.nix`, `README.md`, `PROVENANCE.md`.
 - **Approach:**
   1. Add a non-flake Codex Router input pinned to the exact tagged revision and expose a read-only source package.
-  2. Add nullable optional package slots for Codex, the router source, Node/uv, and the Go toolchain needed to build source-only Slack binaries.
-  3. Keep the module limited to `environment.systemPackages` and existing inert package rendering. Do not add `systemd.services`, `systemd.user.services`, activation, linger, `/etc` router configuration, or `/var` router state.
+  2. Add nullable optional package slots for Codex, the router source, Node/uv, Go for source-only Slack binaries, and `cloudflared` for host-owned outbound tunnels.
+  3. Keep the module limited to `environment.systemPackages` and existing inert package rendering. Do not add `systemd.services`, `systemd.user.services`, activation, linger, `/etc` router or tunnel configuration, or `/var` router state.
   4. Document that the operator copies or checks out the pinned source into a writable stable user directory and runs the upstream installer as the operator UID.
 - **Patterns to follow:** Existing optional `copilotPackage`/`ghPackage` module options, inert package outputs, pinned `flake` inputs, and provenance records.
 - **Test scenarios:**
   - The flake input and source package identify the exact Codex Router tag and commit rather than `main`.
   - Enabling the optional distribution adds the selected Codex, router source, Node/uv, and Go packages without adding a system or user service.
+  - Enabling the optional distribution exposes `cloudflared` without adding a tunnel service or embedding a tunnel credential.
   - The package and module checks continue to pass with the optional packages absent.
   - The source package contains no credentials, host values, or runtime state and does not run the upstream installer during Nix evaluation.
 - **Verification:** `nix flake check path:. --no-update-lock-file` and the existing package/module checks pass in `gascity.nix`.
@@ -263,19 +285,19 @@ The router and Gas City supervisor are separate user-owned processes with separa
 ### U2. Wiring host package selection and operator-local setup
 
 - **Goal:** Select the new distribution outputs on the Nix host while keeping Codex Router, Slack credentials, and native user services outside NixOS lifecycle ownership.
-- **Requirements:** R1, R3, R4, R7, KTD1, KTD6.
+- **Requirements:** R1, R3, R4, R7, R11, KTD1, KTD6, KTD8.
 - **Dependencies:** U1.
 - **Target repository:** `NixOS host configuration`.
 - **Files:** `flake.nix`, `flake.lock`, `modules/d2b-gascity.nix`.
 - **Approach:**
-  1. Select the Codex CLI, pinned router source, Node/uv, and optional Go packages through the existing `programs.gascity` module path.
+  1. Select the Codex CLI, pinned router source, Node/uv, Go, and `cloudflared` packages through the existing `programs.gascity` module path.
   2. Do not render Copilot, router, or PR credentials into the NixOS configuration, `/nix/store`, or the supervisor environment. Supply only the stock Slack adapter variables at runtime from the operator-owned `0600` env file outside the store.
   3. Keep router setup and its user systemd unit under the operator UID using the upstream installer.
   4. Keep Slack Events ingress and its TLS/Funnel configuration host-owned and separate from the dashboard proxy.
 - **Patterns to follow:** Existing host flake pinning, `programs.gascity` package selection, and host-only secret-file rules.
 - **Test scenarios:**
   - The host evaluates with the new optional packages selected and still has no NixOS-owned Codex Router or Slack service.
-  - The rebuilt host exposes `codex`, Node/uv, and the pinned router source to the operator.
+  - The rebuilt host exposes `codex`, Node/uv, the pinned router source, and `cloudflared` to the operator.
   - Host configuration review finds no Copilot PAT, router secret, PR token, Slack secret, workspace ID, channel ID, or public ingress value.
 - **Verification:** Host flake evaluation/build succeeds and the operator can complete the upstream router doctor without a system-owned router unit.
 
@@ -306,7 +328,7 @@ The router and Gas City supervisor are separate user-owned processes with separa
 
 - **Goal:** Provide the operator setup handoff and execute the smallest real proof of routed Codex, Slack Q&A, and d2b PR publication.
 - **Requirements:** R8-R10, AE1-AE4, KTD5-KTD7.
-- **Dependencies:** U2, U3.
+- **Dependencies:** U2, U3, U5.
 - **Files:** `docs/operations.md`, `docs/testing.md`.
 - **Approach:**
   1. Document protected local setup for the Copilot Requests PAT, separate d2b PR authorization, the operator-owned `${XDG_CONFIG_HOME:-$HOME/.config}/gc-slack-adapter/env` file at mode `0600`, required Slack bot scopes, public HTTPS Events URL, stable workspace name, and the existing host supervisor value for `GC_API_BASE_URL`. Source the env file in the same operator session as `gc start`; do not use the Slack pack's alternate API default.
@@ -327,6 +349,36 @@ The router and Gas City supervisor are separate user-owned processes with separa
   - Given the proof has no backend model receipt but the existing router catalog and active-model checks pass, record the model route as unverified rather than adding a new verification harness.
 - **Verification:** Record only redacted runtime outcomes in the session. Do not commit transcripts, model output, credentials, IDs, logs, or PR payloads.
 
+### U5. Adding free Cloudflare ingress and retiring local proxy auth
+
+- **Goal:** Publish the dashboard and Slack adapter through a free Cloudflare Tunnel without opening a home inbound port, protect the dashboard with Cloudflare Access, and retire TinyAuth/Nginx where direct native routing passes the compatibility smoke.
+- **Requirements:** R11-R14, AE1, AE2, KTD8-KTD10.
+- **Dependencies:** U2, U3.
+- **Target repositories:** `gascity.nix`, NixOS host configuration, and `d2b-gascity` operational documentation.
+- **Files:**
+  - `gascity.nix`: `flake.nix`, `nixosModules/default.nix`, `tests/module.nix`, `tests/package.nix`, `README.md`, `PROVENANCE.md`
+  - `NixOS host`: `flake.nix`, `flake.lock`, `modules/d2b-gascity.nix`
+  - `d2b-gascity`: `docs/operations.md`, `docs/testing.md`, `SECURITY.md`
+- **Approach:**
+  1. Expose the nixpkgs `cloudflared` package through the inert `gascity.nix` distribution. Do not render a tunnel token, hostname, Access policy, or Cloudflare API credential in the distribution.
+  2. Configure the host to run the outbound-only connector with host-managed credentials and separate routes for the dashboard and Slack.
+  3. Create a free Cloudflare Access self-hosted application for the dashboard hostname with an allowlist for the operator identity. Enable tunnel-side Access token validation when supported by the chosen connector configuration.
+  4. Route the dashboard first through the existing local proxy stack so the Access and Tunnel path can be tested without changing Gas City behavior.
+  5. Remove TinyAuth and its credential database from the dashboard path, then test direct native Gas City routing for dashboard UI, API mutations, SSE, and WebSocket upgrades. Remove Nginx and its firewall redirects only if those checks pass.
+  6. Route Slack through a separate hostname or high-entropy path that bypasses Access login, preserves the adapter's `/slack/events` path, and retains Slack signing-secret verification. Add the free-tier edge path gate only if it can be implemented in host ingress without a new Gas City relay.
+- **Execution note:** Treat this as a staged migration. Keep a rollback path until dashboard UI, API, SSE, Slack URL verification, and native service health pass through the new routes.
+- **Patterns to follow:** Existing inert optional-package outputs in `gascity.nix`, host-only secret handling, Cloudflare's self-hosted Access application flow, the existing Nginx streaming/origin guards, and the Slack Full Pack's two-listener contract.
+- **Test scenarios:**
+  - The distribution exposes `cloudflared` without adding a Gas City lifecycle service or embedding host values.
+  - The host starts the connector with credentials outside the Nix store and no inbound home firewall port.
+  - An unauthenticated dashboard request is rejected by Cloudflare Access before reaching the origin, while the allowlisted operator can load the dashboard.
+  - Dashboard API mutations, SSE streams, and WebSocket upgrades continue to work through the Access and Tunnel path.
+  - After TinyAuth removal, no dashboard request depends on the TinyAuth socket or users database.
+  - After Nginx removal, direct native Gas City routing preserves the tested dashboard behavior; otherwise Nginx remains only with a documented compatibility reason.
+  - Slack's request URL verification and signed `message.im` event reach the adapter through the separate route, while Access login is not required for Slack.
+  - A request that lacks the Cloudflare edge gate or Slack signature is rejected before it can create a Gas City event or session action.
+- **Verification:** The free Cloudflare dashboard route, direct native dashboard route, and separate Slack route pass redacted manual smokes. No Cloudflare tokens, certificates, Access policies, private hostnames, or live payloads enter tracked files.
+
 ## Verification Contract
 
 | Scope | Check | Done signal |
@@ -334,6 +386,7 @@ The router and Gas City supervisor are separate user-owned processes with separa
 | `gascity.nix` | Existing Nix flake, package, and module checks | Pinned source and optional packages evaluate without a NixOS-owned router or Slack service |
 | `d2b-gascity` | `python3 tests/test_city.py` and existing `make check` | Native Codex provider, Slack import/lock, privacy rules, and native init contracts pass |
 | Host runtime | Router doctor and Codex model catalog check | Router user service is healthy and a curated Copilot model is available |
+| Cloudflare ingress | Free `cloudflared` connector and Access-protected dashboard route | No inbound home port; unauthenticated dashboard requests are blocked at the edge |
 | City runtime | `gc status`, `gc start .`, and native service health | City resolves, Codex is the active agent command, and Slack is ready |
 | End-to-end proof | One planted Slack question, one answer, outgoing diff review, and one d2b publication | A small unmerged pull request targets `v3` with no private or runtime-derived content |
 
@@ -344,5 +397,6 @@ Do not add a test harness, mock Slack server, paid router smoke test, model iden
 - U1 is complete when `gascity.nix` exposes the pinned source and prerequisites through its existing inert package interface and its checks pass.
 - U2 is complete when the host selects those packages without embedding private values or owning the router/Slack lifecycle.
 - U3 is complete when the portable city uses native Codex, imports and locks Slack Full, preserves existing d2b workflow contracts, and its focused checks pass.
+- U5 is complete when the free Cloudflare Tunnel and Access dashboard path works without an inbound home port, TinyAuth is removed, and Nginx is either removed after direct native compatibility passes or retained only with a documented compatibility reason.
 - U4 is complete when the operator can follow the redacted setup instructions, verify the one-to-one DM, review the outgoing proof content, and the runtime proof opens one d2b `v3` pull request after a Slack question-and-answer exchange.
 - The final changes contain no abandoned wrapper, relay, system service, mock verifier, credentials, private identifiers, runtime state, transcripts, or copied prototype state.
