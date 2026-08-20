@@ -92,3 +92,9 @@ coverage/
 *.bak
 *~
 .DS_Store
+
+# Beads / Dolt files (added by bd init)
+.beads-credential-key
+.beads/proxieddb/
+.codex/
+.dolt-backup/

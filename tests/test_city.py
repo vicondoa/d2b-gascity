@@ -280,7 +280,7 @@ class RootPortableCityTests(unittest.TestCase):
         ):
             self.assertNotIn(marker, text)
 
-    def test_pack_pins_canonical_sources_and_declares_private_proxy_services(
+    def test_pack_pins_canonical_sources_and_uses_imported_services(
         self,
     ) -> None:
         pack = tomllib.loads((ROOT / "pack.toml").read_text(encoding="utf-8"))
@@ -303,29 +303,13 @@ class RootPortableCityTests(unittest.TestCase):
             {"source": SLACK_PACK_SOURCE, "version": f"sha:{PACK_COMMIT}"},
         )
 
-        self.assertEqual(len(pack["service"]), 2)
-        services = {service["name"]: service for service in pack["service"]}
-        self.assertEqual(set(services), {"proxy-tinyauth", "proxy-nginx"})
-        self.assertNotIn("slack", services)
+        self.assertNotIn("service", pack)
         for relative in (
             "slack-full",
             "gc-slack-adapter",
             "gc-slack-cli",
         ):
             self.assertFalse((ROOT / relative).exists(), relative)
-        for service in services.values():
-            self.assertEqual(service["kind"], "proxy_process")
-            self.assertEqual(service["publish_mode"], "private")
-            self.assertEqual(service["state_root"], ".gc/services/proxy")
-            self.assertNotIn("publication", service)
-        self.assertEqual(
-            services["proxy-tinyauth"]["process"]["command"],
-            ["gascity-tinyauth-service"],
-        )
-        self.assertEqual(
-            services["proxy-nginx"]["process"]["command"],
-            ["gascity-nginx-service"],
-        )
 
     def test_lock_and_v3_workflow_shadows_are_pinned(self) -> None:
         lock = tomllib.loads((ROOT / "packs.lock").read_text(encoding="utf-8"))

@@ -6,17 +6,38 @@ There is no repository-specific wrapper.
 
 ## Install the runtime
 
-Install the pinned `gc` and `codex` runtimes, `gh`, TinyAuth, Nginx, and any
-other optional proxy binaries through the separate private
+Install the pinned `gc`, `codex`, `cloudflared`, and `gh` runtimes, plus any
+optional integration binaries, through the separate private
 `vicondoa/gascity.nix` repository or another compatible host source. This
 repository contains no Nix packaging. Follow the sibling repository's
-documentation for host configuration and optional proxy setup. The city uses
-Gas City's stock Codex provider; the host's Codex Router selects the active
+documentation for host configuration and tunnel setup. The city uses Gas
+City's stock Codex provider; the host's Codex Router selects the active
 Copilot model.
 
 The core distribution is inert: installation does not start a supervisor,
-city, proxy, or custom service. Optional proxy binaries may be absent; the
-city remains usable while those services report a degraded state.
+city, tunnel, or custom service.
+
+## Free Cloudflare ingress
+
+The host may run `cloudflared` as a separate outbound-only ingress service.
+The Cloudflare Tunnel token, Access policy, and public hostnames are
+host-local and must not be placed in this repository or the Nix store.
+
+Use one published application for the dashboard hostname and protect it with
+the free Cloudflare Access identity policy for the operator. Use a separate
+published application for the Slack hostname without Access login because
+Slack cannot complete an Access authentication flow. The Slack adapter still
+requires its signing-secret, timestamp, and workspace checks.
+
+The intended local origins are:
+
+- Dashboard: the native Gas City API on the host's loopback supervisor port.
+- Slack: `http://127.0.0.1:8765`, with the adapter bound to loopback.
+
+Keep all home-router inbound ports closed. The dashboard and API are served
+directly by the native Gas City supervisor through the Cloudflare Tunnel.
+Cloudflare Access protects the dashboard hostname; Slack uses its own signed
+Events route without Access login.
 
 ## Initialize and start
 
@@ -81,9 +102,7 @@ gc service doctor
 gc service restart <service-name>
 ```
 
-If optional proxy adapters are not installed, the proxy services should be
-visibly degraded while core city status remains usable. Do not add a
-replacement process or wrapper.
+The city owns no dashboard authentication proxy or replacement wrapper.
 
 ## Codex Router and credential boundaries
 

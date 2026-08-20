@@ -10,15 +10,15 @@ version = "sha:5d2a9d023edbb9ba24fdcff554e89fc3d7da72fe"
 commit = "5d2a9d023edbb9ba24fdcff554e89fc3d7da72fe"
 fetched = "2026-08-14T22:39:05Z"
 
-[packs."https://github.com/gastownhall/gascity-packs/tree/main/slack-full"]
-version = "sha:5d2a9d023edbb9ba24fdcff554e89fc3d7da72fe"
-commit = "5d2a9d023edbb9ba24fdcff554e89fc3d7da72fe"
-fetched = "2026-08-19T11:00:43Z"
-
 [packs."https://github.com/gastownhall/gascity-packs/tree/main/gascity/roles"]
 version = "sha:5d2a9d023edbb9ba24fdcff554e89fc3d7da72fe"
 commit = "5d2a9d023edbb9ba24fdcff554e89fc3d7da72fe"
 fetched = "2026-08-14T22:39:05Z"
+
+[packs."https://github.com/gastownhall/gascity-packs/tree/main/slack-full"]
+version = "sha:5d2a9d023edbb9ba24fdcff554e89fc3d7da72fe"
+commit = "5d2a9d023edbb9ba24fdcff554e89fc3d7da72fe"
+fetched = "2026-08-19T11:00:43Z"
 
 [packs."https://github.com/gastownhall/gascity.git//examples/bd"]
 version = "sha:f895c0ff47d6ee9334ed282a416387eb5b084d24"

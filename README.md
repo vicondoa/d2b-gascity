@@ -11,8 +11,8 @@ official Compound Engineering, Discord, and pinned Slack Full imports, the
 two narrow `v3` workflow overrides, and focused portable-city checks. The
 city uses Gas City's stock Codex provider; Codex Router and its active
 Copilot model are host-owned. This repository contains no Nix distribution or
-host deployment module. Install `gc`, `codex`, and any optional integration
-or proxy binaries through the separate private
+host deployment module. Install `gc`, `codex`, `cloudflared`, and any optional
+integration binaries through the separate private
 `vicondoa/gascity.nix` repository or another compatible source.
 
 ## Layout

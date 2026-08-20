@@ -23,21 +23,3 @@ version = "sha:5d2a9d023edbb9ba24fdcff554e89fc3d7da72fe"
 [imports.slack-full]
 source = "https://github.com/gastownhall/gascity-packs/tree/main/slack-full"
 version = "sha:5d2a9d023edbb9ba24fdcff554e89fc3d7da72fe"
-
-[[service]]
-name = "proxy-tinyauth"
-kind = "proxy_process"
-publish_mode = "private"
-state_root = ".gc/services/proxy"
-
-[service.process]
-command = ["gascity-tinyauth-service"]
-
-[[service]]
-name = "proxy-nginx"
-kind = "proxy_process"
-publish_mode = "private"
-state_root = ".gc/services/proxy"
-
-[service.process]
-command = ["gascity-nginx-service"]

@@ -10,8 +10,9 @@ make check
 `make check` runs the same standard-library test module. It validates the
 root Pack v2 layout, the d2b `v3` rig declaration, the stock Codex provider,
 canonical import pins including Slack Full, the two `v3` workflow overrides,
-proxy service declarations, source privacy, credential separation, and the
-native init and rig-binding path when `GC_BIN` is available.
+the absence of city-owned dashboard proxy services, source privacy, credential
+separation, and the native init and rig-binding path when `GC_BIN` is
+available.
 
 The focused checks also assert that Slack remains an imported source-only
 pack: no Slack service or built adapter binary is authored by the city. They
@@ -51,9 +52,18 @@ are not committed test code, fixtures, reports, prompts, responses, or
 pull-request payloads. The focused suite never starts Slack, Codex Router, or
 an external pull-request flow.
 
-- Ingress: with host-provided proxy configuration, verify listeners are absent
-  before `gc start`, authentication fails closed, authenticated SPA/API/SSE
-  access works, and listeners disappear after `gc stop`.
+- Cloudflare dashboard: with the `cloudflared` connector running, verify an
+  unauthenticated request to the dashboard hostname is rejected by Cloudflare
+  Access before reaching the host. Verify the allowlisted operator can load
+  the dashboard, perform an API mutation, receive SSE updates, and use any
+  required WebSocket upgrade.
+- Cloudflare Slack route: verify the separate Slack hostname reaches only
+  `/slack/events`, does not require Cloudflare Access login, and preserves
+  Slack signing-secret and workspace validation. Keep the adapter on
+  `127.0.0.1:8765` and do not open a home inbound port.
+- Ingress: with the host-owned Cloudflare connector running, verify the
+  dashboard is authenticated by Access, direct native SPA/API/SSE access
+  works, and no home inbound port is open.
 - Slack: source the mode-`0600`
   `${XDG_CONFIG_HOME:-$HOME/.config}/gc-slack-adapter/env` file in the same
   shell as `gc start`; verify the host-supplied `GC_CITY_NAME`,
