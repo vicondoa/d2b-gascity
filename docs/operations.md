@@ -37,7 +37,10 @@ The intended local origins are:
 Keep all home-router inbound ports closed. The dashboard and API are served
 directly by the native Gas City supervisor through the Cloudflare Tunnel.
 Cloudflare Access protects the dashboard hostname; Slack uses its own signed
-Events route without Access login.
+Events route without Access login. Configure the Slack hostname's published
+application to match only `/slack/events`, followed by a catch-all
+`http_status:404` rule. Do not publish the adapter's `/healthz`, OAuth, or
+other paths in the steady-state route.
 
 ## Initialize and start
 
@@ -128,8 +131,10 @@ source = "https://github.com/gastownhall/gascity-packs/tree/main/slack-full"
 version = "sha:5d2a9d023edbb9ba24fdcff554e89fc3d7da72fe"
 ```
 
-The imported pack owns its `slack` `proxy_process` service. Do not add a
-city-owned Slack service, a second supervisor, or a custom relay.
+The imported pack owns its `slack` `proxy_process` service. In this city the
+materialized import exposes its operator commands as `gc slack-full`; use that
+binding rather than adding a city-owned Slack service, a second supervisor, or
+a custom relay.
 
 Slack Full carries source-only Go binaries. After the pack is materialized,
 build them in that materialized pack using the upstream instructions:
@@ -144,11 +149,21 @@ Do not copy them into this repository or commit them.
 
 After the city and Slack service are running, create the coordinator session
 through the native session path, verify the operator's one-to-one DM, and
-bind it with `gc slack bind-dm`. Attach the imported
+bind it with `gc slack-full bind-dm`. Attach the imported
 `template-fragments/slack-v0.template.md` fragment to that coordinator.
-Use the turn-bound `gc slack reply-current` path for replies. Do not use
+Use the turn-bound `gc slack-full reply-current` path for replies. Do not use
 room, launcher, mapping, file-transfer, or direct-adapter flows for the
 clarification proof.
+
+For workspace-bound request verification, prefer the stock Slack OAuth install
+flow from the imported pack. It records the signing secret with the
+workspace/app key in `.gc/slack/apps.json`; after the install, source the
+generated `.gc/slack/install.env`, unset `SLACK_CLIENT_ID`,
+`SLACK_CLIENT_SECRET`, and `SLACK_REDIRECT_URI`, and restart the adapter.
+Keep `SLACK_SIGNING_SECRET` out of the long-lived supervisor environment when
+the registry contains the stamped secret. The OAuth callback and its
+temporary public route are onboarding-only; disable them before the
+steady-state Slack route is restricted to `/slack/events`.
 
 ## Discord gateway import
 

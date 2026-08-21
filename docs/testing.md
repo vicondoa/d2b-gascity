@@ -18,7 +18,7 @@ The focused checks also assert that Slack remains an imported source-only
 pack: no Slack service or built adapter binary is authored by the city. They
 cover host environment inheritance (`GC_CITY_NAME`, `GC_CITY_PATH`, and the
 host-supplied `GC_API_BASE_URL`), the stock `slack-v0` fragment and
-`gc slack reply-current` path, and the removal of the old
+`gc slack-full reply-current` path, and the removal of the old
 `GH_TOKEN=$COPILOT_GITHUB_TOKEN` coupling.
 
 ## Optional native smoke
@@ -59,7 +59,9 @@ an external pull-request flow.
   required WebSocket upgrade.
 - Cloudflare Slack route: verify the separate Slack hostname reaches only
   `/slack/events`, does not require Cloudflare Access login, and preserves
-  Slack signing-secret and workspace validation. Keep the adapter on
+  Slack signing-secret and workspace validation. Configure the Cloudflare
+  Tunnel hostname rule with path `/slack/events` and a catch-all
+  `http_status:404` rule before exposing it. Keep the adapter on
   `127.0.0.1:8765` and do not open a home inbound port.
 - Ingress: with the host-owned Cloudflare connector running, verify the
   dashboard is authenticated by Access, direct native SPA/API/SSE access
@@ -70,7 +72,7 @@ an external pull-request flow.
   `GC_CITY_PATH`, and `GC_API_BASE_URL` values are inherited by the imported
   `proxy_process`. Bind only the operator-verified one-to-one DM, attach the
   stock `slack-v0` fragment, and verify one question and one
-  `gc slack reply-current` answer. Do not use Slack mocks or add delivery
+  `gc slack-full reply-current` answer. Do not use Slack mocks or add delivery
   verification.
 - Compound Engineering: run the bounded `gc sling gc.run-operator` example
   from [operations.md](operations.md), verify the worktree starts at

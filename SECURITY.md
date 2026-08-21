@@ -24,7 +24,8 @@ authorized owner for a private reporting route.
 - Cloudflare Access protects the dashboard hostname and allowlists the
   operator identity. Slack uses a separate hostname/path without Access
   login, because Slack authenticates Events requests with its signing secret
-  and workspace check instead.
+  and workspace check instead. The steady-state Slack Tunnel route must match
+  only `/slack/events` and return `404` for all other paths.
 - The host-managed Codex Router owns the Copilot Requests credential and the
   active account-visible model. The city does not store router URLs, model
   IDs, Copilot token variables, model transcripts, or token material.
@@ -33,9 +34,12 @@ authorized owner for a private reporting route.
   Slack service or relay. The adapter is allowed only the Slack variables
   from the operator-owned mode-`0600` environment file.
 - Slack Events ingress is host-owned and public. Slack signing verification
-  and workspace checks must pass before an event is accepted. The proof is
-  restricted to an operator-verified one-to-one DM, not a general
-  authorization layer for rooms or multi-party conversations.
+  and workspace checks must pass before an event is accepted. Complete the
+  stock OAuth install so the signing secret is stamped into the workspace/app
+  registry, then remove the global signing-secret fallback from the long-lived
+  service environment. The proof is restricted to an operator-verified
+  one-to-one DM, not a general authorization layer for rooms or multi-party
+  conversations.
 - Discord operation is gateway-only. App credentials and guild, channel, and
   user mappings are site-local; no public Interactions endpoint is published.
 - The d2b publication identity is separate from Copilot Requests and Slack.
