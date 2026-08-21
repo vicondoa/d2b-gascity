@@ -65,7 +65,8 @@ chmod 600 "$SLACK_ENV"
 The file is host-local and must contain only the Slack adapter variables plus
 the host values `GC_CITY_NAME=d2b-gascity`, `GC_CITY_PATH`, and the existing
 supervisor value for `GC_API_BASE_URL`. Do not use the Slack pack's alternate
-API default. Keep Codex Router, Copilot Requests, and d2b pull-request
+API default. Set `LISTEN_PUBLIC=127.0.0.1:8765` so the adapter remains
+loopback-only. Keep Codex Router, Copilot Requests, and d2b pull-request
 credentials out of this file.
 
 Create the user-owned supervisor link at the native `GC_HOME` location. Use
@@ -75,6 +76,15 @@ repository:
 ```text
 GC_HOME="${GC_HOME:-$HOME/.gc}"
 ln -s /path/from-host/supervisor.toml "$GC_HOME/supervisor.toml"
+```
+
+If `pack.toml` imports Slack Full, do not run `gc start` until the imported
+pack is materialized and its source-only binaries are built. Set `GC_PACK_DIR`
+to the materialized `slack-full` directory shown by the host's pack
+materialization output, verify `manifest/app.json` exists, and build the
+adapter and CLI there as described below. Then run:
+
+```text
 gc start
 ```
 
@@ -137,9 +147,11 @@ binding rather than adding a city-owned Slack service, a second supervisor, or
 a custom relay.
 
 Slack Full carries source-only Go binaries. After the pack is materialized,
-build them in that materialized pack using the upstream instructions:
+set `GC_PACK_DIR` to its materialized `slack-full` directory, verify
+`manifest/app.json` exists, and build them using the upstream instructions:
 
 ```text
+test -f "$GC_PACK_DIR/manifest/app.json"
 (cd "$GC_PACK_DIR/adapter" && go build -o gc-slack-adapter)
 (cd "$GC_PACK_DIR/cli" && go build -o gc-slack-cli .)
 ```
@@ -193,7 +205,7 @@ site-local credential rotation.
 The city uses native Codex through the host router, the official Compound
 Engineering and roles assets, and official publication. The two local
 workflow assets select `origin/v3` for worktrees and `v3` for pull requests.
-A bounded native launch uses `gc.run-operator` and the official
+A bounded native launch uses `d2b/roles.run-operator` and the official
 `compound-build` formula:
 
 ```text
