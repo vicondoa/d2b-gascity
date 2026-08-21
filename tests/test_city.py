@@ -388,6 +388,7 @@ class RootPortableCityTests(unittest.TestCase):
             "GC_API_BASE_URL",
             "slack-v0",
             "gc slack-full reply-current",
+            "d2b/roles.run-operator",
             "SLACK_CLIENT_ID",
             "SLACK_REDIRECT_URI",
             "apps.json",

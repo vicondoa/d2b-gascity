@@ -74,7 +74,7 @@ an external pull-request flow.
   stock `slack-v0` fragment, and verify one question and one
   `gc slack-full reply-current` answer. Do not use Slack mocks or add delivery
   verification.
-- Compound Engineering: run the bounded `gc sling gc.run-operator` example
+- Compound Engineering: run the bounded `gc sling d2b/roles.run-operator` example
   from [operations.md](operations.md), verify the worktree starts at
   `origin/v3`, and verify the official pull request targets `v3` in
   `vicondoa/d2b`. Stop on any mismatch and retain only redacted pass/fail

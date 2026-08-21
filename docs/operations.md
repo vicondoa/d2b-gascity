@@ -159,10 +159,12 @@ For workspace-bound request verification, prefer the stock Slack OAuth install
 flow from the imported pack. It records the signing secret with the
 workspace/app key in `.gc/slack/apps.json`; after the install, source the
 generated `.gc/slack/install.env`, unset `SLACK_CLIENT_ID`,
-`SLACK_CLIENT_SECRET`, and `SLACK_REDIRECT_URI`, and restart the adapter.
-Keep `SLACK_SIGNING_SECRET` out of the long-lived supervisor environment when
-the registry contains the stamped secret. The OAuth callback and its
-temporary public route are onboarding-only; disable them before the
+`SLACK_CLIENT_SECRET`, `SLACK_REDIRECT_URI`, and `SLACK_APP_ID`, and restart
+the adapter. The stock adapter uses `SLACK_APP_ID` to select its global
+signing-secret branch, so leave it unset when using the workspace-bound
+registry. Keep `SLACK_SIGNING_SECRET` out of the long-lived supervisor
+environment when the registry contains the stamped secret. The OAuth callback
+and its temporary public route are onboarding-only; disable them before the
 steady-state Slack route is restricted to `/slack/events`.
 
 ## Discord gateway import
@@ -195,7 +197,7 @@ A bounded native launch uses `gc.run-operator` and the official
 `compound-build` formula:
 
 ```text
-gc sling gc.run-operator <bead-id> --on compound-build \
+gc sling d2b/roles.run-operator <bead-id> --on compound-build \
   --var artifact_root=<site-local-artifact-root> \
   --var interaction_mode=autonomous \
   --var review_mode=agent \
