@@ -18,12 +18,22 @@ default_branch = "v3"
 source = "https://github.com/gastownhall/gascity-packs/tree/main/gascity/roles"
 version = "sha:5d2a9d023edbb9ba24fdcff554e89fc3d7da72fe"
 
+[[named_session]]
+template = "codex"
+scope = "rig"
+mode = "always"
+
 [patches]
 
 [[patches.agent]]
 dir = "d2b"
 name = "ce-pr-comment-resolver"
 provider = "codex"
+
+[[patches.agent]]
+append_fragments = ["slack-v0"]
+dir = "d2b"
+name = "codex"
 
 [[patches.agent]]
 dir = "d2b"

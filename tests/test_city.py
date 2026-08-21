@@ -187,7 +187,9 @@ class RootPortableCityTests(unittest.TestCase):
 
         self.assertNotIn("api", config)
         self.assertNotIn("suspended_on_start", config)
-        self.assertNotIn("session", text.lower())
+        self.assertNotIn("[[session]]", text.lower())
+        self.assertNotIn("[session]", text.lower())
+        self.assertIn("[[named_session]]", text.lower())
 
         rigs = config["rigs"]
         self.assertEqual(len(rigs), 1)
@@ -248,11 +250,22 @@ class RootPortableCityTests(unittest.TestCase):
             [
                 {
                     "dir": "d2b",
+                    "name": "ce-pr-comment-resolver",
+                    "provider": "codex",
+                },
+                {
+                    "append_fragments": ["slack-v0"],
+                    "dir": "d2b",
+                    "name": "codex",
+                },
+            ]
+            + [
+                {
+                    "dir": "d2b",
                     "name": name,
                     "provider": "codex",
                 }
                 for name in (
-                    "ce-pr-comment-resolver",
                     "ce-work",
                     "implementation-worker",
                     "publisher",
@@ -261,7 +274,7 @@ class RootPortableCityTests(unittest.TestCase):
         )
         self.assertTrue(
             all(
-                set(patch) <= {"dir", "name", "provider"}
+                set(patch) <= {"append_fragments", "dir", "name", "provider"}
                 for patch in patches["agent"]
             )
         )
@@ -273,12 +286,13 @@ class RootPortableCityTests(unittest.TestCase):
         ).lower()
         for marker in (
             "api",
-            "session",
             "acp",
             "deployment-verification",
             "delivery-verification",
         ):
             self.assertNotIn(marker, text)
+        self.assertNotIn("[[session]]", text)
+        self.assertNotIn("[session]", text)
 
     def test_pack_pins_canonical_sources_and_uses_imported_services(
         self,
