@@ -18,20 +18,23 @@ not copy product source or upstream pack implementation.
 | --- | --- | --- | --- |
 | Gas City | [gastownhall/gascity](https://github.com/gastownhall/gascity) | `v1.4.1`, `f895c0ff47d6ee9334ed282a416387eb5b084d24` | MIT |
 | Gas City packs | [gastownhall/gascity-packs](https://github.com/gastownhall/gascity-packs) | `5d2a9d023edbb9ba24fdcff554e89fc3d7da72fe` | Retain upstream notices and verify pack terms before redistribution |
+| Slack Full Pack | [gastownhall/gascity-packs/slack-full](https://github.com/gastownhall/gascity-packs/tree/5d2a9d023edbb9ba24fdcff554e89fc3d7da72fe/slack-full) | `5d2a9d023edbb9ba24fdcff554e89fc3d7da72fe` | Source-only adapter and CLI; retain upstream notices and build only in materialized pack state |
 | Beads | [steveyegge/beads](https://github.com/steveyegge/beads) | `v1.2.2`, `6c124203e771433a3550c348771a5b5e27fd3c21` | MIT |
 | Dolt | [dolthub/dolt](https://github.com/dolthub/dolt) | `2.1.7` | Apache-2.0 |
-| Copilot CLI | [github/copilot-cli](https://github.com/github/copilot-cli) | `1.0.79` | GitHub Copilot CLI License |
 
-The Gas City and Beads pack imports are recorded in `pack.toml` and
-`packs.lock`. Optional runtime and proxy installation provenance belongs to
-the separate `vicondoa/gascity.nix` repository or the compatible host source
-that supplies those binaries.
+The Gas City, Beads, and Slack Full pack imports are recorded in `pack.toml`
+and `packs.lock`. The city has no Copilot CLI provider. Native Codex and
+Codex Router installation and pin provenance belong to the separate
+`vicondoa/gascity.nix` repository or the compatible host source that supplies
+those binaries.
 
 ## License boundary
 
 Local repository content is provided under the Apache License, Version 2.0.
 Imported packs and binaries retain their upstream licenses and notices.
-Nothing in this file relicenses an imported component.
+Slack Full's source-only adapter and CLI are not city-authored binaries;
+materialized build outputs stay outside tracked files. Nothing in this file
+relicenses an imported component.
 
 ## State and privacy boundary
 
