@@ -177,7 +177,11 @@ signing-secret branch, so leave it unset when using the workspace-bound
 registry. Keep `SLACK_SIGNING_SECRET` out of the long-lived supervisor
 environment when the registry contains the stamped secret. The OAuth callback
 and its temporary public route are onboarding-only; disable them before the
-steady-state Slack route is restricted to `/slack/events`.
+steady-state Slack route is restricted to `/slack/events` and
+`/slack/interactions`. The bootstrap registers the stock `/gc` slash command
+against `/slack/interactions`; bind its channel or rig with the stock
+`gc slack-full map-channel` or `gc slack-full map-rig` command before using
+it. No custom slash-command dispatcher is added.
 
 ## Discord gateway import
 
