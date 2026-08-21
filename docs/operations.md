@@ -183,6 +183,10 @@ against `/slack/interactions`; bind its channel or rig with the stock
 `gc slack-full map-channel` or `gc slack-full map-rig` command before using
 it. No custom slash-command dispatcher is added.
 
+The bootstrap also invites the six identity bots to each private room. Verify
+`gc slack-full peers` reports no membership or binding warnings before a room
+mention or company-room proof.
+
 ## Discord gateway import
 
 Use the official command with site-local credentials and mappings only:
