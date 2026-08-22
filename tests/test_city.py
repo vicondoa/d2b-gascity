@@ -254,7 +254,7 @@ class RootPortableCityTests(unittest.TestCase):
                     "provider": "codex",
                 },
                 {
-                    "append_fragments": ["slack-v0"],
+                    "append_fragments": ["slack-v0", "slack-progress"],
                     "dir": "d2b",
                     "name": "codex",
                 },

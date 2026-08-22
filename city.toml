@@ -31,7 +31,7 @@ name = "ce-pr-comment-resolver"
 provider = "codex"
 
 [[patches.agent]]
-append_fragments = ["slack-v0"]
+append_fragments = ["slack-v0", "slack-progress"]
 dir = "d2b"
 name = "codex"
 
