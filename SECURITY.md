@@ -40,8 +40,6 @@ authorized owner for a private reporting route.
   service environment. The proof is restricted to an operator-verified
   one-to-one DM, not a general authorization layer for rooms or multi-party
   conversations.
-- Discord operation is gateway-only. App credentials and guild, channel, and
-  user mappings are site-local; no public Interactions endpoint is published.
 - The d2b publication identity is separate from Copilot Requests and Slack.
   It is scoped to `vicondoa/d2b` content and pull-request write only. It must
   not merge, force-push, or bypass rules.

@@ -6,8 +6,8 @@ There is no repository-specific wrapper.
 
 ## Install the runtime
 
-Install the pinned `gc`, `codex`, `cloudflared`, and `gh` runtimes, plus any
-optional integration binaries, through the separate private
+Install the pinned `gc`, `codex`, `cloudflared`, and `gh` runtimes, plus the
+Slack adapter binaries, through the separate private
 `vicondoa/gascity.nix` repository or another compatible host source. This
 repository contains no Nix packaging. Follow the sibling repository's
 documentation for host configuration and tunnel setup. The city uses Gas
@@ -177,36 +177,13 @@ signing-secret branch, so leave it unset when using the workspace-bound
 registry. Keep `SLACK_SIGNING_SECRET` out of the long-lived supervisor
 environment when the registry contains the stamped secret. The OAuth callback
 and its temporary public route are onboarding-only; disable them before the
-steady-state Slack route is restricted to `/slack/events` and
-`/slack/interactions`. The bootstrap registers the stock `/gc` slash command
-against `/slack/interactions`; bind its channel or rig with the stock
-`gc slack-full map-channel` or `gc slack-full map-rig` command before using
-it. No custom slash-command dispatcher is added.
+steady-state Slack route is restricted to `/slack/events` with a catch-all
+`http_status:404` rule. Do not publish `/slack/interactions`, the adapter's
+`/healthz`, or other paths in the steady state.
 
 The bootstrap also invites the six identity bots to each private room. Verify
 `gc slack-full peers` reports no membership or binding warnings before a room
 mention or company-room proof.
-
-## Discord gateway import
-
-Use the official command with site-local credentials and mappings only:
-
-```text
-gc discord import-app \
-  --application-id "$DISCORD_APPLICATION_ID" \
-  --public-key "$DISCORD_PUBLIC_KEY" \
-  --bot-token-file /dev/stdin \
-  --guild-allowlist "$DISCORD_GUILD_ID" \
-  --channel-allowlist "$DISCORD_CHANNEL_ID" \
-  --role-allowlist "$DISCORD_ROLE_ID" \
-  < "$DISCORD_TOKEN_FILE"
-```
-
-Keep the token file, application values, and guild, channel, role, or user
-mappings outside the repository. This is gateway-only operation: do not
-publish a public Interactions endpoint or add a public route. Restart the
-official gateway service through native Gas City service commands after a
-site-local credential rotation.
 
 ## Compound Engineering
 

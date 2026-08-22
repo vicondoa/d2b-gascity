@@ -5,11 +5,6 @@ version = "sha:5d2a9d023edbb9ba24fdcff554e89fc3d7da72fe"
 commit = "5d2a9d023edbb9ba24fdcff554e89fc3d7da72fe"
 fetched = "2026-08-14T22:39:05Z"
 
-[packs."https://github.com/gastownhall/gascity-packs/tree/main/discord"]
-version = "sha:5d2a9d023edbb9ba24fdcff554e89fc3d7da72fe"
-commit = "5d2a9d023edbb9ba24fdcff554e89fc3d7da72fe"
-fetched = "2026-08-14T22:39:05Z"
-
 [packs."https://github.com/gastownhall/gascity-packs/tree/main/gascity"]
 version = "sha:5d2a9d023edbb9ba24fdcff554e89fc3d7da72fe"
 commit = "5d2a9d023edbb9ba24fdcff554e89fc3d7da72fe"

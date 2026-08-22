@@ -12,7 +12,7 @@ and this project follows semantic versioning where releases are published.
 - Refocused the repository as the root portable Gas City city for one
   `vicondoa/d2b` rig on branch `v3`.
 - Kept the official Pack v2 core, Beads, Compound Engineering, roles, and
-  Discord imports, with builtin Copilot provider routing and narrow `v3`
+  pinned Slack Full import, with builtin Copilot provider routing and narrow `v3`
   workflow overrides.
 - Made native per-user Gas City commands the documented initialization,
   lifecycle, service diagnosis, rig binding, and stop path.

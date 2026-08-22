@@ -7,8 +7,8 @@ d2b product repository.
 ## Repository boundary
 
 This repository owns the root Pack v2 city, the d2b rig declaration, the
-official Compound Engineering, Discord, and pinned Slack Full imports, the
-two narrow `v3` workflow overrides, and focused portable-city checks. The
+official Compound Engineering and pinned Slack Full import, the two narrow
+`v3` workflow overrides, and focused portable-city checks. The
 city uses Gas City's stock Codex provider; Codex Router and its active
 Copilot model are host-owned. This repository contains no Nix distribution or
 host deployment module. Install `gc`, `codex`, `cloudflared`, and any optional
@@ -40,8 +40,8 @@ machine-local values stay outside tracked files.
 Follow [docs/operations.md](docs/operations.md) for native initialization,
 the user-owned supervisor configuration link, host environment inheritance,
 Codex Router and credential boundaries, Slack Full binding, lifecycle
-commands, rig binding, gateway-only Discord import, service diagnosis, and
-the bounded official Compound Engineering flow. [docs/testing.md](docs/testing.md)
+commands, rig binding, service diagnosis, and the bounded official Compound
+Engineering flow. [docs/testing.md](docs/testing.md)
 describes the focused checks and the manual live smokes.
 
 ## Governance and privacy

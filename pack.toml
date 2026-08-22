@@ -20,10 +20,6 @@ version = "sha:5d2a9d023edbb9ba24fdcff554e89fc3d7da72fe"
 source = "https://github.com/gastownhall/gascity.git//internal/bootstrap/packs/core"
 version = "sha:f895c0ff47d6ee9334ed282a416387eb5b084d24"
 
-[imports.discord]
-source = "https://github.com/gastownhall/gascity-packs/tree/main/discord"
-version = "sha:5d2a9d023edbb9ba24fdcff554e89fc3d7da72fe"
-
 [imports.slack-full]
 source = "https://github.com/gastownhall/gascity-packs/tree/main/slack-full"
 version = "sha:5d2a9d023edbb9ba24fdcff554e89fc3d7da72fe"

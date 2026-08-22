@@ -41,7 +41,7 @@ CI downloads exact pinned Linux archives for Gas City `v1.4.1`, Beads `v1.2.2`,
 and Dolt `2.1.7`, verifies their SHA-256 values, and runs the focused test.
 The workflow is [`.github/workflows/check.yml`](../.github/workflows/check.yml).
 It does not require credentials, network access to a private repository, or
-live model, Discord, or GitHub activity.
+live model or GitHub activity.
 
 ## Manual live smokes
 

@@ -309,7 +309,6 @@ class RootPortableCityTests(unittest.TestCase):
                 "bd": f"sha:{GASCITY_COMMIT}",
                 "gc": f"sha:{PACK_COMMIT}",
                 "compound-engineering": f"sha:{PACK_COMMIT}",
-                "discord": f"sha:{PACK_COMMIT}",
                 "slack-full": f"sha:{PACK_COMMIT}",
             },
         )
@@ -332,10 +331,6 @@ class RootPortableCityTests(unittest.TestCase):
             (
                 "https://github.com/gastownhall/"
                 "gascity-packs/tree/main/compound-engineering"
-            ): PACK_COMMIT,
-            (
-                "https://github.com/gastownhall/"
-                "gascity-packs/tree/main/discord"
             ): PACK_COMMIT,
             SLACK_PACK_SOURCE: PACK_COMMIT,
             (
@@ -421,20 +416,14 @@ class RootPortableCityTests(unittest.TestCase):
         self.assertIn("source-only", docs.lower())
         self.assertIn("credential separation", docs.lower())
 
-    def test_discord_import_has_no_public_site_mapping(self) -> None:
-        text = "\n".join(
-            (ROOT / relative).read_text(encoding="utf-8")
-            for relative in ("city.toml", "pack.toml")
-        ).lower()
-        for marker in (
-            "public_base_domain",
-            "interactions_url",
-            "external_route",
-            "guild_id",
-            "channel_id",
-            "user_mapping",
-        ):
-            self.assertNotIn(marker, text)
+    def test_discord_is_disabled(self) -> None:
+        pack = tomllib.loads((ROOT / "pack.toml").read_text(encoding="utf-8"))
+        lock = tomllib.loads((ROOT / "packs.lock").read_text(encoding="utf-8"))
+        self.assertNotIn("discord", pack["imports"])
+        self.assertNotIn(
+            "https://github.com/gastownhall/gascity-packs/tree/main/discord",
+            lock["packs"],
+        )
 
     def test_authored_city_files_have_only_generic_source_values(self) -> None:
         text = "\n".join(
