@@ -12,6 +12,10 @@ version = "sha:f895c0ff47d6ee9334ed282a416387eb5b084d24"
 source = "https://github.com/gastownhall/gascity-packs/tree/main/compound-engineering"
 version = "sha:5d2a9d023edbb9ba24fdcff554e89fc3d7da72fe"
 
+[imports.gc]
+source = "https://github.com/gastownhall/gascity-packs/tree/main/gascity"
+version = "sha:5d2a9d023edbb9ba24fdcff554e89fc3d7da72fe"
+
 [imports.core]
 source = "https://github.com/gastownhall/gascity.git//internal/bootstrap/packs/core"
 version = "sha:f895c0ff47d6ee9334ed282a416387eb5b084d24"

@@ -199,7 +199,7 @@ class RootPortableCityTests(unittest.TestCase):
         )
         self.assertNotIn("path", rigs[0])
         self.assertEqual(
-            rigs[0]["imports"]["roles"],
+            rigs[0]["imports"]["gc"],
             {
                 "source": (
                     "https://github.com/gastownhall/"
@@ -307,6 +307,7 @@ class RootPortableCityTests(unittest.TestCase):
             {
                 "core": f"sha:{GASCITY_COMMIT}",
                 "bd": f"sha:{GASCITY_COMMIT}",
+                "gc": f"sha:{PACK_COMMIT}",
                 "compound-engineering": f"sha:{PACK_COMMIT}",
                 "discord": f"sha:{PACK_COMMIT}",
                 "slack-full": f"sha:{PACK_COMMIT}",
@@ -340,6 +341,10 @@ class RootPortableCityTests(unittest.TestCase):
             (
                 "https://github.com/gastownhall/"
                 "gascity-packs/tree/main/gascity/roles"
+            ): PACK_COMMIT,
+            (
+                "https://github.com/gastownhall/"
+                "gascity-packs/tree/main/gascity"
             ): PACK_COMMIT,
             (
                 "https://github.com/gastownhall/"
