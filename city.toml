@@ -1,13 +1,17 @@
 [workspace]
-name = "d2b-gascity"
 provider = "codex"
 
 [providers]
 [providers.codex]
 base = "builtin:codex"
-
+ready_delay_ms = 0
 [providers.codex.option_defaults]
 model = ""
+
+[[named_session]]
+template = "codex"
+scope = "rig"
+mode = "always"
 
 [[rigs]]
 name = "d2b"
@@ -18,11 +22,6 @@ default_branch = "v3"
 source = "https://github.com/gastownhall/gascity-packs/tree/main/gascity/roles"
 version = "sha:5d2a9d023edbb9ba24fdcff554e89fc3d7da72fe"
 
-[[named_session]]
-template = "codex"
-scope = "rig"
-mode = "always"
-
 [patches]
 
 [[patches.agent]]
@@ -31,9 +30,9 @@ name = "ce-pr-comment-resolver"
 provider = "codex"
 
 [[patches.agent]]
-append_fragments = ["slack-v0", "slack-progress"]
 dir = "d2b"
 name = "codex"
+append_fragments = ["slack-v0", "slack-progress"]
 
 [[patches.agent]]
 dir = "d2b"
