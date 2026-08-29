@@ -104,16 +104,17 @@ trap cleanup EXIT
 trap 'cleanup; exit 1' HUP INT TERM
 
 stage_projection() {
-    candidate=$1
+    owner=$1
+    candidate=$2
     [ ! -e "$candidate" ] && [ ! -L "$candidate" ] ||
         blocker "staging path already exists: $candidate"
     stage=$candidate
     mkdir "$stage" || blocker "cannot create staging directory: $stage"
-    if [ "$candidate" = "$stage_github_candidate" ]; then
-        stage_github=$stage
-    else
-        stage_agents=$stage
-    fi
+    case "$owner" in
+        github) stage_github=$stage ;;
+        agents) stage_agents=$stage ;;
+        *) blocker "unknown projection owner: $owner" ;;
+    esac
     cp -R "$source_root/." "$stage/" ||
         blocker "cannot copy vendored skill to $stage"
     verify_files "$stage"
@@ -128,13 +129,14 @@ stage_projection() {
         blocker "projection marker verification failed"
 }
 
-stage_projection "$stage_github_candidate"
-stage_projection "$stage_agents_candidate"
+stage_projection github "$stage_github_candidate"
+stage_projection agents "$stage_agents_candidate"
 
 replace_projection() {
-    target=$1
-    stage=$2
-    backup_candidate=$3
+    owner=$1
+    target=$2
+    stage=$3
+    backup_candidate=$4
     moved=0
     if [ -e "$target" ] || [ -L "$target" ]; then
         [ ! -e "$backup_candidate" ] && [ ! -L "$backup_candidate" ] ||
@@ -142,11 +144,11 @@ replace_projection() {
         mv "$target" "$backup_candidate" ||
             blocker "cannot preserve existing projection: $target"
         backup=$backup_candidate
-        if [ "$backup_candidate" = "$backup_github_candidate" ]; then
-            backup_github=$backup
-        else
-            backup_agents=$backup
-        fi
+        case "$owner" in
+            github) backup_github=$backup ;;
+            agents) backup_agents=$backup ;;
+            *) blocker "unknown projection owner: $owner" ;;
+        esac
         moved=1
     fi
     if ! mv "$stage" "$target"; then
@@ -158,26 +160,28 @@ replace_projection() {
     if [ "$moved" = 1 ]; then
         rm -rf "$backup_candidate" ||
             blocker "cannot remove old projection: $backup_candidate"
-        if [ "$backup_candidate" = "$backup_github" ]; then
-            backup_github=
-        else
-            backup_agents=
-        fi
+        case "$owner" in
+            github) backup_github= ;;
+            agents) backup_agents= ;;
+            *) blocker "unknown projection owner: $owner" ;;
+        esac
     fi
-    if [ "$stage" = "$stage_github" ]; then
-        stage_github=
-    else
-        stage_agents=
-    fi
+    case "$owner" in
+        github) stage_github= ;;
+        agents) stage_agents= ;;
+        *) blocker "unknown projection owner: $owner" ;;
+    esac
 }
 
 replace_projection \
+    github \
     "$github_parent/pr-babysit" \
-    "$stage_github_candidate" \
+    "$stage_github" \
     "$backup_github_candidate"
 replace_projection \
+    agents \
     "$agents_parent/pr-babysit" \
-    "$stage_agents_candidate" \
+    "$stage_agents" \
     "$backup_agents_candidate"
 
 printf 'project-copilot-skill: projected pr-babysit %s into %s and %s\n' \

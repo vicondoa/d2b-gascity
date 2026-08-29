@@ -12,6 +12,7 @@ import tempfile
 import time
 import tomllib
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -2510,7 +2511,6 @@ class VendoredPrBabysitTests(unittest.TestCase):
 
         source_before = tree_bytes(PR_BABYSIT_ROOT)
         try:
-            workdir = root / "workdir"
             rig_source = root / "rig-source"
             rig_source.mkdir()
             workdir = rig_source / ".gc" / "agents" / "pr-babysitter"
@@ -2905,29 +2905,26 @@ if command == "close":
         root, env = self._fixture("concurrent-handoff")
         try:
             command = [str(PR_BABYSIT_STATE_RUNNER), "handoff"]
-            processes = [
-                subprocess.Popen(
-                    command,
-                    cwd=ROOT,
-                    env=os.environ | env,
-                    stdin=subprocess.PIPE,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    text=True,
-                )
-                for _ in range(2)
-            ]
-            results = [
-                process.communicate(
-                    input=json.dumps(self._HANDOFF),
-                )
-                for process in processes
-            ]
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                futures = [
+                    executor.submit(
+                        subprocess.run,
+                        command,
+                        cwd=ROOT,
+                        env=os.environ | env,
+                        input=json.dumps(self._HANDOFF),
+                        capture_output=True,
+                        text=True,
+                        check=False,
+                    )
+                    for _ in range(2)
+                ]
+                results = [future.result() for future in futures]
             self.assertTrue(
-                all(process.returncode == 0 for process in processes),
+                all(result.returncode == 0 for result in results),
                 results,
             )
-            outputs = [json.loads(stdout) for stdout, _ in results]
+            outputs = [json.loads(result.stdout) for result in results]
             self.assertEqual(
                 {output["watch_id"] for output in outputs},
                 {outputs[0]["watch_id"]},
@@ -2970,36 +2967,35 @@ if command == "close":
                 },
             )
             command = [str(PR_BABYSIT_STATE_RUNNER), "claim-action"]
-            processes = [
-                subprocess.Popen(
-                    command,
-                    cwd=ROOT,
-                    env=os.environ | env,
-                    stdin=subprocess.PIPE,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    text=True,
-                )
-                for _ in payloads
-            ]
-            results = [
-                process.communicate(input=json.dumps(payload))
-                for process, payload in zip(processes, payloads)
-            ]
+            with ThreadPoolExecutor(max_workers=len(payloads)) as executor:
+                futures = [
+                    executor.submit(
+                        subprocess.run,
+                        command,
+                        cwd=ROOT,
+                        env=os.environ | env,
+                        input=json.dumps(payload),
+                        capture_output=True,
+                        text=True,
+                        check=False,
+                    )
+                    for payload in payloads
+                ]
+                results = [future.result() for future in futures]
             self.assertEqual(
-                sorted(process.returncode for process in processes),
+                sorted(result.returncode for result in results),
                 [0, 1],
                 results,
             )
             winner = next(
-                json.loads(stdout)
-                for process, (stdout, _) in zip(processes, results)
-                if process.returncode == 0
+                json.loads(result.stdout)
+                for result in results
+                if result.returncode == 0
             )
             loser = next(
-                json.loads(stdout)
-                for process, (stdout, _) in zip(processes, results)
-                if process.returncode != 0
+                json.loads(result.stdout)
+                for result in results
+                if result.returncode != 0
             )
             self.assertEqual(winner["watch_id"], watch_id)
             self.assertEqual(loser["error"]["code"], "already-claimed")

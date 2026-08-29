@@ -48,7 +48,6 @@ VALIDATION_STATUSES = {"passed", "failed", "not-run", "ambiguous"}
 AMBIGUOUS_REASON = "ambiguous-outcome"
 SHA_RE = re.compile(r"^[0-9a-fA-F]{40}$")
 SLUG_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9_.-]*[A-Za-z0-9])?$")
-LOWER_SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 WATCH_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 ACTION_KIND_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,47}$")
 SAFE_REASON_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,95}$")
@@ -311,7 +310,7 @@ def parse_identity(payload: dict[str, Any]) -> dict[str, Any]:
         payload_value(payload, "prefix", "rig_prefix") or expected_rig["prefix"],
         "prefix",
     )
-    if prefix != expected_rig["prefix"] or not LOWER_SLUG_RE.fullmatch(prefix):
+    if prefix != expected_rig["prefix"] or not WATCH_ID_RE.fullmatch(prefix):
         fail("prefix does not match the owning rig")
 
     owner_raw = payload_value(payload, "owner")
@@ -444,7 +443,7 @@ def iso_now() -> str:
 def parse_time(value: Any, field: str, *, default_now: bool = False) -> datetime:
     if value is None or value == "":
         if default_now:
-            return datetime.now(timezone.utc)
+            return parse_time(iso_now(), field)
         fail(f"{field} is required")
     result = text_value(value, field)
     normalized = result[:-1] + "+00:00" if result.endswith("Z") else result
@@ -705,10 +704,14 @@ def require_beads(result: BeadsResult, operation: str) -> Any:
     return result.payload
 
 
-def show_issue(issue_id: str) -> tuple[dict[str, Any], dict[str, str]]:
+def show_issue(
+    issue_id: str,
+    *,
+    operation: str = "show",
+) -> tuple[dict[str, Any], dict[str, str]]:
     validate_watch_id(issue_id)
     result = run_beads(["show", issue_id, "--json"])
-    payload = require_beads(result, "show")
+    payload = require_beads(result, operation)
     issue = issue_from_payload(payload)
     if issue.get("id") != issue_id:
         fail("Beads returned a different issue ID", "beads-invalid-response")
@@ -717,9 +720,11 @@ def show_issue(issue_id: str) -> tuple[dict[str, Any], dict[str, str]]:
 
 def show_issue_if_present(
     issue_id: str,
+    *,
+    operation: str = "show",
 ) -> tuple[dict[str, Any], dict[str, str]] | None:
     try:
-        return show_issue(issue_id)
+        return show_issue(issue_id, operation=operation)
     except StateError as error:
         if error.code == "beads-not-found":
             return None
@@ -1039,14 +1044,10 @@ def invalidate_action_claim(
         return
     generation = generation_from_metadata(metadata)
     action_id = action_id_for(watch_id, generation, action_kind, fingerprint)
-    result = run_beads(["show", action_id, "--json"])
-    if not result.ok:
-        error = beads_error(result, "stale action show")
-        if error.code == "beads-not-found":
-            return
-        raise error
-    action = issue_from_payload(require_beads(result, "stale action show"))
-    action_metadata_value = metadata_from_issue(action)
+    existing = show_issue_if_present(action_id, operation="stale action show")
+    if existing is None:
+        return
+    _, action_metadata_value = existing
     if action_metadata_value.get("watch_id") != watch_id:
         fail("stale action does not belong to watch", "identity-mismatch")
     metadata_updates(
@@ -1385,7 +1386,6 @@ def _claim_action_locked(
         fingerprint,
         head_sha,
     )
-    action_initial["record_kind"] = "action"
     created, _, _ = create_action(
         action_id,
         watch_id,
