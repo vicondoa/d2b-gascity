@@ -431,13 +431,24 @@ class RootPortableCityTests(unittest.TestCase):
         generator = (
             CORE_PACK_ROOT / "commands" / "gen-model-tiers" / "run.sh"
         )
-        result = subprocess.run(
-            [str(generator), str(CITY_ROOT / "city.toml")],
-            cwd=ROOT,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
+
+        def generate(
+            city: pathlib.Path,
+            base: pathlib.Path | None = None,
+        ) -> subprocess.CompletedProcess[str]:
+            env = os.environ.copy()
+            if base is not None:
+                env["MODEL_TIERS_BASE"] = str(base)
+            return subprocess.run(
+                [str(generator), str(city)],
+                cwd=ROOT,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+        result = generate(CITY_ROOT / "city.toml")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(
             result.stdout,
@@ -445,22 +456,61 @@ class RootPortableCityTests(unittest.TestCase):
         )
 
         with tempfile.TemporaryDirectory() as raw_root:
-            invalid_base = pathlib.Path(raw_root) / "model-tiers.base.toml"
+            temporary = pathlib.Path(raw_root)
+            invalid_base = temporary / "invalid-base.toml"
             invalid_base.write_text(
-                '[tiers]\nimplementation-worker = "invalid tier"\n',
+                '[tiers]\nimplementation-worker = "unknown-tier"\n',
                 encoding="utf-8",
             )
-            env = os.environ.copy()
-            env["MODEL_TIERS_BASE"] = str(invalid_base)
-            invalid = subprocess.run(
-                [str(generator), str(CITY_ROOT / "city.toml")],
-                cwd=ROOT,
-                env=env,
-                capture_output=True,
-                text=True,
-                check=False,
+            invalid = generate(CITY_ROOT / "city.toml", invalid_base)
+            self.assertNotEqual(invalid.returncode, 0)
+            self.assertIn("unknown tier", invalid.stderr)
+
+            empty_base = temporary / "empty-base.toml"
+            empty_base.write_text("[tiers]\n", encoding="utf-8")
+            empty = generate(CITY_ROOT / "city.toml", empty_base)
+            self.assertNotEqual(empty.returncode, 0)
+            self.assertIn("no valid role assignments", empty.stderr)
+
+            no_rigs = temporary / "no-rigs.toml"
+            no_rigs.write_text(
+                '[workspace]\nprovider = "deep-thinker"\n',
+                encoding="utf-8",
             )
-        self.assertNotEqual(invalid.returncode, 0)
+            missing_rigs = generate(no_rigs)
+            self.assertNotEqual(missing_rigs.returncode, 0)
+            self.assertIn("no rigs found", missing_rigs.stderr)
+
+            invalid_rig = temporary / "invalid-rig.toml"
+            invalid_rig.write_text(
+                '[[rigs]]\nname = "invalid rig"\n',
+                encoding="utf-8",
+            )
+            invalid_name = generate(invalid_rig)
+            self.assertNotEqual(invalid_name.returncode, 0)
+            self.assertIn("invalid rig name", invalid_name.stderr)
+
+            multi_rig = temporary / "multi-rig.toml"
+            multi_rig.write_text(
+                '[[rigs]]\nname = "alpha"\n\n[[rigs]]\nname = "beta"\n',
+                encoding="utf-8",
+            )
+            multiple = generate(multi_rig)
+            self.assertEqual(multiple.returncode, 0, multiple.stderr)
+            patches = tomllib.loads(multiple.stdout)["patches"]["agent"]
+            self.assertEqual(len(patches), 24)
+            self.assertEqual({patch["dir"] for patch in patches}, {"alpha", "beta"})
+
+            missing_city = generate(temporary / "missing-city.toml")
+            self.assertNotEqual(missing_city.returncode, 0)
+            self.assertIn("city file not found", missing_city.stderr)
+
+            missing_base = generate(
+                CITY_ROOT / "city.toml",
+                temporary / "missing-base.toml",
+            )
+            self.assertNotEqual(missing_base.returncode, 0)
+            self.assertIn("base map not found", missing_base.stderr)
 
     def test_mayor_is_single_native_coordinator(self) -> None:
         agent = tomllib.loads(
