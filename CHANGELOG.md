@@ -9,6 +9,9 @@ and this project follows semantic versioning where releases are published.
 
 ### Changed
 
+- Added local definitions for the global `command-glossary` and
+  `operational-awareness` fragments so strict prompt rendering cannot silently
+  omit them without importing the full Gastown workflow pack.
 - Moved the only active city root to `cities/d2b-gascity` and documented the
   repository boundary that excludes a local d2b checkout or bind mount.
 - Documented native in-place initialization with

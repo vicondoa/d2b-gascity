@@ -89,10 +89,10 @@ gc service list
 gc service doctor
 ```
 
-The city uses the official global `command-glossary`, `operational-awareness`,
-and `discord-v0` fragments plus the local `d2b-governance` fragment.
-`discord-v0` gives every session that receives a Discord event the
-explicit reply contract. The daemon uses
+The local core pack provides the global `command-glossary` and
+`operational-awareness` fragments. The official Discord pack provides
+`discord-v0`, and the city provides `d2b-governance`. `discord-v0` gives every
+session that receives a Discord event the explicit reply contract. The daemon uses
 `patrol_interval=30s`, `max_restarts=5`, `restart_window=1h`,
 `shutdown_timeout=5s`, and `formula_v2=true`.
 

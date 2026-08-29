@@ -46,6 +46,12 @@ or transport. The city-local mayor adapts the cookbook coordinator concept
 through the official `gc.mayor` skill and official Gas City formulas and
 roles; it never implements or merges.
 
+The local core pack independently defines the `command-glossary` and
+`operational-awareness` fragments referenced by the city. Their text is local
+Apache-2.0 content and does not import the Gastown pack, its agents, sessions,
+or workflow machinery. The official Discord pack remains the source of the
+`discord-v0` fragment.
+
 ## Adapted cookbook material
 
 The repository adapts selected concepts and limited text from
