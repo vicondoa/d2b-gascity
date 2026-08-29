@@ -195,6 +195,23 @@ PR_BABYSIT_LOCAL_FILES = (
 PR_BABYSIT_STATE_RUNNER = (
     PR_BABYSIT_ROOT / "commands" / "pr-babysit" / "run.sh"
 )
+PR_BABYSIT_REPAIR_FORMULA = (
+    PR_BABYSIT_ROOT / "formulas" / "mol-pr-babysit-repair.toml"
+)
+PR_BABYSIT_REPAIR_PREPARE = (
+    PR_BABYSIT_ROOT
+    / "assets"
+    / "workflows"
+    / "pr-babysit"
+    / "prepare-worktree.md"
+)
+PR_BABYSIT_REPAIR_VALIDATE = (
+    PR_BABYSIT_ROOT
+    / "assets"
+    / "workflows"
+    / "pr-babysit"
+    / "validate-and-report.md"
+)
 PUBLISH_OPEN_PR_ASSET = (
     CITY_ROOT / "assets" / "workflows" / "publish" / "open-pr.md"
 )
@@ -2482,13 +2499,22 @@ class VendoredPrBabysitTests(unittest.TestCase):
         for action in ("`gh`", "git push"):
             self.assertGreater(lowered.index(action), gate, action)
         for marker in (
-            "gh_token",
-            "copilot_github_token",
-            "credential",
             "user-global",
             "/tmp",
         ):
             self.assertNotIn(marker, lowered)
+        for marker in (
+            "gh_token",
+            "github_token",
+            "copilot token",
+            "operator-attested",
+            "contents write",
+            "pull requests read",
+            "fine-grained permissions",
+            "untrusted input",
+            "addressed thread ids",
+        ):
+            self.assertIn(marker, lowered)
         for relative in PR_BABYSIT_PROJECTED_FILES:
             match = re.search(
                 rf"verify_file '([0-9a-f]{{64}})' "
@@ -2708,7 +2734,7 @@ save(calls_path, calls)
 records = load(state_path, [])
 command_index = next(
     (index for index, value in enumerate(argv)
-     if value in {"create", "show", "update", "close", "list"}),
+     if value in {"create", "show", "update", "close", "list", "dep"}),
     None,
 )
 if command_index is None:
@@ -2777,6 +2803,22 @@ if command == "list":
     raise SystemExit(0)
 
 
+if command == "dep":
+    blocker = args[0] if args and not args[0].startswith("-") else ""
+    blocked = value("--blocks")
+    blocker_record = record_for(blocker)
+    blocked_record = record_for(blocked)
+    if blocker_record is None or blocked_record is None:
+        print("not found", file=sys.stderr)
+        raise SystemExit(1)
+    dependencies = set(blocked_record.get("blocked_by", []))
+    dependencies.add(blocker)
+    blocked_record["blocked_by"] = sorted(dependencies)
+    save(state_path, records)
+    print(json.dumps({"ok": True, "blocker": blocker, "blocked": blocked}))
+    raise SystemExit(0)
+
+
 if command == "update":
     issue_id = next((item for item in args if not item.startswith("-")), "")
     record = record_for(issue_id)
@@ -2797,6 +2839,8 @@ if command == "update":
         record["status"] = value("--status")
     if "--assignee" in args or any(item.startswith("--assignee=") for item in args):
         record["assignee"] = value("--assignee")
+    if "--parent" in args or any(item.startswith("--parent=") for item in args):
+        record["parent"] = value("--parent")
     metadata = dict(record.get("metadata") or {})
     index = 0
     while index < len(args):
@@ -4660,6 +4704,706 @@ print(json.dumps({"ok": True}))
                     ]
                 ),
                 3,
+            )
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
+
+
+class PrBabysitRepairTests(unittest.TestCase):
+    _HANDOFF = dict(PrBabysitStateTests._HANDOFF)
+
+    def _fixture(self, name: str) -> tuple[pathlib.Path, dict[str, str]]:
+        root = ROOT / ".scratch" / f"u6-repair-{name}"
+        shutil.rmtree(root, ignore_errors=True)
+        root.mkdir(parents=True)
+        fake = root / "fake-beads"
+        fake.write_text(
+            PrBabysitStateTests._fake_beads_script(),
+            encoding="utf-8",
+        )
+        fake.chmod(0o755)
+        (root / "beads.json").write_text("[]\n", encoding="utf-8")
+        (root / "calls.json").write_text("[]\n", encoding="utf-8")
+        return root, {
+            "PR_BABYSIT_BEADS_BIN": str(fake),
+            "FAKE_BEADS_ROOT": str(root),
+            "PR_BABYSIT_BEADS_CWD": str(root),
+            "GC_RIG_ROOT": str(root),
+            "PR_BABYSIT_ALLOWED_HOSTS": "github.com",
+        }
+
+    def _run(
+        self,
+        env: dict[str, str],
+        action: str,
+        payload: dict[str, object] | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [str(PR_BABYSIT_STATE_RUNNER), action],
+            cwd=ROOT,
+            env=os.environ | env,
+            input=json.dumps(payload or {}),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+    @staticmethod
+    def _json(result: subprocess.CompletedProcess[str]) -> dict:
+        if not result.stdout:
+            raise AssertionError(result.stderr)
+        return json.loads(result.stdout)
+
+    @staticmethod
+    def _fake_gc_script() -> str:
+        return r"""#!/usr/bin/env python3
+import json
+import os
+import sys
+from pathlib import Path
+
+root = Path(os.environ["FAKE_REPAIR_ROOT"])
+calls_path = root / "gc-calls.json"
+calls = json.loads(calls_path.read_text(encoding="utf-8")) if calls_path.exists() else []
+calls.append(sys.argv[1:])
+calls_path.write_text(
+    json.dumps(calls, sort_keys=True, separators=(",", ":")) + "\n",
+    encoding="utf-8",
+)
+if os.environ.get("FAKE_GC_FAIL") == "1":
+    print("formula attach failed", file=sys.stderr)
+    raise SystemExit(1)
+print(json.dumps({"ok": True, "root_id": "repair-root"}))
+"""
+
+    def _repair_fixture(
+        self,
+        name: str,
+    ) -> tuple[pathlib.Path, dict[str, str]]:
+        root, env = self._fixture(f"repair-{name}")
+        fake_gc = root / "fake-gc"
+        fake_gc.write_text(self._fake_gc_script(), encoding="utf-8")
+        fake_gc.chmod(0o755)
+        (root / "gc-calls.json").write_text("[]\n", encoding="utf-8")
+        env.update(
+            {
+                "PR_BABYSIT_GC_BIN": str(fake_gc),
+                "FAKE_REPAIR_ROOT": str(root),
+                "PR_BABYSIT_GITHUB_CAPABILITY_ATTESTED": (
+                    "contents-write,pull-requests-read"
+                ),
+            }
+        )
+        return root, env
+
+    def _dispatch(
+        self,
+        env: dict[str, str],
+        watch_id: str,
+        *,
+        generation: int,
+        head_sha: str,
+        action_kind: str,
+        fingerprint: str,
+        addressed_thread_ids: list[str] | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        return self._run(
+            env,
+            "dispatch-repair",
+            {
+                "watch_id": watch_id,
+                "generation": generation,
+                "head_sha": head_sha,
+                "action_kind": action_kind,
+                "fingerprint": fingerprint,
+                "addressed_thread_ids": addressed_thread_ids or [],
+            },
+        )
+
+    def _complete(
+        self,
+        env: dict[str, str],
+        watch_id: str,
+        *,
+        generation: int,
+        old_sha: str,
+        new_sha: str,
+        action_kind: str,
+        fingerprint: str,
+    ) -> str:
+        dispatched = self._dispatch(
+            env,
+            watch_id,
+            generation=generation,
+            head_sha=old_sha,
+            action_kind=action_kind,
+            fingerprint=fingerprint,
+            addressed_thread_ids=["thread-1"],
+        )
+        self.assertEqual(dispatched.returncode, 0, dispatched.stderr)
+        action_id = self._json(dispatched)["action_id"]
+        recorded = self._run(
+            env,
+            "record-repair-result",
+            {
+                "watch_id": watch_id,
+                "action_id": action_id,
+                "generation": generation,
+                "expected_old_sha": old_sha,
+                "pushed_sha": new_sha,
+                "validation_status": "passed",
+                "make_check_result": "passed",
+                "addressed_thread_ids": ["thread-1"],
+            },
+        )
+        self.assertEqual(recorded.returncode, 0, recorded.stderr)
+        confirmed = self._run(
+            env,
+            "confirm-action",
+            {
+                "watch_id": watch_id,
+                "action_id": action_id,
+                "generation": generation,
+                "current_sha": new_sha,
+            },
+        )
+        self.assertEqual(confirmed.returncode, 0, confirmed.stderr)
+        return action_id
+
+    def test_repair_formula_declares_v2_targets_dependencies_and_assets(self):
+        formula = tomllib.loads(
+            PR_BABYSIT_REPAIR_FORMULA.read_text(encoding="utf-8")
+        )
+        self.assertEqual(formula["formula"], "mol-pr-babysit-repair")
+        self.assertEqual(formula["version"], 2)
+        self.assertEqual(
+            formula["requires"]["formula_compiler"],
+            ">=2.0.0",
+        )
+        steps = formula["steps"]
+        self.assertEqual(
+            [step["id"] for step in steps],
+            [
+                "prepare-worktree",
+                "repair",
+                "review",
+                "validate-and-report",
+                "close-action",
+            ],
+        )
+        targets = {
+            step["id"]: step["metadata"]["gc.run_target"]
+            for step in steps
+        }
+        self.assertEqual(
+            targets,
+            {
+                "prepare-worktree": "gc.run-operator",
+                "repair": "gc.implementation-worker",
+                "review": "gc.implementation-reviewer",
+                "validate-and-report": "gc.run-operator",
+                "close-action": "gc.run-operator",
+            },
+        )
+        by_id = {step["id"]: step for step in steps}
+        self.assertEqual(by_id["repair"]["needs"], ["prepare-worktree"])
+        self.assertEqual(by_id["review"]["needs"], ["repair"])
+        self.assertEqual(
+            by_id["validate-and-report"]["needs"],
+            ["repair", "review"],
+        )
+        self.assertEqual(
+            by_id["close-action"]["needs"],
+            ["validate-and-report"],
+        )
+        self.assertIn(
+            "description_file",
+            by_id["prepare-worktree"],
+        )
+        self.assertIn(
+            "description_file",
+            by_id["validate-and-report"],
+        )
+        for path in (PR_BABYSIT_REPAIR_PREPARE, PR_BABYSIT_REPAIR_VALIDATE):
+            self.assertTrue(path.is_file(), path)
+
+    def test_repair_formula_compiles_with_native_formula_v2(self):
+        gc = shutil.which("gc")
+        if gc is None:
+            self.skipTest("gc unavailable")
+        result = subprocess.run(
+            [
+                gc,
+                "formula",
+                "show",
+                "mol-pr-babysit-repair",
+                "--city",
+                str(CITY_ROOT),
+                "--rig",
+                "d2b",
+                "--json",
+            ],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        compiled = json.loads(result.stdout)
+        self.assertTrue(compiled["ok"])
+        self.assertEqual(
+            {
+                (dep["step_id"], dep["depends_on_id"])
+                for dep in compiled["deps"]
+                if dep["step_id"].startswith("mol-pr-babysit-repair.")
+                and dep["depends_on_id"].startswith("mol-pr-babysit-repair.")
+            },
+            {
+                (
+                    "mol-pr-babysit-repair.repair",
+                    "mol-pr-babysit-repair.prepare-worktree",
+                ),
+                (
+                    "mol-pr-babysit-repair.review",
+                    "mol-pr-babysit-repair.repair",
+                ),
+                (
+                    "mol-pr-babysit-repair.validate-and-report",
+                    "mol-pr-babysit-repair.repair",
+                ),
+                (
+                    "mol-pr-babysit-repair.validate-and-report",
+                    "mol-pr-babysit-repair.review",
+                ),
+                (
+                    "mol-pr-babysit-repair.close-action",
+                    "mol-pr-babysit-repair.validate-and-report",
+                ),
+                (
+                    "mol-pr-babysit-repair.workflow-finalize",
+                    "mol-pr-babysit-repair.close-action",
+                ),
+            },
+        )
+
+    def test_repair_workflows_bind_identity_and_fail_closed(self):
+        prepare = PR_BABYSIT_REPAIR_PREPARE.read_text(encoding="utf-8")
+        validate = PR_BABYSIT_REPAIR_VALIDATE.read_text(encoding="utf-8")
+        prompt = (
+            PR_BABYSIT_ROOT
+            / "agents"
+            / "pr-babysitter"
+            / "prompt.template.md"
+        ).read_text(encoding="utf-8")
+        text = "\n".join((prepare, validate, prompt)).lower()
+        for marker in (
+            "github host",
+            "repository",
+            "pr number",
+            "base_ref",
+            "head_ref",
+            "observed_head_sha",
+            "action_id",
+            "generation",
+            "dirty",
+            "symlink",
+            "stale",
+            "contents write",
+            "pull requests read",
+            "operator-attested",
+            "untrusted data",
+            "explicitly addressed thread",
+            "make check",
+            "refs/heads/",
+        ):
+            self.assertIn(marker, text, marker)
+        for marker in (
+            "d2b) EXPECTED_BASE='v3'",
+            "city-source) EXPECTED_BASE='main'",
+            "recorded action worktree is missing",
+            "recorded action worktree is dirty",
+            "legacy or incomplete worktree provenance",
+            "action-scoped worktree path collision",
+            "remote pull-request head changed after observation",
+            "remote head is stale",
+            "push outcome is ambiguous",
+        ):
+            self.assertIn(marker.lower(), prepare.lower() + "\n" + validate.lower())
+        self.assertIn(
+            'git -C "$WORKTREE" push origin \\\n'
+            '    "HEAD:refs/heads/$HEAD_REF"',
+            validate,
+        )
+        self.assertIn(
+            'refs/heads/$HEAD_REF:refs/remotes/origin/$HEAD_REF',
+            prepare,
+        )
+        self.assertNotIn("fork_sha", prepare.lower())
+        self.assertNotIn("origin/v3", prepare.lower())
+        self.assertNotIn("owning source checkout is dirty", prepare.lower())
+        self.assertNotIn(".pr-babysit-state.json", validate)
+        self.assertIn('(cd "$WORKTREE" && make check)', validate)
+        for forbidden in (
+            "git merge",
+            "git rebase",
+            "--force",
+            "--force-with-lease",
+            "gh pr merge",
+            "approve workflow",
+            "create a replacement",
+        ):
+            self.assertNotIn(forbidden, prepare.lower() + "\n" + validate.lower())
+        self.assertIn(
+            "GH_TOKEN",
+            prepare,
+        )
+        self.assertIn(
+            "GITHUB_TOKEN",
+            prepare,
+        )
+
+    def test_dispatch_claims_before_idempotent_formula_and_blocks_watch(self):
+        root, env = self._repair_fixture("dispatch")
+        try:
+            handoff = self._run(env, "handoff", self._HANDOFF)
+            self.assertEqual(handoff.returncode, 0, handoff.stderr)
+            watch_id = self._json(handoff)["watch_id"]
+            dispatched = self._dispatch(
+                env,
+                watch_id,
+                generation=1,
+                head_sha="a" * 40,
+                action_kind="ci",
+                fingerprint="check failed",
+                addressed_thread_ids=["thread-1"],
+            )
+            self.assertEqual(dispatched.returncode, 0, dispatched.stderr)
+            result = self._json(dispatched)
+            action_id = result["action_id"]
+            records = json.loads((root / "beads.json").read_text())
+            action = next(record for record in records if record["id"] == action_id)
+            watch = next(record for record in records if record["id"] == watch_id)
+            self.assertEqual(action["metadata"]["claim_status"], "claimed")
+            self.assertEqual(action["metadata"]["formula_attached"], "true")
+            self.assertIn(action_id, watch["blocked_by"])
+            calls = json.loads((root / "gc-calls.json").read_text())
+            self.assertEqual(len(calls), 1)
+            self.assertEqual(
+                calls[0][:4],
+                ["formula", "cook", "mol-pr-babysit-repair", "--attach"],
+            )
+            self.assertEqual(calls[0][4], action_id)
+            dep_calls = [
+                call["argv"]
+                for call in json.loads((root / "calls.json").read_text())
+                if call["argv"] and call["argv"][0] == "dep"
+            ]
+            self.assertEqual(
+                dep_calls,
+                [["dep", action_id, "--blocks", watch_id]],
+            )
+
+            reused = self._dispatch(
+                env,
+                watch_id,
+                generation=1,
+                head_sha="a" * 40,
+                action_kind="ci",
+                fingerprint="CHECK   FAILED",
+                addressed_thread_ids=["thread-1"],
+            )
+            self.assertEqual(reused.returncode, 0, reused.stderr)
+            self.assertTrue(self._json(reused)["reused"])
+            self.assertEqual(
+                len(json.loads((root / "gc-calls.json").read_text())),
+                1,
+            )
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
+
+    def test_result_records_sha_check_and_threads_then_closes_action(self):
+        root, env = self._repair_fixture("result")
+        try:
+            handoff = self._run(env, "handoff", self._HANDOFF)
+            self.assertEqual(handoff.returncode, 0, handoff.stderr)
+            watch_id = self._json(handoff)["watch_id"]
+            action_id = self._complete(
+                env,
+                watch_id,
+                generation=1,
+                old_sha="a" * 40,
+                new_sha="b" * 40,
+                action_kind="review",
+                fingerprint="thread needs fix",
+            )
+            records = json.loads((root / "beads.json").read_text())
+            action = next(record for record in records if record["id"] == action_id)
+            watch = next(record for record in records if record["id"] == watch_id)
+            self.assertEqual(action["status"], "closed")
+            self.assertEqual(action["metadata"]["expected_old_sha"], "a" * 40)
+            self.assertEqual(action["metadata"]["pushed_sha"], "b" * 40)
+            self.assertEqual(action["metadata"]["make_check_result"], "passed")
+            self.assertEqual(
+                action["metadata"]["addressed_thread_ids"],
+                "thread-1",
+            )
+            self.assertEqual(watch["metadata"]["head_sha"], "b" * 40)
+            self.assertEqual(watch["metadata"]["state"], "watching")
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
+
+    def test_result_rejects_unclaimed_or_command_like_thread_ids(self):
+        root, env = self._repair_fixture("thread-fence")
+        try:
+            handoff = self._run(env, "handoff", self._HANDOFF)
+            self.assertEqual(handoff.returncode, 0, handoff.stderr)
+            watch_id = self._json(handoff)["watch_id"]
+            dispatched = self._dispatch(
+                env,
+                watch_id,
+                generation=1,
+                head_sha="a" * 40,
+                action_kind="review",
+                fingerprint="thread-fence",
+                addressed_thread_ids=["thread-1"],
+            )
+            self.assertEqual(dispatched.returncode, 0, dispatched.stderr)
+            action_id = self._json(dispatched)["action_id"]
+            for thread_id in ("thread-2", "$(touch marker)"):
+                result = self._run(
+                    env,
+                    "record-repair-result",
+                    {
+                        "watch_id": watch_id,
+                        "action_id": action_id,
+                        "generation": 1,
+                        "expected_old_sha": "a" * 40,
+                        "pushed_sha": "b" * 40,
+                        "validation_status": "passed",
+                        "make_check_result": "passed",
+                        "addressed_thread_ids": [thread_id],
+                    },
+                )
+                self.assertNotEqual(result.returncode, 0)
+            self.assertFalse((root / "marker").exists())
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
+
+    def test_attempt_budgets_survive_heads_and_reset_for_new_fingerprints(self):
+        root, env = self._repair_fixture("budgets")
+        try:
+            handoff = self._run(env, "handoff", self._HANDOFF)
+            self.assertEqual(handoff.returncode, 0, handoff.stderr)
+            watch_id = self._json(handoff)["watch_id"]
+            old_sha = "a" * 40
+            for generation, new_sha in (
+                (1, "b" * 40),
+                (2, "c" * 40),
+                (3, "d" * 40),
+            ):
+                self._complete(
+                    env,
+                    watch_id,
+                    generation=generation,
+                    old_sha=old_sha,
+                    new_sha=new_sha,
+                    action_kind="ci",
+                    fingerprint="same failing check",
+                )
+                old_sha = new_sha
+                state = self._json(self._run(env, "show", {"watch_id": watch_id}))
+                self.assertEqual(state["metadata"]["attempts"], str(generation))
+            exhausted = self._dispatch(
+                env,
+                watch_id,
+                generation=4,
+                head_sha=old_sha,
+                action_kind="ci",
+                fingerprint="same failing check",
+            )
+            self.assertNotEqual(exhausted.returncode, 0)
+            self.assertEqual(
+                self._json(exhausted)["error"]["code"],
+                "attempt-budget-exhausted",
+            )
+            state = self._json(self._run(env, "show", {"watch_id": watch_id}))
+            self.assertEqual(state["metadata"]["state"], "exhausted")
+            self.assertEqual(
+                len(json.loads((root / "gc-calls.json").read_text())),
+                3,
+            )
+
+            reset_root, reset_env = self._repair_fixture("fingerprint-reset")
+            try:
+                handoff = self._run(reset_env, "handoff", self._HANDOFF)
+                self.assertEqual(handoff.returncode, 0, handoff.stderr)
+                reset_watch = self._json(handoff)["watch_id"]
+                self._complete(
+                    reset_env,
+                    reset_watch,
+                    generation=1,
+                    old_sha="a" * 40,
+                    new_sha="b" * 40,
+                    action_kind="review",
+                    fingerprint="thread-one",
+                )
+                next_dispatch = self._dispatch(
+                    reset_env,
+                    reset_watch,
+                    generation=2,
+                    head_sha="b" * 40,
+                    action_kind="review",
+                    fingerprint="thread-two",
+                )
+                self.assertEqual(next_dispatch.returncode, 0, next_dispatch.stderr)
+                state = self._json(
+                    self._run(reset_env, "show", {"watch_id": reset_watch})
+                )
+                self.assertEqual(state["metadata"]["attempts"], "1")
+            finally:
+                shutil.rmtree(reset_root, ignore_errors=True)
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
+
+    def test_review_budget_is_two_across_new_heads(self):
+        root, env = self._repair_fixture("review-budget")
+        try:
+            handoff = self._run(env, "handoff", self._HANDOFF)
+            self.assertEqual(handoff.returncode, 0, handoff.stderr)
+            watch_id = self._json(handoff)["watch_id"]
+            self._complete(
+                env,
+                watch_id,
+                generation=1,
+                old_sha="a" * 40,
+                new_sha="b" * 40,
+                action_kind="review",
+                fingerprint="same review",
+            )
+            self._complete(
+                env,
+                watch_id,
+                generation=2,
+                old_sha="b" * 40,
+                new_sha="c" * 40,
+                action_kind="review",
+                fingerprint="same review",
+            )
+            exhausted = self._dispatch(
+                env,
+                watch_id,
+                generation=3,
+                head_sha="c" * 40,
+                action_kind="review",
+                fingerprint="same review",
+            )
+            self.assertNotEqual(exhausted.returncode, 0)
+            self.assertEqual(
+                self._json(exhausted)["error"]["code"],
+                "attempt-budget-exhausted",
+            )
+            state = self._json(self._run(env, "show", {"watch_id": watch_id}))
+            self.assertEqual(state["metadata"]["state"], "exhausted")
+            self.assertEqual(state["metadata"]["attempts"], "2")
+            self.assertEqual(
+                len(json.loads((root / "gc-calls.json").read_text())),
+                2,
+            )
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
+
+    def test_credential_coupling_and_ambiguous_push_fail_closed(self):
+        root, env = self._repair_fixture("credentials")
+        try:
+            handoff = self._run(env, "handoff", self._HANDOFF)
+            self.assertEqual(handoff.returncode, 0, handoff.stderr)
+            watch_id = self._json(handoff)["watch_id"]
+            coupled = self._dispatch(
+                env
+                | {
+                    "GH_TOKEN": "same-token",
+                    "COPILOT_REQUESTS_TOKEN": "same-token",
+                },
+                watch_id,
+                generation=1,
+                head_sha="a" * 40,
+                action_kind="ci",
+                fingerprint="coupled",
+            )
+            self.assertNotEqual(coupled.returncode, 0)
+            self.assertEqual(
+                self._json(coupled)["error"]["code"],
+                "credential-coupling",
+            )
+            self.assertEqual(
+                json.loads((root / "gc-calls.json").read_text()),
+                [],
+            )
+            records = json.loads((root / "beads.json").read_text())
+            self.assertEqual(len(records), 1)
+
+            dispatched = self._dispatch(
+                env,
+                watch_id,
+                generation=1,
+                head_sha="a" * 40,
+                action_kind="ci",
+                fingerprint="ambiguous",
+            )
+            self.assertEqual(dispatched.returncode, 0, dispatched.stderr)
+            action_id = self._json(dispatched)["action_id"]
+            recorded = self._run(
+                env,
+                "record-repair-result",
+                {
+                    "watch_id": watch_id,
+                    "action_id": action_id,
+                    "generation": 1,
+                    "expected_old_sha": "a" * 40,
+                    "pushed_sha": "b" * 40,
+                    "remote_head_sha": "c" * 40,
+                    "validation_status": "passed",
+                    "make_check_result": "passed",
+                },
+            )
+            self.assertEqual(recorded.returncode, 0, recorded.stderr)
+            state = self._json(self._run(env, "show", {"watch_id": watch_id}))
+            self.assertEqual(state["metadata"]["state"], "blocked")
+            self.assertEqual(
+                state["metadata"]["terminal_reason"],
+                "ambiguous-outcome",
+            )
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
+
+    def test_formula_attach_failure_blocks_without_dispatch_retry(self):
+        root, env = self._repair_fixture("formula-failure")
+        try:
+            handoff = self._run(env, "handoff", self._HANDOFF)
+            self.assertEqual(handoff.returncode, 0, handoff.stderr)
+            watch_id = self._json(handoff)["watch_id"]
+            failed = self._dispatch(
+                env | {"FAKE_GC_FAIL": "1"},
+                watch_id,
+                generation=1,
+                head_sha="a" * 40,
+                action_kind="ci",
+                fingerprint="formula failure",
+            )
+            self.assertNotEqual(failed.returncode, 0)
+            self.assertEqual(
+                self._json(failed)["error"]["code"],
+                "formula-attach",
+            )
+            state = self._json(self._run(env, "show", {"watch_id": watch_id}))
+            self.assertEqual(state["metadata"]["state"], "blocked")
+            self.assertEqual(
+                state["metadata"]["terminal_reason"],
+                "formula-attach-failed",
+            )
+            self.assertEqual(
+                len(json.loads((root / "gc-calls.json").read_text())),
+                1,
             )
         finally:
             shutil.rmtree(root, ignore_errors=True)

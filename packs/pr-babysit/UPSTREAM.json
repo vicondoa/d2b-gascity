@@ -75,6 +75,7 @@
     "Rename the skill to pr-babysit and keep only one target pull request.",
     "Keep snapshot-first ordering, current-head invalidation, and exact branch-currency evidence.",
     "Replace host skill calls and user questions with native-session handoff language.",
-    "Use only the caller-supplied state directory and one checkpoint per turn."
+    "Use only the caller-supplied state directory and one checkpoint per turn.",
+    "Add native bounded repair dispatch, least-privilege credential fencing, and safe SHA/thread result handling."
   ]
 }

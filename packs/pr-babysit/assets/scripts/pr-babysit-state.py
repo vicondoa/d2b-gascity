@@ -48,6 +48,8 @@ VALIDATION_STATUSES = {"passed", "failed", "not-run", "ambiguous"}
 AMBIGUOUS_REASON = "ambiguous-outcome"
 TIME_BUDGET_REASON = "time-budget-exhausted"
 BACKSTOP_REASON = "backstop-expired"
+ATTEMPT_LIMITS = {"ci": 3, "review": 2}
+REPAIR_FORMULA = "mol-pr-babysit-repair"
 ACTIVE_BUDGET = timedelta(hours=8)
 BACKSTOP_BUDGET = timedelta(days=3)
 DEFAULT_DUE_LIMIT = 32
@@ -58,6 +60,8 @@ WATCH_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 BEAD_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 ACTION_KIND_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,47}$")
 SAFE_REASON_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,95}$")
+SAFE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
+SAFE_GIT_REF_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]*$")
 SAFE_METADATA_KEYS = {
     "record_kind",
     "watch_id",
@@ -76,6 +80,7 @@ SAFE_METADATA_KEYS = {
     "merge_strategy",
     "head_ref",
     "head_sha",
+    "observed_head_sha",
     "posture",
     "target_posture",
     "state",
@@ -84,6 +89,10 @@ SAFE_METADATA_KEYS = {
     "last_snapshot_at",
     "action_kind",
     "action_fingerprint",
+    "action_id",
+    "attempt_key",
+    "attempt_limit",
+    "attempt_history",
     "claim_status",
     "attempts",
     "expected_old_head",
@@ -93,6 +102,18 @@ SAFE_METADATA_KEYS = {
     "pushed_sha",
     "last_pushed_sha",
     "validation_status",
+    "make_check_result",
+    "addressed_thread_ids",
+    "formula_attached",
+    "formula_root",
+    "blocker_emitted",
+    "provenance_version",
+    "worktree_provenance",
+    "worktree_head_sha",
+    "worktree_head_ref",
+    "worktree_base_ref",
+    "worktree_generation",
+    "worktree_action_id",
     "terminal_reason",
     "active_since",
     "backstop_at",
@@ -231,10 +252,128 @@ def normalize_fingerprint(value: Any) -> str:
     return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
 
 
+def normalize_action_kind(value: Any) -> str:
+    result = text_value(value, "action_kind").strip().lower()
+    result = re.sub(r"[\s_]+", "-", result)
+    if not ACTION_KIND_RE.fullmatch(result):
+        fail("action_kind is not a safe token")
+    return result
+
+
+def action_attempt_key(action_kind: str, fingerprint: str) -> str:
+    seed = "\x00".join((action_kind, fingerprint))
+    return hashlib.sha256(seed.encode("utf-8")).hexdigest()
+
+
+def action_attempt_limit(action_kind: str) -> int:
+    if action_kind == "review" or action_kind.startswith("review-"):
+        return ATTEMPT_LIMITS["review"]
+    return ATTEMPT_LIMITS["ci"]
+
+
+def parse_attempt_history(value: Any) -> dict[str, int]:
+    if value is None or value == "":
+        return {}
+    raw = text_value(value, "attempt_history")
+    history: dict[str, int] = {}
+    for entry in raw.split(","):
+        if not entry:
+            fail("attempt_history contains an empty entry", "corrupt-state")
+        key, separator, count = entry.partition(":")
+        if (
+            not separator
+            or not re.fullmatch(r"[0-9a-f]{64}", key)
+            or not re.fullmatch(r"[0-9]+", count)
+        ):
+            fail("attempt_history is malformed", "corrupt-state")
+        history[key] = int(count)
+    if len(history) > 128:
+        fail("attempt_history is too large", "corrupt-state")
+    return history
+
+
+def format_attempt_history(history: dict[str, int]) -> str:
+    if len(history) > 128:
+        fail("attempt_history is too large", "unsafe-state")
+    return ",".join(
+        f"{key}:{history[key]}"
+        for key in sorted(history)
+    )
+
+
+def safe_identifier(value: Any, field: str) -> str:
+    if not isinstance(value, str):
+        fail(f"{field} must be a safe identifier")
+    result = text_value(value, field)
+    if len(result) > 128 or not SAFE_ID_RE.fullmatch(result):
+        fail(f"{field} must be a safe identifier")
+    return result
+
+
+def safe_identifier_list(value: Any, field: str) -> str:
+    if value is None or value == "":
+        return ""
+    if isinstance(value, str):
+        values: list[Any] = [
+            item.strip() for item in value.split(",") if item.strip()
+        ]
+    elif isinstance(value, (list, tuple)):
+        values = list(value)
+    else:
+        fail(f"{field} must be a list of safe identifiers")
+    if len(values) > 128:
+        fail(f"{field} contains too many identifiers")
+    identifiers = sorted(
+        {
+            safe_identifier(item, field)
+            for item in values
+        }
+    )
+    if any(len(item) > 128 for item in identifiers):
+        fail(f"{field} contains an identifier that is too long")
+    return ",".join(identifiers)
+
+
+def require_repair_credentials() -> None:
+    copilot_values = (
+        os.environ.get("COPILOT_GITHUB_TOKEN", ""),
+        os.environ.get("COPILOT_REQUESTS_TOKEN", ""),
+        os.environ.get("COPILOT_TOKEN", ""),
+    )
+    for github_name in ("GH_TOKEN", "GITHUB_TOKEN"):
+        github_value = os.environ.get(github_name, "")
+        if github_value and github_value in copilot_values:
+            fail(
+                f"{github_name} must not reuse a Copilot token",
+                "credential-coupling",
+            )
+    attestation = os.environ.get(
+        "PR_BABYSIT_GITHUB_CAPABILITY_ATTESTED",
+        "",
+    )
+    if attestation != "contents-write,pull-requests-read":
+        fail(
+            "repair requires operator-attested Contents write and "
+            "Pull requests read capability",
+            "credential-capability",
+        )
+
+
+def check_repair_credentials() -> dict[str, Any]:
+    require_repair_credentials()
+    return {
+        "ok": True,
+        "action": "check-credentials",
+        "operator_attested": True,
+    }
+
+
 def validate_git_ref(value: Any, field: str) -> str:
     if not isinstance(value, str):
         fail(f"{field} is not a valid git ref")
     result = text_value(value, field)
+    if not SAFE_GIT_REF_RE.fullmatch(result):
+        fail(f"{field} is not a safe git ref")
     try:
         check = subprocess.run(
             ["git", "check-ref-format", "--branch", result],
@@ -414,6 +553,7 @@ def parse_identity(payload: dict[str, Any]) -> dict[str, Any]:
         "base_ref": base_ref,
         "head_ref": head_ref,
         "head_sha": current_sha,
+        "observed_head_sha": current_sha,
     }
     identity["pr_state"] = pr_state
     return identity
@@ -941,8 +1081,13 @@ def initial_watch_metadata(
         "generation": "1",
         "next_snapshot_at": next_snapshot_at,
         "last_snapshot_at": observed_at,
+        "observed_head_sha": identity["head_sha"],
         "action_kind": "",
         "action_fingerprint": "",
+        "action_id": "",
+        "attempt_key": "",
+        "attempt_limit": "",
+        "attempt_history": "",
         "claim_status": "none",
         "attempts": "0",
         "expected_old_head": "",
@@ -952,6 +1097,11 @@ def initial_watch_metadata(
         "pushed_sha": "",
         "last_pushed_sha": "",
         "validation_status": "",
+        "make_check_result": "",
+        "addressed_thread_ids": "",
+        "formula_attached": "",
+        "formula_root": "",
+        "blocker_emitted": "false",
         "terminal_reason": "",
         "active_since": active_since,
         "backstop_at": backstop_at,
@@ -999,6 +1149,26 @@ def create_watch(
     return True, False, issue, current_metadata
 
 
+def ensure_action_blocks_watch(action_id: str, watch_id: str) -> None:
+    result = run_beads(
+        [
+            "dep",
+            action_id,
+            "--blocks",
+            watch_id,
+        ]
+    )
+    if result.ok:
+        return
+    if re.search(
+        r"already[\s_-]+exists|duplicate|conflict",
+        result.stderr + "\n" + result.stdout,
+        flags=re.IGNORECASE,
+    ):
+        return
+    raise beads_error(result, "dependency", atomic_conflict=False)
+
+
 def action_metadata(
     watch_id: str,
     identity: dict[str, Any],
@@ -1006,15 +1176,31 @@ def action_metadata(
     action_kind: str,
     fingerprint: str,
     head_sha: str,
+    action_id: str,
 ) -> dict[str, str]:
     return {
         "record_kind": "action",
+        "provenance_version": "pr-repair-v1",
+        "action_id": action_id,
         "watch_id": watch_id,
         "rig": identity["rig"],
         "rig_prefix": identity["rig_prefix"],
+        "github_host": identity.get("github_host", ""),
+        "owner": identity.get("owner", ""),
+        "repository": identity.get("repository", ""),
+        "pr_number": str(identity.get("pr_number", "")),
+        "url": identity.get("url", ""),
+        "base_ref": identity.get("base_ref", ""),
+        "head_ref": identity.get("head_ref", ""),
+        "head_sha": head_sha,
+        "observed_head_sha": head_sha,
+        "posture": "target",
+        "target_posture": "target",
         "generation": str(generation),
         "action_kind": action_kind,
         "action_fingerprint": fingerprint,
+        "attempt_key": action_attempt_key(action_kind, fingerprint),
+        "attempt_limit": str(action_attempt_limit(action_kind)),
         "claim_status": "claimed",
         "attempts": "1",
         "expected_old_head": head_sha,
@@ -1024,6 +1210,17 @@ def action_metadata(
         "pushed_sha": "",
         "last_pushed_sha": "",
         "validation_status": "",
+        "make_check_result": "",
+        "addressed_thread_ids": "",
+        "formula_attached": "false",
+        "formula_root": "",
+        "blocker_emitted": "false",
+        "worktree_provenance": "",
+        "worktree_head_sha": "",
+        "worktree_head_ref": "",
+        "worktree_base_ref": "",
+        "worktree_generation": "",
+        "worktree_action_id": "",
         "terminal_reason": "",
     }
 
@@ -1038,10 +1235,27 @@ def create_action(
 ) -> tuple[bool, dict[str, Any], dict[str, str]]:
     expected_identity = (
         "record_kind",
+        "provenance_version",
+        "action_id",
         "watch_id",
         "generation",
+        "rig",
+        "rig_prefix",
+        "github_host",
+        "owner",
+        "repository",
+        "pr_number",
+        "url",
+        "base_ref",
+        "head_ref",
+        "head_sha",
+        "observed_head_sha",
+        "posture",
+        "target_posture",
         "action_kind",
         "action_fingerprint",
+        "attempt_key",
+        "attempt_limit",
         "expected_old_head",
     )
 
@@ -1059,6 +1273,7 @@ def create_action(
     if existing is not None:
         issue, current_metadata = existing
         validate_action_identity(current_metadata)
+        ensure_action_blocks_watch(action_id, watch_id)
         return False, issue, current_metadata
 
     title = f"PR babysit action {action_kind}-{fingerprint[:12]}"
@@ -1074,8 +1289,6 @@ def create_action(
             description,
             "--type",
             "task",
-            "--parent",
-            watch_id,
             "--metadata",
             canonical_json(metadata),
             "--silent",
@@ -1085,8 +1298,19 @@ def create_action(
     if not result.ok:
         raise beads_error(result, "action create", atomic_conflict=False)
     require_beads(result, "action create")
+    parent_result = run_beads(
+        [
+            "update",
+            action_id,
+            "--parent",
+            watch_id,
+            "--json",
+        ]
+    )
+    require_beads(parent_result, "action parent")
     issue, current_metadata = show_issue(action_id)
     validate_action_identity(current_metadata)
+    ensure_action_blocks_watch(action_id, watch_id)
     return True, issue, current_metadata
 
 
@@ -1101,18 +1325,27 @@ def clear_claim_updates(
     terminal_reason: str = "",
     last_pushed_sha: str = "",
     backstop_at: str | None = None,
+    attempt_key: str = "",
+    attempts: int = 0,
+    attempt_limit: str = "",
+    attempt_history: str = "",
 ) -> dict[str, str]:
     updates = {
         "state": state,
         "generation": str(generation),
         "head_sha": head_sha,
+        "observed_head_sha": head_sha,
         "last_snapshot_at": observed_at,
         "next_snapshot_at": next_snapshot_at,
         "active_since": active_since,
         "action_kind": "",
         "action_fingerprint": "",
+        "action_id": "",
+        "attempt_key": attempt_key,
+        "attempt_limit": attempt_limit,
+        "attempt_history": attempt_history,
         "claim_status": "none",
-        "attempts": "0",
+        "attempts": str(attempts),
         "expected_old_head": "",
         "expected_new_head": "",
         "expected_old_sha": "",
@@ -1120,6 +1353,11 @@ def clear_claim_updates(
         "pushed_sha": "",
         "last_pushed_sha": last_pushed_sha,
         "validation_status": "",
+        "make_check_result": "",
+        "addressed_thread_ids": "",
+        "formula_attached": "",
+        "formula_root": "",
+        "blocker_emitted": "false",
         "terminal_reason": terminal_reason,
     }
     if backstop_at is not None:
@@ -1264,6 +1502,10 @@ def _handoff_locked(
             ),
             last_pushed_sha=metadata.get("last_pushed_sha", ""),
             backstop_at=backstop_at,
+            attempt_key=metadata.get("attempt_key", ""),
+            attempts=attempts_from_metadata(metadata),
+            attempt_limit=metadata.get("attempt_limit", ""),
+            attempt_history=metadata.get("attempt_history", ""),
         )
         metadata_updates(
             watch_id,
@@ -1292,6 +1534,10 @@ def _handoff_locked(
             active_since=active_since,
             last_pushed_sha=metadata.get("last_pushed_sha", ""),
             backstop_at=backstop_at,
+            attempt_key=metadata.get("attempt_key", ""),
+            attempts=attempts_from_metadata(metadata),
+            attempt_limit=metadata.get("attempt_limit", ""),
+            attempt_history=metadata.get("attempt_history", ""),
         )
         metadata_updates(
             watch_id,
@@ -1937,13 +2183,12 @@ def _claim_action_locked(
     payload: dict[str, Any],
     watch_id: str,
 ) -> dict[str, Any]:
-    action_kind = text_value(
+    action_kind = normalize_action_kind(
         payload_value(payload, "action_kind", "kind"),
-        "action_kind",
-    ).lower()
-    if not ACTION_KIND_RE.fullmatch(action_kind):
-        fail("action_kind is not a safe token")
+    )
     fingerprint = normalize_fingerprint(payload_value(payload, "fingerprint"))
+    attempt_key = action_attempt_key(action_kind, fingerprint)
+    attempt_limit = action_attempt_limit(action_kind)
     generation_raw = payload_value(payload, "generation")
     head_raw = payload_value(
         payload,
@@ -1990,6 +2235,46 @@ def _claim_action_locked(
             }
         fail("watch already has an unconfirmed action claim", "already-claimed")
 
+    previous_key = metadata.get("attempt_key", "")
+    history = parse_attempt_history(metadata.get("attempt_history", ""))
+    if previous_key and previous_key not in history:
+        history[previous_key] = attempts
+    attempts = history.get(attempt_key, 0)
+    if attempts >= attempt_limit:
+        exhaustion_updates = {
+            "state": "exhausted",
+            "attempt_key": attempt_key,
+            "attempt_limit": str(attempt_limit),
+            "attempts": str(attempts),
+            "attempt_history": format_attempt_history(history),
+            "action_kind": "",
+            "action_fingerprint": "",
+            "action_id": "",
+            "claim_status": "exhausted",
+            "expected_old_head": "",
+            "expected_new_head": "",
+            "expected_old_sha": "",
+            "expected_new_sha": "",
+            "pushed_sha": "",
+            "validation_status": "",
+            "make_check_result": "",
+            "addressed_thread_ids": "",
+            "formula_attached": "",
+            "formula_root": "",
+            "blocker_emitted": "true",
+            "terminal_reason": "attempt-budget-exhausted",
+        }
+        metadata_updates(
+            watch_id,
+            exhaustion_updates,
+            status="blocked",
+            assignee="",
+        )
+        fail(
+            "repair attempt budget is exhausted",
+            "attempt-budget-exhausted",
+        )
+
     actor = f"pr-babysit-{action_id}"
     claim_result = run_beads(["update", watch_id, "--claim", "--json"], actor=actor)
     if not claim_result.ok:
@@ -2003,11 +2288,19 @@ def _claim_action_locked(
         {
             "rig": metadata.get("rig", ""),
             "rig_prefix": metadata.get("rig_prefix", ""),
+            "github_host": metadata.get("github_host", ""),
+            "owner": metadata.get("owner", ""),
+            "repository": metadata.get("repository", ""),
+            "pr_number": metadata.get("pr_number", ""),
+            "url": metadata.get("url", ""),
+            "base_ref": metadata.get("base_ref", ""),
+            "head_ref": metadata.get("head_ref", ""),
         },
         generation,
         action_kind,
         fingerprint,
         head_sha,
+        action_id,
     )
     created, _, _ = create_action(
         action_id,
@@ -2021,14 +2314,26 @@ def _claim_action_locked(
         "state": "repairing",
         "action_kind": action_kind,
         "action_fingerprint": fingerprint,
+        "action_id": action_id,
+        "attempt_key": attempt_key,
+        "attempt_limit": str(attempt_limit),
+        "attempt_history": format_attempt_history(
+            {**history, attempt_key: attempts + 1}
+        ),
         "claim_status": "claimed",
         "attempts": str(attempts + 1),
+        "observed_head_sha": head_sha,
         "expected_old_head": head_sha,
         "expected_new_head": "",
         "expected_old_sha": head_sha,
         "expected_new_sha": "",
         "pushed_sha": "",
         "validation_status": "",
+        "make_check_result": "",
+        "addressed_thread_ids": "",
+        "formula_attached": "false",
+        "formula_root": "",
+        "blocker_emitted": "false",
         "terminal_reason": "",
     }
     metadata_updates(watch_id, updates)
@@ -2043,6 +2348,228 @@ def _claim_action_locked(
         "reused": not created,
         "state": metadata["state"],
     }
+
+
+def formula_result_root(output: str) -> str:
+    if not output.strip():
+        return ""
+    parsed: Any = None
+    for line in reversed(output.splitlines()):
+        if not line.strip():
+            continue
+        try:
+            parsed = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        break
+    if isinstance(parsed, list):
+        parsed = parsed[-1] if parsed else None
+    if not isinstance(parsed, dict):
+        return ""
+    for key in ("root_id", "workflow_root_id", "id", "root"):
+        value = parsed.get(key)
+        if value:
+            try:
+                return validate_bead_id(value, key)
+            except StateError:
+                return ""
+    return ""
+
+
+def repair_formula_vars(
+    watch_metadata: dict[str, str],
+    action_metadata_value: dict[str, str],
+    action_id: str,
+    generation: int,
+    action_kind: str,
+    addressed_thread_ids: str,
+) -> list[tuple[str, str]]:
+    required = {
+        "rig": watch_metadata.get("rig", ""),
+        "github_host": watch_metadata.get("github_host", ""),
+        "owner": watch_metadata.get("owner", ""),
+        "repository": watch_metadata.get("repository", ""),
+        "url": watch_metadata.get("url", ""),
+        "pr_number": watch_metadata.get("pr_number", ""),
+        "base_ref": watch_metadata.get("base_ref", ""),
+        "head_ref": watch_metadata.get("head_ref", ""),
+        "observed_head_sha": watch_metadata.get("head_sha", ""),
+        "watch_id": action_metadata_value.get("watch_id", ""),
+        "action_id": action_id,
+        "generation": str(generation),
+        "action_kind": action_kind,
+        "fingerprint": watch_metadata.get("action_fingerprint", ""),
+        "addressed_thread_ids": addressed_thread_ids,
+    }
+    if any(
+        value == ""
+        for key, value in required.items()
+        if key != "addressed_thread_ids"
+    ):
+        fail("repair formula provenance is incomplete", "corrupt-state")
+    validate_watch_id(required["watch_id"])
+    validate_watch_id(required["action_id"])
+    parse_url(
+        required["url"],
+        required["owner"],
+        required["repository"],
+        integer_value(required["pr_number"], "pr_number"),
+    )
+    validate_git_ref(required["base_ref"], "base_ref")
+    validate_git_ref(required["head_ref"], "head_ref")
+    sha_value(required["observed_head_sha"], "observed_head_sha")
+    integer_value(required["generation"], "generation")
+    return sorted(required.items())
+
+
+def attach_repair_formula(
+    watch_metadata: dict[str, str],
+    action_metadata_value: dict[str, str],
+    action_id: str,
+    generation: int,
+    action_kind: str,
+    addressed_thread_ids: str,
+) -> str:
+    command = gc_command() + [
+        "formula",
+        "cook",
+        REPAIR_FORMULA,
+        "--attach",
+        action_id,
+    ]
+    for key, value in repair_formula_vars(
+        watch_metadata,
+        action_metadata_value,
+        action_id,
+        generation,
+        action_kind,
+        addressed_thread_ids,
+    ):
+        command.extend(["--var", f"{key}={value}"])
+    command.append("--json")
+    try:
+        result = subprocess.run(
+            command,
+            cwd=beads_cwd(),
+            env=os.environ.copy(),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError:
+        fail("could not execute repair formula", "formula-exec")
+    if result.returncode:
+        fail("repair formula attachment failed", "formula-attach")
+    return formula_result_root(result.stdout)
+
+
+def block_repair_dispatch(
+    watch_id: str,
+    action_id: str,
+    reason: str,
+) -> None:
+    metadata_updates(
+        action_id,
+        {
+            "claim_status": "blocked",
+            "terminal_reason": reason,
+        },
+        status="blocked",
+        assignee="",
+    )
+    metadata_updates(
+        watch_id,
+        {
+            "state": "blocked",
+            "claim_status": "blocked",
+            "terminal_reason": reason,
+            "blocker_emitted": "true",
+        },
+        status="blocked",
+        assignee="",
+    )
+
+
+def dispatch_repair(payload: dict[str, Any]) -> dict[str, Any]:
+    require_repair_credentials()
+    watch_id = validate_watch_id(payload_value(payload, "watch_id", "id"))
+    addressed_thread_ids = safe_identifier_list(
+        payload_value(
+            payload,
+            "addressed_thread_ids",
+            "thread_ids",
+            "addressed_threads",
+        ),
+        "addressed_thread_ids",
+    )
+    with watch_lock(watch_id):
+        claim_result = _claim_action_locked(payload, watch_id)
+        action_id = validate_watch_id(claim_result["action_id"])
+        _, watch_metadata = show_issue(watch_id)
+        _, action_metadata_value = show_issue(action_id)
+        action_context(
+            {
+                **payload,
+                "watch_id": watch_id,
+                "action_id": action_id,
+                "generation": generation_from_metadata(watch_metadata),
+            }
+        )
+        recorded_thread_ids = action_metadata_value.get(
+            "addressed_thread_ids",
+            "",
+        )
+        if (
+            recorded_thread_ids != addressed_thread_ids
+            and (
+                recorded_thread_ids
+                or action_metadata_value.get("formula_attached") == "true"
+            )
+        ):
+            fail(
+                "repair action thread scope does not match the claim",
+                "identity-mismatch",
+            )
+        if action_metadata_value.get("formula_attached") == "true":
+            return {
+                **claim_result,
+                "action": "dispatch-repair",
+                "formula_attached": True,
+            }
+        generation = generation_from_metadata(watch_metadata)
+        action_kind = normalize_action_kind(
+            payload_value(payload, "action_kind", "kind"),
+        )
+        try:
+            formula_root = attach_repair_formula(
+                watch_metadata,
+                action_metadata_value,
+                action_id,
+                generation,
+                action_kind,
+                addressed_thread_ids,
+            )
+        except StateError as error:
+            if error.code in {"formula-exec", "formula-attach"}:
+                block_repair_dispatch(
+                    watch_id,
+                    action_id,
+                    "formula-attach-failed",
+                )
+            raise
+        updates = {
+            "formula_attached": "true",
+            "formula_root": formula_root,
+            "addressed_thread_ids": addressed_thread_ids,
+        }
+        metadata_updates(action_id, updates)
+        return {
+            **claim_result,
+            "action": "dispatch-repair",
+            "formula_attached": True,
+            "formula_root": formula_root,
+            "addressed_thread_ids": addressed_thread_ids,
+        }
 
 
 def action_context(
@@ -2077,6 +2604,39 @@ def action_context(
     )
     if expected_action_id != action_id:
         fail("action ID does not match the active claim", "identity-mismatch")
+    if action_metadata_value.get("action_id") != action_id:
+        fail("action provenance has the wrong action ID", "identity-mismatch")
+    for key in (
+        "provenance_version",
+        "rig",
+        "rig_prefix",
+        "github_host",
+        "owner",
+        "repository",
+        "pr_number",
+        "url",
+        "base_ref",
+        "head_ref",
+        "head_sha",
+        "observed_head_sha",
+        "posture",
+        "target_posture",
+        "generation",
+        "action_kind",
+        "action_fingerprint",
+        "attempt_key",
+        "attempt_limit",
+    ):
+        if key == "provenance_version":
+            if action_metadata_value.get(key) != "pr-repair-v1":
+                fail("action provenance version is unsupported", "identity-mismatch")
+            continue
+        if action_metadata_value.get(key) != watch_metadata.get(key):
+            if key == "head_sha" and action_metadata_value.get(key) == watch_metadata.get(
+                "expected_old_head"
+            ):
+                continue
+            fail("action provenance does not match the watch", "identity-mismatch")
     return (
         watch_id,
         action_id,
@@ -2117,6 +2677,47 @@ def _record_repair_result_locked(payload: dict[str, Any]) -> dict[str, Any]:
     ).lower()
     if validation_status not in VALIDATION_STATUSES:
         fail("validation_status is not supported")
+    make_check_result = text_value(
+        payload_value(
+            payload,
+            "make_check_result",
+            "make_check",
+            "check_result",
+        )
+        or validation_status,
+        "make_check_result",
+    ).lower()
+    if make_check_result not in VALIDATION_STATUSES:
+        fail("make_check_result is not supported")
+    if validation_status == "passed" and make_check_result != "passed":
+        fail("a passed repair result requires a passed make check")
+    addressed_thread_ids = safe_identifier_list(
+        payload_value(
+            payload,
+            "addressed_thread_ids",
+            "thread_ids",
+            "addressed_threads",
+        ),
+        "addressed_thread_ids",
+    )
+    claimed_thread_ids = {
+        item
+        for item in action_metadata_value.get(
+            "addressed_thread_ids",
+            "",
+        ).split(",")
+        if item
+    }
+    reported_thread_ids = {
+        item
+        for item in addressed_thread_ids.split(",")
+        if item
+    }
+    if not reported_thread_ids.issubset(claimed_thread_ids):
+        fail(
+            "repair result addresses an unclaimed thread",
+            "identity-mismatch",
+        )
     if validation_status == "passed" and not pushed_sha:
         fail("a passed repair result requires pushed_sha")
     if (
@@ -2129,11 +2730,13 @@ def _record_repair_result_locked(payload: dict[str, Any]) -> dict[str, Any]:
         "remote_head_sha",
         required=False,
     )
+    if validation_status == "passed" and pushed_sha == expected_old_sha:
+        validation_status = "ambiguous"
     if remote_head and pushed_sha and remote_head != pushed_sha:
         validation_status = "ambiguous"
     action_updates = {
         "claim_status": "ambiguous"
-        if validation_status == "ambiguous"
+        if validation_status in {"ambiguous", "failed"}
         else "result-recorded",
         "expected_old_head": expected_old_sha,
         "expected_new_head": pushed_sha,
@@ -2142,6 +2745,15 @@ def _record_repair_result_locked(payload: dict[str, Any]) -> dict[str, Any]:
         "pushed_sha": pushed_sha,
         "last_pushed_sha": pushed_sha,
         "validation_status": validation_status,
+        "make_check_result": make_check_result,
+        "addressed_thread_ids": addressed_thread_ids,
+        "terminal_reason": (
+            AMBIGUOUS_REASON
+            if validation_status == "ambiguous"
+            else "repair-validation-failed"
+            if validation_status == "failed"
+            else ""
+        ),
     }
     metadata_updates(
         action_id,
@@ -2156,9 +2768,11 @@ def _record_repair_result_locked(payload: dict[str, Any]) -> dict[str, Any]:
         "pushed_sha": pushed_sha,
         "last_pushed_sha": pushed_sha,
         "validation_status": validation_status,
+        "make_check_result": make_check_result,
+        "addressed_thread_ids": addressed_thread_ids,
         "claim_status": (
             "blocked"
-            if validation_status == "ambiguous"
+            if validation_status in {"ambiguous", "failed"}
             else "result-recorded"
         ),
     }
@@ -2167,6 +2781,7 @@ def _record_repair_result_locked(payload: dict[str, Any]) -> dict[str, Any]:
             {
                 "state": "blocked",
                 "terminal_reason": AMBIGUOUS_REASON,
+                "blocker_emitted": "true",
             }
         )
         metadata_updates(watch_id, watch_updates, status="blocked", assignee="")
@@ -2175,6 +2790,7 @@ def _record_repair_result_locked(payload: dict[str, Any]) -> dict[str, Any]:
             {
                 "state": "blocked",
                 "terminal_reason": "repair-validation-failed",
+                "blocker_emitted": "true",
             }
         )
         metadata_updates(watch_id, watch_updates, status="blocked", assignee="")
@@ -2216,9 +2832,14 @@ def _confirm_action_locked(payload: dict[str, Any]) -> dict[str, Any]:
         "current_sha",
     )
     validation_status = action_metadata_value.get("validation_status", "")
+    make_check_result = action_metadata_value.get("make_check_result", "")
     pushed_sha = action_metadata_value.get("pushed_sha", "")
     expected_old_sha = action_metadata_value.get("expected_old_head", "")
-    if not pushed_sha or validation_status != "passed":
+    if (
+        not pushed_sha
+        or validation_status != "passed"
+        or make_check_result != "passed"
+    ):
         reason = (
             "repair-validation-failed"
             if validation_status == "failed"
@@ -2241,6 +2862,7 @@ def _confirm_action_locked(payload: dict[str, Any]) -> dict[str, Any]:
                 "state": "blocked",
                 "claim_status": "blocked",
                 "terminal_reason": reason,
+                "blocker_emitted": "true",
             },
             status="blocked",
             assignee="",
@@ -2270,6 +2892,7 @@ def _confirm_action_locked(payload: dict[str, Any]) -> dict[str, Any]:
                 "state": "blocked",
                 "claim_status": "blocked",
                 "terminal_reason": reason,
+                "blocker_emitted": "true",
             },
             status="blocked",
             assignee="",
@@ -2294,7 +2917,6 @@ def _confirm_action_locked(payload: dict[str, Any]) -> dict[str, Any]:
     )
     parse_time(observed_at, "observed_at")
     parse_time(next_snapshot_at, "next_snapshot_at")
-    close_issue(action_id, "confirmed")
     next_generation = generation + 1
     metadata_updates(
         watch_id,
@@ -2306,10 +2928,15 @@ def _confirm_action_locked(payload: dict[str, Any]) -> dict[str, Any]:
             next_snapshot_at=next_snapshot_at,
             active_since=observed_at,
             last_pushed_sha=pushed_sha,
+            attempt_key=watch_metadata.get("attempt_key", ""),
+            attempts=attempts_from_metadata(watch_metadata),
+            attempt_limit=watch_metadata.get("attempt_limit", ""),
+            attempt_history=watch_metadata.get("attempt_history", ""),
         ),
         status="open",
         assignee="",
     )
+    close_issue(action_id, "confirmed")
     _, metadata = show_issue(watch_id)
     return metadata_response(
         "confirm-action",
@@ -2525,6 +3152,7 @@ def _checkpoint_locked(
         "state": desired,
         "generation": str(next_generation),
         "head_sha": observed_head,
+        "observed_head_sha": observed_head,
         "last_snapshot_at": observed_at,
         "next_snapshot_at": next_snapshot_at,
         "active_since": active_since,
@@ -2540,6 +3168,7 @@ def _checkpoint_locked(
             {
                 "action_kind": "",
                 "action_fingerprint": "",
+                "action_id": "",
                 "claim_status": (
                     "blocked"
                     if desired == "blocked"
@@ -2553,6 +3182,15 @@ def _checkpoint_locked(
                 "expected_new_sha": "",
                 "pushed_sha": "",
                 "validation_status": "",
+                "make_check_result": "",
+                "addressed_thread_ids": "",
+                "formula_attached": "",
+                "formula_root": "",
+                "blocker_emitted": (
+                    "true"
+                    if desired in {"blocked", "exhausted"}
+                    else "false"
+                ),
             }
         )
     else:
@@ -2802,12 +3440,38 @@ def parse_cli_request(argv: list[str]) -> dict[str, Any]:
                 "generation",
                 "head_sha",
             ),
+            "dispatch-repair": (
+                "watch_id",
+                "action_kind",
+                "fingerprint",
+                "generation",
+                "head_sha",
+                "addressed_thread_ids",
+            ),
+            "dispatch": (
+                "watch_id",
+                "action_kind",
+                "fingerprint",
+                "generation",
+                "head_sha",
+                "addressed_thread_ids",
+            ),
+            "repair": (
+                "watch_id",
+                "action_kind",
+                "fingerprint",
+                "generation",
+                "head_sha",
+                "addressed_thread_ids",
+            ),
             "record-repair-result": (
                 "watch_id",
                 "action_id",
                 "expected_old_sha",
                 "pushed_sha",
                 "validation_status",
+                "make_check_result",
+                "addressed_thread_ids",
             ),
             "record": (
                 "watch_id",
@@ -2815,6 +3479,17 @@ def parse_cli_request(argv: list[str]) -> dict[str, Any]:
                 "expected_old_sha",
                 "pushed_sha",
                 "validation_status",
+                "make_check_result",
+                "addressed_thread_ids",
+            ),
+            "repair-result": (
+                "watch_id",
+                "action_id",
+                "expected_old_sha",
+                "pushed_sha",
+                "validation_status",
+                "make_check_result",
+                "addressed_thread_ids",
             ),
             "confirm-action": ("watch_id", "action_id", "current_sha",),
             "confirm": ("watch_id", "action_id", "current_sha",),
@@ -2884,6 +3559,8 @@ def parse_cli_request(argv: list[str]) -> dict[str, Any]:
 
 def dispatch(payload: dict[str, Any]) -> dict[str, Any]:
     action = payload.get("action")
+    if action in {"check-credentials", "credential-check", "check-capability"}:
+        return check_repair_credentials()
     if action == "handoff":
         return handoff(payload)
     if action in {
@@ -2900,7 +3577,9 @@ def dispatch(payload: dict[str, Any]) -> dict[str, Any]:
         return transition(payload)
     if action in {"claim-action", "claim"}:
         return claim_action(payload)
-    if action in {"record-repair-result", "record"}:
+    if action in {"dispatch-repair", "dispatch", "repair"}:
+        return dispatch_repair(payload)
+    if action in {"record-repair-result", "record", "repair-result"}:
         return record_repair_result(payload)
     if action in {"confirm-action", "confirm"}:
         return confirm_action(payload)
