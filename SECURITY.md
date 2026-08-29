@@ -50,12 +50,13 @@ those values outside this repository.
   Stock `builtin:codex` is an alternate provider only.
 - Keep Copilot Requests, d2b publication credentials, and Discord app
   credentials separate. Never set `GH_TOKEN` from a Copilot token.
-- The d2b formula gate stamps and re-reads `target=v3` and
-  `merge_strategy=pr` before inherited submission. Publication must refuse
-  direct merges and never merge or force-push. Host branch protection for
-  `v3` is defense-in-depth: it must require pull requests and apply to
-  administrators, but this repository does not claim that the current host
-  is already configured that way. Merge decisions remain human-owned.
+- Publication stamps and re-reads `merge_strategy=pr` plus the owning rig's
+  target: `v3` for d2b and `main` for city-source. The d2b Discord extension is
+  product-only. Publication must refuse direct merges and never merge or
+  force-push. Host branch protection for `v3` is defense-in-depth: it must
+  require pull requests and apply to administrators, but this repository does
+  not claim that the current host is already configured that way. Merge
+  decisions remain human-owned.
 
 ## Human-only clean reset
 

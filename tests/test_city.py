@@ -232,7 +232,7 @@ class RootPortableCityTests(unittest.TestCase):
             set(CORE_PACK_FILES),
         )
 
-    def test_city_has_one_pathless_d2b_rig_and_model_tiers(
+    def test_city_has_pathless_product_and_source_rigs_with_model_tiers(
         self,
     ) -> None:
         path = CITY_ROOT / "city.toml"
@@ -262,24 +262,60 @@ class RootPortableCityTests(unittest.TestCase):
         )
 
         rigs = config["rigs"]
-        self.assertEqual(len(rigs), 1)
+        self.assertEqual(len(rigs), 2)
+        rigs_by_name = {rig["name"]: rig for rig in rigs}
+        d2b_rig = rigs_by_name["d2b"]
         self.assertEqual(
-            {key: rigs[0][key] for key in ("name", "prefix", "default_branch")},
+            {
+                key: d2b_rig[key]
+                for key in ("name", "prefix", "default_branch")
+            },
             {"name": "d2b", "prefix": "d2b", "default_branch": "v3"},
         )
-        self.assertNotIn("path", rigs[0])
+        self.assertNotIn("path", d2b_rig)
         self.assertEqual(
-            rigs[0]["imports"]["gc"],
+            d2b_rig["imports"]["gc"],
             {
                 "source": GASCITY_ROLES_PACK_SOURCE,
                 "version": f"sha:{PACK_COMMIT}",
             },
         )
         self.assertEqual(
-            rigs[0]["formula_vars"],
+            d2b_rig["formula_vars"],
             {
                 "base_branch": "v3",
                 "target_branch": "v3",
+                "open_pr": "true",
+                "push": "true",
+                "drain_policy": "separate",
+            },
+        )
+        city_source_rig = rigs_by_name["city-source"]
+        self.assertEqual(
+            {
+                key: city_source_rig[key]
+                for key in ("name", "prefix", "default_branch")
+            },
+            {
+                "name": "city-source",
+                "prefix": "city",
+                "default_branch": "main",
+            },
+        )
+        self.assertTrue(city_source_rig["suspended_on_start"])
+        self.assertNotIn("path", city_source_rig)
+        self.assertEqual(
+            city_source_rig["imports"]["gc"],
+            {
+                "source": GASCITY_ROLES_PACK_SOURCE,
+                "version": f"sha:{PACK_COMMIT}",
+            },
+        )
+        self.assertEqual(
+            city_source_rig["formula_vars"],
+            {
+                "base_branch": "main",
+                "target_branch": "main",
                 "open_pr": "true",
                 "push": "true",
                 "drain_policy": "separate",
@@ -418,18 +454,19 @@ class RootPortableCityTests(unittest.TestCase):
             "publisher": "fast-worker",
         }
         patches = model_tiers["patches"]["agent"]
-        self.assertEqual(len(patches), len(expected_tiers))
-        self.assertEqual(
-            {
-                patch["name"]: patch["provider"]
-                for patch in patches
-                if patch["dir"] == "d2b"
-            },
-            expected_tiers,
-        )
+        self.assertEqual(len(patches), len(expected_tiers) * len(rigs))
+        for rig_name in ("d2b", "city-source"):
+            self.assertEqual(
+                {
+                    patch["name"]: patch["provider"]
+                    for patch in patches
+                    if patch["dir"] == rig_name
+                },
+                expected_tiers,
+            )
         self.assertEqual(
             {patch["dir"] for patch in patches},
-            {"d2b"},
+            {"d2b", "city-source"},
         )
         for marker in (
             "secret",
@@ -879,6 +916,7 @@ class RootPortableCityTests(unittest.TestCase):
             / "template-fragments"
             / "d2b-governance.template.md"
         ).read_text(encoding="utf-8")
+        fragment_policy = " ".join(fragment.lower().split())
         for marker in (
             "build-basic",
             "implement",
@@ -892,10 +930,12 @@ class RootPortableCityTests(unittest.TestCase):
             "never merge",
             "force-push",
             "human-owned",
+            "city-source",
+            "target=main",
         ):
-            self.assertIn(marker, fragment.lower())
+            self.assertIn(marker, fragment_policy)
         self.assertEqual(
-            " ".join(fragment.lower().split()).count("branch protection"),
+            fragment_policy.count("branch protection"),
             1,
         )
 
@@ -931,6 +971,11 @@ class RootPortableCityTests(unittest.TestCase):
             "product-local `.beads/`",
             "agent hooks",
             "gc init --file city.toml --preserve-existing --no-start .",
+            "city-source",
+            "--start-suspended",
+            "separate clone or worktree",
+            "never bind",
+            "metadata.target=main",
             GASCITY_PACK_SOURCE,
             GASCITY_ROLES_PACK_SOURCE,
             DISCORD_PACK_SOURCE,
@@ -1205,12 +1250,14 @@ class RootPortableCityTests(unittest.TestCase):
             try:
                 source = root / "source"
                 city = source / CITY_RELATIVE
+                city_source = root / "city-source"
                 rig = root / "rig"
                 home = root / "home"
                 gc_home = root / "gc-home"
                 git_config = root / "git-config"
                 tool_bin = root / "tools"
                 city.mkdir(parents=True)
+                city_source.mkdir()
                 rig.mkdir()
                 home.mkdir()
                 gc_home.mkdir()
@@ -1234,6 +1281,9 @@ class RootPortableCityTests(unittest.TestCase):
                     {
                         "HOME": str(home),
                         "GC_HOME": str(gc_home),
+                        "XDG_CACHE_HOME": str(home / ".cache"),
+                        "XDG_CONFIG_HOME": str(home / ".config"),
+                        "XDG_STATE_HOME": str(home / ".local" / "state"),
                         "GIT_CONFIG_NOSYSTEM": "1",
                         "GIT_CONFIG_GLOBAL": str(git_config),
                         "GIT_AUTHOR_NAME": "Gas City Test",
@@ -1243,8 +1293,13 @@ class RootPortableCityTests(unittest.TestCase):
                     }
                 )
                 _git(["init", "--quiet", "-b", "main"], cwd=source, env=env)
+                _git(
+                    ["init", "--quiet", "-b", "main"],
+                    cwd=city_source,
+                    env=env,
+                )
                 _git(["init", "--quiet", "-b", "v3"], cwd=rig, env=env)
-                for repository in (source, rig):
+                for repository in (source, city_source, rig):
                     _git(
                         [
                             "config",
@@ -1374,6 +1429,14 @@ class RootPortableCityTests(unittest.TestCase):
                 ):
                     self.assertIn(marker, post_message_help)
 
+                site = city / ".gc" / "site.toml"
+                site.write_text(
+                    site.read_text(encoding="utf-8")
+                    + "\n[[rig]]\n"
+                    + 'name = "city-source"\n'
+                    + f'path = "{city_source}"\n',
+                    encoding="utf-8",
+                )
                 run_gc(
                     "rig",
                     "add",
@@ -1382,6 +1445,21 @@ class RootPortableCityTests(unittest.TestCase):
                     "d2b",
                     "--city",
                     str(city),
+                )
+                run_gc(
+                    "rig",
+                    "add",
+                    str(city_source),
+                    "--name",
+                    "city-source",
+                    "--prefix",
+                    "ct" + re.sub(r"[^a-z0-9]", "", root.name.lower())[-8:],
+                    "--start-suspended",
+                    "--city",
+                    str(city),
+                )
+                (city / "city.toml").write_bytes(
+                    city_before[str(CITY_RELATIVE / "city.toml")]
                 )
                 run_gc("config", "show", "--city", str(city))
 
@@ -1713,15 +1791,16 @@ class RootPortableCityTests(unittest.TestCase):
                     "run-operator": "fast-worker",
                     "publisher": "fast-worker",
                 }
-                self.assertEqual(
-                    {
-                        agent.get("Name"): agent.get("Provider")
-                        for agent in agents
-                        if agent.get("Dir") == "d2b"
-                        and agent.get("Name") in expected_role_providers
-                    },
-                    expected_role_providers,
-                )
+                for rig_name in ("d2b", "city-source"):
+                    self.assertEqual(
+                        {
+                            agent.get("Name"): agent.get("Provider")
+                            for agent in agents
+                            if agent.get("Dir") == rig_name
+                            and agent.get("Name") in expected_role_providers
+                        },
+                        expected_role_providers,
+                    )
                 rendered_mayor_result = run_gc("prime", "mayor", "--strict")
                 self.assertEqual(rendered_mayor_result.stderr, "")
                 rendered_mayor = rendered_mayor_result.stdout
@@ -1733,29 +1812,42 @@ class RootPortableCityTests(unittest.TestCase):
                     "Your default state is idle",
                     "Gas City may show provider profiles as implicit agents",
                     "Do not implement source changes in the mayor session",
-                    "d2b governance",
+                    "Use the bound `d2b` rig",
+                    "Use the separately bound `city-source` rig",
+                    "repository governance",
                 ):
                     self.assertIn(marker, rendered_mayor_flat)
 
-                site = city / ".gc" / "site.toml"
                 self.assertTrue(site.is_file())
                 site_text = site.read_text(encoding="utf-8")
                 self.assertIn(f'path = "{rig}"', site_text)
                 self.assertIn('name = "d2b"', site_text)
+                self.assertIn(f'path = "{city_source}"', site_text)
+                self.assertIn('name = "city-source"', site_text)
+                self.assertTrue((city_source / ".beads").is_dir())
                 native_city = tomllib.loads(
                     (city / "city.toml").read_text(encoding="utf-8")
                 )
+                native_rigs = {
+                    rig_config["name"]: rig_config
+                    for rig_config in native_city["rigs"]
+                }
                 self.assertEqual(
                     {
-                        key: native_city["rigs"][0][key]
+                        key: native_rigs["d2b"][key]
                         for key in ("name", "prefix", "default_branch")
                     },
                     {"name": "d2b", "prefix": "d2b", "default_branch": "v3"},
                 )
-                self.assertNotIn("path", native_city["rigs"][0])
+                self.assertNotIn("path", native_rigs["d2b"])
+                self.assertNotIn("path", native_rigs["city-source"])
                 for relative in AUTHORED_FILES:
                     self.assertNotIn(
                         str(rig).encode(),
+                        (source / relative).read_bytes(),
+                    )
+                    self.assertNotIn(
+                        str(city_source).encode(),
                         (source / relative).read_bytes(),
                     )
                 self.assertFalse(

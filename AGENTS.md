@@ -2,10 +2,11 @@
 
 ## Repository boundary
 
-This private repository is the portable source for one Gas City city and one
-external `vicondoa/d2b` rig on branch `v3`. The only active city root is
-`cities/d2b-gascity`; the repository root is not a city and must not contain a
-repository-local d2b checkout or bind mount.
+This private repository is the portable source for one Gas City city, one
+external `vicondoa/d2b` product rig on branch `v3`, and one machine-local
+`city-source` clone for changes to this repository on `main`. The only active
+city root is `cities/d2b-gascity`; the repository root is not a city and must
+not contain a repository-local d2b checkout or bind mount.
 
 The plan in `docs/plans/` is the authority. Do not edit a plan to record
 progress. The separate private `vicondoa/gascity.nix` repository owns runtime
@@ -14,8 +15,9 @@ installation and host integration; do not recreate that boundary here.
 Native Gas City owns the supervisor, city registration, imported services,
 sessions, retries, and runtime state. Do not add a second lifecycle owner,
 custom wrapper, relay, publication helper, or delivery verification system.
-Bind the external checkout only with native `gc rig add`; its path belongs in
-live `.gc/site.toml`, not in portable source.
+Bind the external product checkout only with native `gc rig add`. Bind
+`city-source` to a separate clone or worktree, never the live nested city
+checkout. Both paths belong in live `.gc/site.toml`, not in portable source.
 
 ## Portable model tiers
 
@@ -27,7 +29,7 @@ aliases:
 - `solid-worker`: `gpt-5.6-luna`, max effort, `long_context`.
 - `fast-worker`: `gpt-5.6-luna`, medium effort, default context.
 
-The city maps the twelve imported d2b roles to those aliases. Stock
+The city maps the twelve imported roles for both rigs to those aliases. Stock
 `builtin:codex` remains an explicit alternate provider only. Do not add
 foreign providers, custom model adapters, or tier-specific routing machinery.
 
@@ -37,14 +39,16 @@ The adapted mayor is one city-local native session using the official
 `gc.mayor` skill and official Gas City formulas and roles. It plans, creates
 beads, dispatches work, monitors results, and waits when idle. It must never
 implement source changes, create replacement agents, merge, force-push, or
-bypass the d2b `v3` pull-request handoff.
+bypass either repository's pull-request handoff.
 
 Keep `d2b-governance` registered as a global fragment. Publication must
-persist and re-read `metadata.target=v3` and `metadata.merge_strategy=pr`,
-refuse direct merges, and accept only the pull-request handoff. Human owners
-make merge decisions. Host branch protection for `v3` is defense-in-depth:
-it must require pull requests and apply to administrators, but this
-repository does not claim the current host is already configured that way.
+persist and re-read `metadata.merge_strategy=pr` plus the repository-specific
+target: `v3` for `d2b`, `main` for `city-source`. Refuse direct merges and
+accept only the pull-request handoff. The d2b Discord formula extension is
+product-only. Human owners make merge decisions. Host branch protection for
+`v3` is defense-in-depth: it must require pull requests and apply to
+administrators, but this repository does not claim the current host is already
+configured that way.
 
 ## Source, host, and reset boundaries
 
@@ -63,7 +67,10 @@ root-city runtime paths. Set host-local `GC_CITY_PATH` to
 `cities/d2b-gascity`, initialize with
 `gc init --file city.toml --preserve-existing --no-start .` from that nested
 directory, bind the verified checkout with `gc rig add`, and re-import
-Discord through native commands.
+Discord through native commands. Create a separate d2b-gascity clone or
+worktree for `city-source`, seed only its machine-local site binding, and
+provision it with `gc rig add --start-suspended`. Never bind it to the live
+nested city checkout.
 
 ## Privacy and credentials
 

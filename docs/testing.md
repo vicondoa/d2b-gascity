@@ -13,17 +13,18 @@ The standard-library test module validates:
   repository-local d2b checkout or bind mount declaration;
 - the authored city files, reusable `packs/core-city` files, and absence of
   copied city, service, relay, binary, site, or runtime state;
-- the pathless d2b `v3` rig declaration and native `gc rig add` contract;
+- the pathless d2b `v3` and city-source `main` declarations, machine-local
+  bindings, and native `gc rig add` provisioning contract;
 - exactly four model tiers: `deep-thinker` with `gpt-5.6-sol` medium and
   `long_context`, `reviewer` with `grok-4.6` high and `long_context`,
   `solid-worker` with `gpt-5.6-luna` max and `long_context`, and
   `fast-worker` with `gpt-5.6-luna` medium and `default`;
-- all twelve role assignments, the single city-local mayor, stock
+- all twelve role assignments on both rigs, the single city-local mayor, stock
   `builtin:codex` availability, and the absence of excluded providers and
   workflows;
 - exact core, Beads, Gas City pack, and Discord import sources and pins;
-- the Gas City pack city and rig import, global fragments, `v3` formula
-  defaults, and full daemon settings;
+- the Gas City pack city and rig imports, global fragments, repository-specific
+  formula defaults, and full daemon settings;
 - the local d2b Discord formula extension and governance fragment policy;
 - Discord's native-service boundary and the absence of authored private
   mappings or credentials;
@@ -53,11 +54,11 @@ gc init --file city.toml --preserve-existing --no-start .
 
 It checks authored files, native import and configuration validation, the
 resolved d2b Discord resume formula and the Gas City pack `build-basic` and
-`implement` formulas, all twelve role-tier assignments, the documented
-Discord command contracts with native `gc discord ... --help`, binds an
-external fixture rig through `gc rig add`, and confirms that the rig path
-stays in ignored `.gc/site.toml` state. The smoke does not start services or
-use credentials.
+`implement` formulas, all twelve role-tier assignments on both rigs, and the
+documented Discord command contracts. It pre-seeds a separate city-source
+fixture in `.gc/site.toml`, provisions both fixture rigs through native
+`gc rig add`, and confirms that paths stay in ignored site state. The smoke
+does not start services or use credentials.
 
 ## CI inputs
 
@@ -136,8 +137,8 @@ external publication flow.
 
 ### PR-only publication
 
-- Verify d2b work persists and re-reads `metadata.target=v3` and
-  `metadata.merge_strategy=pr`.
+- Verify publication persists and re-reads `metadata.merge_strategy=pr` plus
+  `metadata.target=v3` for d2b or `metadata.target=main` for city-source.
 - Verify publication refuses direct merges and never merges or force-pushes.
 
 ## Documentation and reset evidence

@@ -114,8 +114,11 @@ Reset is human-only and fail-closed:
    requests, and product-local `.beads/`, `.gitignore`, and agent hooks.
 5. Remove only confirmed old root-city `.gc`, `.beads`, session, and worktree
    paths. Never traverse or delete the external checkout.
-6. Set host-local `GC_CITY_PATH`, run the nested `gc init`, bind the verified
-   source checkout, and confirm exactly one registered city and rig.
+6. Set host-local `GC_CITY_PATH` and run the nested `gc init`. Create a separate
+   d2b-gascity clone or worktree, seed its machine-local `city-source` binding
+   in `.gc/site.toml`, then provision `d2b` and `city-source` through native
+   `gc rig add`. Confirm one registered city with separate product and
+   city-source work surfaces.
 7. Re-import Discord with token input through `/dev/stdin`, least-privilege
    permissions, guild/channel/role allowlists, and the service exposure
    boundaries: public `discord-interactions`, protected `discord-admin`, and

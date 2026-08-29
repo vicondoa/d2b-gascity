@@ -81,8 +81,9 @@ The adapted city-local mayor is one always-on native session with
 beads, dispatch work, monitor results, and wait when idle.
 
 The mayor does not implement source changes, create replacement agents, merge,
-force-push, or bypass the d2b `v3` pull-request handoff. Human operators own
-publication and merge decisions. See
+force-push, or bypass either repository's pull-request handoff. It routes
+product work to `d2b`/`v3` and city source work to `city-source`/`main`.
+Human operators own publication and merge decisions. See
 [recipes/the-mayor.md](recipes/the-mayor.md).
 
 ## Initialize the nested city
@@ -102,20 +103,30 @@ The command preserves authored Pack v2 files and does not copy repository
 metadata or runtime state. Native Gas City owns lifecycle and per-user state;
 do not add a wrapper, second supervisor, or city-starting service.
 
-## Bind the external d2b rig
+## Bind the product and city-source rigs
 
-After verifying the external checkout identity, remotes, branch, worktree,
-and product-local bookkeeping, bind it while the nested city is selected:
+Create a separate `d2b-gascity` clone or worktree for automated source work;
+never bind `city-source` to the live nested city checkout itself. Seed that
+machine-local path in `.gc/site.toml`:
+
+```toml
+[[rig]]
+name = "city-source"
+path = "/path/to/separate/d2b-gascity-checkout"
+```
+
+Then provision both work surfaces through native Gas City:
 
 ```text
 gc rig add <verified-d2b-checkout> --name d2b --city .
+gc rig add <separate-d2b-gascity-checkout> \
+  --name city-source --start-suspended --city .
 gc status
 ```
 
-The path is written to live `.gc/site.toml` only. Never add a `path` field to
-the portable rig declaration and never recreate the checkout under this
-repository. The external checkout's `.beads/`, `.gitignore`, and agent hooks
-are product-local rig bookkeeping and must survive a clean reset.
+Paths stay in live `.gc/site.toml` only. The external d2b checkout's
+`.beads/`, `.gitignore`, and agent hooks are product-local rig bookkeeping and
+must survive a clean reset.
 
 ## Discord and publication boundaries
 
@@ -130,11 +141,12 @@ gateway remains private.
 Keep Copilot Requests, d2b publication authorization, and Discord app
 credentials separate. Never put credentials, token paths, identifiers,
 allowlists, mappings, or live payloads in this repository. Publication must
-persist and re-read `metadata.target=v3` and
-`metadata.merge_strategy=pr`, refuse direct merges, and never merge or
-force-push. Branch protection for `v3` is defense-in-depth and must require
-pull requests and apply to administrators; this repository does not claim
-that the current host is already configured that way.
+persist and re-read `metadata.merge_strategy=pr` plus
+`metadata.target=v3` for d2b or `metadata.target=main` for city-source,
+refuse direct merges, and never merge or force-push. Branch protection for
+`v3` is defense-in-depth and must require pull requests and apply to
+administrators; this repository does not claim that the current host is
+already configured that way.
 The policy requires pull requests and must apply to administrators.
 
 ## Clean reset
@@ -145,8 +157,9 @@ inventory active work and Discord apps, allowlists, maps, bindings, and
 launchers privately; stop and unregister the old root city; confirm and
 unmount the d2b bind mount without recursive deletion; remove only confirmed
 old root-city runtime paths; initialize the nested city; bind the verified
-external checkout; and re-import Discord. The runbook preserves the external
-checkout and its product-local `.beads/`, `.gitignore`, and hooks.
+external checkout and a separate city-source clone; and re-import Discord. The
+runbook preserves the external checkout and its product-local `.beads/`,
+`.gitignore`, and hooks.
 
 ## Verification and provenance
 
