@@ -149,6 +149,34 @@ administrators; this repository does not claim that the current host is
 already configured that way.
 The policy requires pull requests and must apply to administrators.
 
+## PR babysitting and human-gate recovery
+
+**Current status: blocked.** The pinned city composition does not import
+`ce-babysit-pr`, and it does not schedule
+`notify-on-human-gate-creation` or `renudge-stale-human-gates`. The required
+official Pack v2 export and compatible Gas City core revision are not available
+at the immutable revisions recorded in `cities/d2b-gascity/pack.toml` and
+`packs.lock`.
+
+Do not invoke the unavailable skill from this city or treat either named gate
+order as enabled. The existing native `gate-sweep` remains the only composed
+mechanical gate sweep. There is no local watcher, relay, wrapper, or scheduler
+to fill the upstream gap, and the city must not add one or copy the unavailable
+skill.
+
+The blocked upstream request is for target-only observation of an existing pull
+request and native creation and stale-gate notifications. If official
+immutable dependencies become available, any integration must preserve
+human-owned approval and merge decisions, report blockers explicitly, and never
+approve, merge, or force-push. Credentialed PR and gate behavior remains a
+host-owned smoke, not a claim made by this documentation.
+
+The d2b rig remains targeted to `v3` with `metadata.target=v3` and
+`metadata.merge_strategy=pr`. This city-source change is delivered to `main`
+with `metadata.target=main` through a pull request. Until the upstream
+prerequisite is published, repository checks can verify only this blocked
+composition and its no-local-watcher boundary.
+
 ## Clean reset
 
 The reset and bind-mount removal are human-only actions. Follow the

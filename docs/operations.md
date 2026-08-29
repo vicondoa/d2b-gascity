@@ -261,6 +261,35 @@ and keep merge decisions human-owned.
 Mappings and command sync are native pack state. The city does not copy or
 hard-code them.
 
+## PR babysitting and human-gate recovery
+
+### Upstream capability status
+
+The current immutable city composition is blocked on upstream packaging. The
+official Pack v2 export for `ce-babysit-pr` is not imported, and a compatible
+Gas City core revision providing the native human-gate orders is unavailable.
+Those are prerequisites, not capabilities supplied by this city.
+
+| Capability | Current status |
+| --- | --- |
+| `ce-babysit-pr` | Not imported; do not invoke it from this city. |
+| `notify-on-human-gate-creation` | Not scheduled by the pinned core. |
+| `renudge-stale-human-gates` | Not scheduled by the pinned core. |
+| `gate-sweep` | Existing native mechanical sweep remains composed. |
+
+Do not vendor or copy the missing skill, add a local watcher, relay, wrapper,
+or replacement scheduler, or treat documentation as proof of runtime
+babysitting or gate-recovery behavior. No local watcher or scheduler is
+supported. Any future integration must remain target-only, keep blockers
+visible, and preserve human-owned approval and merge decisions; it must never
+approve, merge, or force-push.
+
+The external d2b rig remains governed by `metadata.target=v3` and
+`metadata.merge_strategy=pr`. Changes to this city-source repository target
+`metadata.target=main` and are delivered through a pull request. Authenticated
+PR and notification smokes remain host-owned and must stop at preflight until
+the official export and compatible core revision are published and pinned.
+
 ## Chat bindings, ambient reads, and launchers
 
 Room/thread bindings and exact DM bindings route messages to named sessions:

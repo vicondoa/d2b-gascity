@@ -77,6 +77,38 @@ committed test code, fixtures, reports, prompts, responses, or pull-request
 payloads. The focused suite never starts Discord, Copilot, Codex, or an
 external publication flow.
 
+### PR babysitting
+
+This smoke is blocked because `ce-babysit-pr` is not imported by the current
+city composition. It is not a credential-free repository test, and no host
+setup can prove a capability that the pinned Pack v2 sources do not expose.
+Do not invoke the unavailable skill, create a replacement watcher, or treat
+this documentation as an implementation of target-only PR observation.
+
+When an official immutable Pack v2 export is published and pinned, the
+host-owned redacted smoke must use a disposable open PR and least-privilege
+GitHub access that cannot approve, merge, force-push, or administer the
+repository. It must verify explicit blocker reporting, target-only behavior,
+and human-owned approval and merge decisions. Record only redacted pass/fail
+notes outside this repository; never save PR identifiers, payloads, prompts,
+responses, logs, or watch state.
+
+### Human-gate recovery
+
+This smoke is blocked because `notify-on-human-gate-creation` and
+`renudge-stale-human-gates` are not scheduled by the pinned Gas City core.
+The existing `gate-sweep` is only the native mechanical sweep and does not
+provide the missing notification behavior. Do not create a local watcher,
+relay, scheduler, or delivery verifier to fill the gap.
+
+After a compatible immutable core revision is available, a host-owned
+redacted smoke may use disposable Beads and notification fixtures to verify
+creation notification, interval-bounded stale re-notification, failed-send
+retry, resolution stop, and restart recovery from durable state. Until then,
+stop at preflight and do not claim those behaviors are available. Keep all
+recipient mappings, gate identifiers, notification bodies, runtime state, and
+delivery evidence host-local.
+
 ### Gas City pack
 
 - Confirm native `gc status` shows the `gc.mayor` skill path and d2b rig

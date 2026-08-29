@@ -1112,6 +1112,60 @@ class RootPortableCityTests(unittest.TestCase):
         ):
             self.assertNotIn(marker, docs.lower())
 
+    def test_docs_record_blocked_babysitting_and_gate_recovery(
+        self,
+    ) -> None:
+        documents = {
+            relative: (ROOT / relative).read_text(encoding="utf-8")
+            for relative in (
+                "README.md",
+                "docs/operations.md",
+                "docs/testing.md",
+            )
+        }
+        docs_flat = " ".join("\n".join(documents.values()).lower().split())
+        for marker in (
+            "`ce-babysit-pr`",
+            "official pack v2 export",
+            "compatible gas city core revision",
+            "not imported",
+            "not scheduled",
+            "existing native `gate-sweep`",
+            "target-only",
+            "metadata.target=v3",
+            "metadata.merge_strategy=pr",
+            "no local watcher",
+            "human-owned",
+            "never approve",
+            "force-push",
+        ):
+            self.assertIn(marker, docs_flat)
+        self.assertIn(
+            "`ce-babysit-pr` is not imported",
+            documents["docs/testing.md"].lower(),
+        )
+        self.assertIn(
+            "`notify-on-human-gate-creation`",
+            documents["docs/testing.md"].lower(),
+        )
+        self.assertIn(
+            "`renudge-stale-human-gates`",
+            documents["docs/testing.md"].lower(),
+        )
+        self.assertIn(
+            "are not scheduled by the pinned gas city core",
+            documents["docs/testing.md"].lower(),
+        )
+        for marker in (
+            "/ce-babysit-pr ",
+            "the imported official `ce-babysit-pr` skill",
+            "official imported `ce-babysit-pr` skill",
+            "schedules both human-gate recovery orders",
+            "the selected gas city core schedules both",
+            "native supervisor exec orders",
+        ):
+            self.assertNotIn(marker, docs_flat)
+
     def test_discord_and_gascity_pack_are_enabled_and_pinned(self) -> None:
         pack = tomllib.loads(
             (CITY_ROOT / "pack.toml").read_text(encoding="utf-8")
