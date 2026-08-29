@@ -14,9 +14,15 @@ import unittest
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-PACK_COMMIT = "5d2a9d023edbb9ba24fdcff554e89fc3d7da72fe"
-SLACK_PACK_SOURCE = (
-    "https://github.com/gastownhall/gascity-packs/tree/main/slack-full"
+PACK_COMMIT = "9f98ea4e1974cb49d18cd0c453eb81b2370cca84"
+GASCITY_PACK_SOURCE = (
+    "https://github.com/gastownhall/gascity-packs/tree/main/gascity"
+)
+GASCITY_ROLES_PACK_SOURCE = (
+    "https://github.com/gastownhall/gascity-packs/tree/main/gascity/roles"
+)
+DISCORD_PACK_SOURCE = (
+    "https://github.com/gastownhall/gascity-packs/tree/main/discord"
 )
 GASCITY_COMMIT = "f895c0ff47d6ee9334ed282a416387eb5b084d24"
 GASCITY_VERSION = "1.4.1"
@@ -35,8 +41,10 @@ AUTHORED_FILES = (
     "city.toml",
     "pack.toml",
     "packs.lock",
-    "assets/workflows/do-work/prepare-worktree.md",
-    "assets/workflows/build-base/publish.md",
+    "formulas/mol-d2b-discord-fix-issue.toml",
+    "template-fragments/d2b-governance.template.md",
+    "agents/mayor/agent.toml",
+    "agents/mayor/prompt.template.md",
 )
 RUNTIME_PATHS = (
     ".gc",
@@ -46,6 +54,8 @@ RUNTIME_PATHS = (
     ".state",
     "run",
 )
+
+
 def _git(command: list[str], *, cwd: pathlib.Path, env: dict[str, str]) -> None:
     result = subprocess.run(
         ["git", *command],
@@ -177,8 +187,16 @@ class RootPortableCityTests(unittest.TestCase):
             "worktree-producer-inventory.json",
         ):
             self.assertFalse((ROOT / relative).exists(), relative)
+        self.assertEqual(
+            {path.name for path in (ROOT / "formulas").glob("*.toml")},
+            {
+                pathlib.Path(relative).name
+                for relative in AUTHORED_FILES
+                if relative.startswith("formulas/")
+            },
+        )
 
-    def test_city_has_one_pathless_d2b_rig_and_stock_codex_provider(
+    def test_city_has_one_pathless_d2b_rig_and_stock_providers(
         self,
     ) -> None:
         path = ROOT / "city.toml"
@@ -187,7 +205,18 @@ class RootPortableCityTests(unittest.TestCase):
 
         self.assertNotIn("api", config)
         self.assertNotIn("suspended_on_start", config)
-        self.assertNotIn("session", text.lower())
+        self.assertNotIn("[[session]]", text.lower())
+        self.assertNotIn("[session]", text.lower())
+        self.assertEqual(
+            config.get("named_session"),
+            [
+                {
+                    "template": "mayor",
+                    "scope": "city",
+                    "mode": "always",
+                }
+            ],
+        )
 
         rigs = config["rigs"]
         self.assertEqual(len(rigs), 1)
@@ -197,73 +226,111 @@ class RootPortableCityTests(unittest.TestCase):
         )
         self.assertNotIn("path", rigs[0])
         self.assertEqual(
-            rigs[0]["imports"]["roles"],
+            rigs[0]["imports"]["gc"],
             {
-                "source": (
-                    "https://github.com/gastownhall/"
-                    "gascity-packs/tree/main/gascity/roles"
-                ),
+                "source": GASCITY_ROLES_PACK_SOURCE,
                 "version": f"sha:{PACK_COMMIT}",
+            },
+        )
+        self.assertEqual(
+            rigs[0]["formula_vars"],
+            {
+                "base_branch": "v3",
+                "target_branch": "v3",
+                "open_pr": "true",
+                "push": "true",
+                "drain_policy": "separate",
             },
         )
 
         self.assertEqual(
             set(config["providers"]),
-            {"codex"},
+            {"copilot-planning-grok", "copilot-code-luna", "codex"},
         )
         self.assertEqual(
             config["workspace"],
-            {"name": "d2b-gascity", "provider": "codex"},
+            {
+                "provider": "copilot-planning-grok",
+                "global_fragments": [
+                    "command-glossary",
+                    "operational-awareness",
+                    "discord-v0",
+                    "d2b-governance",
+                ],
+            },
         )
-        provider = config["providers"]["codex"]
-        self.assertEqual(provider["base"], "builtin:codex")
-        self.assertEqual(provider["option_defaults"], {"model": ""})
+        expected_args = {
+            "copilot-planning-grok": [
+                "--yolo",
+                "--model",
+                "grok-4.6",
+                "--context",
+                "long_context",
+                "--effort",
+                "high",
+            ],
+            "copilot-code-luna": [
+                "--yolo",
+                "--model",
+                "gpt-5.6-luna",
+                "--context",
+                "default",
+                "--effort",
+                "max",
+            ],
+        }
+        for name, args in expected_args.items():
+            provider = config["providers"][name]
+            self.assertEqual(provider["base"], "builtin:copilot")
+            self.assertEqual(provider["args"], args)
+            for key in ("command", "env", "option_defaults"):
+                self.assertNotIn(key, provider)
+        codex = config["providers"]["codex"]
+        self.assertEqual(codex["base"], "builtin:codex")
+        self.assertEqual(codex["ready_delay_ms"], 0)
+        self.assertEqual(codex["option_defaults"], {"model": ""})
         for key in ("args", "command", "env"):
-            self.assertNotIn(key, provider)
+            self.assertNotIn(key, codex)
         for marker in (
-            "builtin:copilot",
             "COPILOT_GITHUB_TOKEN",
             "GH_TOKEN",
-            "--model",
-            "gpt-",
-            "grok-",
         ):
             self.assertNotIn(marker, text)
 
-        patches = config["patches"]
         self.assertEqual(
-            patches["rigs"],
-            [
-                {
-                    "name": "d2b",
-                    "formula_vars": {
-                        "base_branch": "v3",
-                        "base_ref": "origin/v3",
-                    },
-                }
-            ],
+            config["patches"],
+            {
+                "agent": [
+                    {
+                        "dir": "d2b",
+                        "name": "implementation-worker",
+                        "provider": "copilot-code-luna",
+                    }
+                ]
+            },
         )
+        for marker in (
+            "secret",
+            "token",
+            "guild",
+            "channel",
+            "role-allowlist",
+            "mapping",
+            "service",
+            "relay",
+        ):
+            self.assertNotIn(marker, text.lower())
+        self.assertIn("/gascity/roles", text)
+        self.assertNotRegex(text.lower(), r"role[-_]id")
         self.assertEqual(
-            patches["agent"],
-            [
-                {
-                    "dir": "d2b",
-                    "name": name,
-                    "provider": "codex",
-                }
-                for name in (
-                    "ce-pr-comment-resolver",
-                    "ce-work",
-                    "implementation-worker",
-                    "publisher",
-                )
-            ],
-        )
-        self.assertTrue(
-            all(
-                set(patch) <= {"dir", "name", "provider"}
-                for patch in patches["agent"]
-            )
+            config["daemon"],
+            {
+                "patrol_interval": "30s",
+                "max_restarts": 5,
+                "restart_window": "1h",
+                "shutdown_timeout": "5s",
+                "formula_v2": True,
+            },
         )
 
     def test_city_has_no_obsolete_routing_or_delivery_verification(self) -> None:
@@ -273,12 +340,13 @@ class RootPortableCityTests(unittest.TestCase):
         ).lower()
         for marker in (
             "api",
-            "session",
             "acp",
             "deployment-verification",
             "delivery-verification",
         ):
             self.assertNotIn(marker, text)
+        self.assertNotIn("[[session]]", text)
+        self.assertNotIn("[session]", text)
 
     def test_pack_pins_canonical_sources_and_uses_imported_services(
         self,
@@ -293,40 +361,57 @@ class RootPortableCityTests(unittest.TestCase):
             {
                 "core": f"sha:{GASCITY_COMMIT}",
                 "bd": f"sha:{GASCITY_COMMIT}",
-                "compound-engineering": f"sha:{PACK_COMMIT}",
+                "gc": f"sha:{PACK_COMMIT}",
                 "discord": f"sha:{PACK_COMMIT}",
-                "slack-full": f"sha:{PACK_COMMIT}",
             },
         )
         self.assertEqual(
-            pack["imports"]["slack-full"],
-            {"source": SLACK_PACK_SOURCE, "version": f"sha:{PACK_COMMIT}"},
+            {
+                name: import_config["source"]
+                for name, import_config in pack["imports"].items()
+            },
+            {
+                "core": (
+                    "https://github.com/gastownhall/"
+                    "gascity.git//internal/bootstrap/packs/core"
+                ),
+                "bd": (
+                    "https://github.com/gastownhall/"
+                    "gascity.git//examples/bd"
+                ),
+                "gc": GASCITY_PACK_SOURCE,
+                "discord": DISCORD_PACK_SOURCE,
+            },
+        )
+        self.assertEqual(
+            pack["imports"]["gc"],
+            {"source": GASCITY_PACK_SOURCE, "version": f"sha:{PACK_COMMIT}"},
+        )
+        self.assertEqual(
+            pack["imports"]["discord"],
+            {"source": DISCORD_PACK_SOURCE, "version": f"sha:{PACK_COMMIT}"},
         )
 
-        self.assertNotIn("service", pack)
+        for key in ("service", "services", "relay", "mappings"):
+            self.assertNotIn(key, pack)
         for relative in (
-            "slack-full",
-            "gc-slack-adapter",
-            "gc-slack-cli",
+            "services",
+            "relay",
+            "discord",
+            "discord-interactions",
+            "discord-admin",
+            "discord-gateway",
+            "gc-discord-adapter",
+            "gc-discord-cli",
         ):
             self.assertFalse((ROOT / relative).exists(), relative)
 
-    def test_lock_and_v3_workflow_shadows_are_pinned(self) -> None:
+    def test_lock_pins_exact_sources(self) -> None:
         lock = tomllib.loads((ROOT / "packs.lock").read_text(encoding="utf-8"))
         expected = {
-            (
-                "https://github.com/gastownhall/"
-                "gascity-packs/tree/main/compound-engineering"
-            ): PACK_COMMIT,
-            (
-                "https://github.com/gastownhall/"
-                "gascity-packs/tree/main/discord"
-            ): PACK_COMMIT,
-            SLACK_PACK_SOURCE: PACK_COMMIT,
-            (
-                "https://github.com/gastownhall/"
-                "gascity-packs/tree/main/gascity/roles"
-            ): PACK_COMMIT,
+            GASCITY_PACK_SOURCE: PACK_COMMIT,
+            GASCITY_ROLES_PACK_SOURCE: PACK_COMMIT,
+            DISCORD_PACK_SOURCE: PACK_COMMIT,
             (
                 "https://github.com/gastownhall/"
                 "gascity.git//examples/bd"
@@ -341,30 +426,197 @@ class RootPortableCityTests(unittest.TestCase):
             self.assertEqual(lock["packs"][source]["version"], f"sha:{commit}")
             self.assertEqual(lock["packs"][source]["commit"], commit)
 
-        worktree = (
-            ROOT / "assets/workflows/do-work/prepare-worktree.md"
-        ).read_text(encoding="utf-8")
-        publish = (
-            ROOT / "assets/workflows/build-base/publish.md"
-        ).read_text(encoding="utf-8")
-        self.assertIn("git fetch --prune origin v3", worktree)
-        self.assertIn('git worktree add "$WORKTREE" --detach origin/v3', worktree)
-        self.assertIn("gc.publication.base_sha", worktree)
-        self.assertNotIn("DEFAULT_BRANCH", worktree)
+    def test_local_formula_extensions_and_governance_fragment(self) -> None:
+        formula_path = ROOT / "formulas" / "mol-d2b-discord-fix-issue.toml"
+        formula = tomllib.loads(formula_path.read_text(encoding="utf-8"))
+        self.assertEqual(
+            set(formula),
+            {"formula", "extends", "steps"},
+        )
+        self.assertEqual(formula["formula"], "mol-d2b-discord-fix-issue")
+        self.assertEqual(formula["extends"], ["mol-discord-fix-issue"])
+        self.assertEqual(len(formula["steps"]), 1)
+        step = formula["steps"][0]
+        self.assertEqual(step["id"], "workspace-setup")
+        self.assertEqual(step["needs"], ["load-context"])
+        description = step["description"]
         for marker in (
-            "gc.publication.base_ref",
-            "gc.publication.base_sha",
-            "vicondoa/d2b",
-            "v3",
-            "push",
-            "open_pr",
-            "fail closed",
+            "if ! git fetch --prune origin '+refs/heads/*:refs/remotes/origin/*'; then",
+            "git fetch --prune origin '+refs/heads/*:refs/remotes/origin/*'",
+            'git show-ref --verify --quiet "refs/remotes/origin/v3"',
+            "metadata.work_dir",
+            "metadata.branch",
+            "metadata.base_ref",
+            "metadata.fork_sha",
+            "RECORDED_WORKTREE",
+            "RECORDED_BRANCH",
+            'if [ "$BASE_REF" != "origin/v3" ] || [ -z "$FORK_SHA" ]',
+            "legacy or missing extension metadata",
+            "Recovery:",
+            'git show-ref --verify --quiet "refs/heads/$BRANCH"',
+            'git show-ref --verify --quiet "refs/remotes/origin/$BRANCH"',
+            'if [ -n "$RECORDED_WORKTREE" ] && [ -d "$RECORDED_WORKTREE" ]',
+            'if [ -e "$WORKTREE_PATH" ] || [ -L "$WORKTREE_PATH" ]',
+            'git worktree add "$WORKTREE_PATH" "$BRANCH"',
+            'git worktree add --track -b "$BRANCH" "$WORKTREE_PATH" "origin/$BRANCH"',
+            'git worktree add "$WORKTREE_PATH" --detach origin/v3',
+            'gc bd update {{issue}} --set-metadata work_dir="$WORKTREE"',
+            "WORKTREE_RECREATED=1",
+            "git branch --show-current",
+            "recreated worktree is on",
+            'git checkout --track -b "$BRANCH" "origin/$BRANCH"',
+            "no local or origin branch exists",
+            'git status --porcelain',
+            'git cat-file -e "$FORK_SHA^{commit}"',
+            'git merge-base --is-ancestor "$FORK_SHA" HEAD',
+            'git merge-base --is-ancestor "$FORK_SHA" origin/v3',
+            "not a commit in this repository",
+            "not an ancestor of the recorded branch HEAD",
+            "not an ancestor of current origin/v3",
+            "establish a verified prior origin/v3 base",
+            "git rebase --rebase-merges --reapply-cherry-picks --empty=stop origin/v3",
+            "git merge-base --is-ancestor origin/v3 HEAD",
+            "--set-metadata base_ref=origin/v3",
+            "--set-metadata fork_sha=",
+            "Prior work remains intact",
         ):
-            self.assertIn(marker, publish)
-        self.assertIn("never merge", publish.lower())
-        self.assertIn("never force-push", publish.lower())
+            self.assertIn(marker, description)
+        self.assertNotIn(
+            "recorded worktree does not exist",
+            description,
+        )
+        self.assertLess(
+            description.index('if [ "$BASE_REF" != "origin/v3" ]'),
+            description.index("WORKTREE_RECREATED=0"),
+        )
+        collision_index = description.index(
+            'if [ -e "$WORKTREE_PATH" ] || [ -L "$WORKTREE_PATH" ]'
+        )
+        local_worktree_index = description.index(
+            'git worktree add "$WORKTREE_PATH" "$BRANCH"'
+        )
+        remote_worktree_index = description.index(
+            'git worktree add --track -b "$BRANCH" "$WORKTREE_PATH" "origin/$BRANCH"'
+        )
+        detached_worktree_index = description.index(
+            'git worktree add "$WORKTREE_PATH" --detach origin/v3'
+        )
+        for worktree_add_index in (
+            local_worktree_index,
+            remote_worktree_index,
+            detached_worktree_index,
+        ):
+            self.assertLess(collision_index, worktree_add_index)
+        self.assertLess(local_worktree_index, detached_worktree_index)
+        self.assertLess(remote_worktree_index, detached_worktree_index)
+        worktree_metadata_index = description.index(
+            'gc bd update {{issue}} --set-metadata work_dir="$WORKTREE"'
+        )
+        self.assertLess(
+            description.index("WORKTREE_RECREATED=1"),
+            worktree_metadata_index,
+        )
+        self.assertLess(local_worktree_index, worktree_metadata_index)
+        self.assertLess(remote_worktree_index, worktree_metadata_index)
+        self.assertLess(detached_worktree_index, worktree_metadata_index)
+        self.assertLess(
+            description.index('git status --porcelain'),
+            description.index('git checkout "$BRANCH"'),
+        )
+        self.assertLess(
+            description.index('if [ "$WORKTREE_RECREATED" = "1" ]'),
+            description.index('git checkout "$BRANCH"'),
+        )
+        self.assertLess(
+            description.index('git cat-file -e "$FORK_SHA^{commit}"'),
+            description.index(
+                "git rebase --rebase-merges "
+                "--reapply-cherry-picks --empty=stop origin/v3"
+            ),
+        )
+        self.assertLess(
+            description.index('git merge-base --is-ancestor "$FORK_SHA" HEAD'),
+            description.index(
+                "git rebase --rebase-merges "
+                "--reapply-cherry-picks --empty=stop origin/v3"
+            ),
+        )
+        self.assertLess(
+            description.index(
+                'git merge-base --is-ancestor "$FORK_SHA" origin/v3'
+            ),
+            description.index(
+                "git rebase --rebase-merges "
+                "--reapply-cherry-picks --empty=stop origin/v3"
+            ),
+        )
+        self.assertLess(
+            description.index('git cat-file -e "$FORK_SHA^{commit}"'),
+            description.index('git merge-base --is-ancestor "$FORK_SHA" HEAD'),
+        )
+        self.assertLess(
+            description.index('git merge-base --is-ancestor "$FORK_SHA" HEAD'),
+            description.index(
+                'git merge-base --is-ancestor "$FORK_SHA" origin/v3'
+            ),
+        )
+        rebase_index = description.index(
+            "git rebase --rebase-merges "
+            "--reapply-cherry-picks --empty=stop origin/v3"
+        )
+        self.assertLess(
+            rebase_index,
+            description.index(
+                "if ! git merge-base --is-ancestor origin/v3 HEAD;",
+                rebase_index,
+            ),
+        )
+        self.assertLess(
+            detached_worktree_index,
+            description.index('git checkout -b "$BRANCH" origin/v3'),
+        )
+        recorded_recreate_index = description.index(
+            'if [ -n "$RECORDED_BRANCH" ]; then',
+            description.index("WORKTREE_RECREATED=0"),
+        )
+        recorded_recreate_block = description[
+            recorded_recreate_index:detached_worktree_index
+        ]
+        self.assertNotIn(
+            'git worktree add "$WORKTREE_PATH" --detach origin/v3',
+            recorded_recreate_block,
+        )
+        self.assertNotIn(
+            'git checkout -b "$BRANCH" origin/v3',
+            recorded_recreate_block,
+        )
+        self.assertNotIn("git remote show origin", step["description"])
 
-    def test_docs_record_host_inheritance_and_slack_credential_boundaries(
+        fragment = (
+            ROOT / "template-fragments" / "d2b-governance.template.md"
+        ).read_text(encoding="utf-8")
+        self.assertRegex(fragment, r'\{\{ define "d2b-governance"')
+        for marker in (
+            "build-basic",
+            "implement",
+            "github-issue-fix",
+            "publish",
+            "mol-d2b-discord-fix-issue",
+            "target=v3",
+            "merge_strategy=pr",
+            "refuse direct merges",
+            "pull-request handoff",
+            "never merge",
+            "force-push",
+            "human-owned",
+        ):
+            self.assertIn(marker, fragment.lower())
+        self.assertEqual(
+            " ".join(fragment.lower().split()).count("branch protection"),
+            1,
+        )
+
+    def test_docs_record_host_inheritance_and_discord_boundaries(
         self,
     ) -> None:
         docs = "\n".join(
@@ -378,44 +630,174 @@ class RootPortableCityTests(unittest.TestCase):
                 "PROVENANCE.md",
             )
         )
+        docs_flat = " ".join(docs.lower().split())
         for marker in (
-            SLACK_PACK_SOURCE,
+            GASCITY_PACK_SOURCE,
+            GASCITY_ROLES_PACK_SOURCE,
+            DISCORD_PACK_SOURCE,
             "sha:" + PACK_COMMIT,
-            "gc-slack-adapter/env",
             "0600",
             "GC_CITY_NAME",
             "GC_CITY_PATH",
             "GC_API_BASE_URL",
-            "slack-v0",
-            "gc slack-full reply-current",
-            "d2b/roles.run-operator",
-            "SLACK_CLIENT_ID",
-            "SLACK_REDIRECT_URI",
-            "apps.json",
-            "http_status:404",
-            "gc-slack-adapter",
-            "gc-slack-cli",
+            "command-glossary",
+            "operational-awareness",
+            "discord-v0",
+            "d2b-governance",
+            "patrol_interval",
+            "formula_v2",
+            "discord-interactions",
+            "discord-admin",
+            "discord-gateway",
+            "/v0/discord/interactions",
+            "bot",
+            "applications.commands",
+            "View Channels",
+            "Send Messages",
+            "Read Message History",
+            "Create Public Threads",
+            "Send Messages in Threads",
+            "Message Content Intent",
+            "Administrator",
+            "Manage Guild",
+            "Manage Roles",
+            "Manage Channels",
+            "Manage Messages",
+            "Manage Webhooks",
+            "Attach Files",
+            "Add Reactions",
+            "Embed Links",
+            "Presence Intent",
+            "--guild-allowlist",
+            "--channel-allowlist",
+            "--role-allowlist",
+            "named app",
+            "independent",
+            "mol-d2b-discord-fix-issue",
+            "base_ref=origin/v3",
+            "fork_sha",
+            "--rebase-merges",
+            "--reapply-cherry-picks",
+            "--empty=stop",
+            "PR-only",
+            "requires pull requests",
+            "apply to administrators",
+            "/gc fix",
+            "modal",
+            "Room/thread bindings",
+            "@@handle",
+            "ambient-read",
+            "peer fanout",
+            "bot-authored",
+            "explicit publish",
+            "plain message",
+            "gc.mayor",
+            "implementation-worker",
+            "run-operator",
+            "publisher",
+            "requirements-planner",
+            "build-basic",
+            "implement",
+            "github-issue-fix",
+            "github-pr-review",
+            "publish",
             "Copilot Requests",
             "GH_TOKEN",
+            "grok-4.6",
+            "high",
+            "long_context",
+            "Luna",
+            "max",
+            "copilot-planning-grok",
+            "copilot-code-luna",
+            "builtin:copilot",
+            "builtin:codex",
         ):
             self.assertIn(marker, docs)
+        self.assertIn(
+            "mutually exclusive alternatives for the same room",
+            docs_flat,
+        )
+        self.assertIn(
+            "branch protection for `v3` is defense-in-depth",
+            docs_flat,
+        )
+        self.assertIn(
+            "only `discord-interactions` is public",
+            docs_flat,
+        )
+        self.assertIn(
+            "`discord-admin` must remain tenant/access-policy protected",
+            docs_flat,
+        )
+        self.assertIn(
+            "`discord-gateway` remains private",
+            docs_flat,
+        )
+        self.assertIn(
+            "official discord pack owns all three native services",
+            docs_flat,
+        )
         self.assertIn("source-only", docs.lower())
         self.assertIn("credential separation", docs.lower())
-
-    def test_discord_import_has_no_public_site_mapping(self) -> None:
-        text = "\n".join(
-            (ROOT / relative).read_text(encoding="utf-8")
-            for relative in ("city.toml", "pack.toml")
-        ).lower()
         for marker in (
-            "public_base_domain",
-            "interactions_url",
-            "external_route",
-            "guild_id",
-            "channel_id",
-            "user_mapping",
+            "s" + "lack",
+            "comp" + "ound" + "-engineering",
+            "comp" + "ound" + " engineering",
         ):
-            self.assertNotIn(marker, text)
+            self.assertNotIn(marker, docs.lower())
+
+    def test_discord_and_gascity_pack_are_enabled_and_pinned(self) -> None:
+        pack = tomllib.loads((ROOT / "pack.toml").read_text(encoding="utf-8"))
+        lock = tomllib.loads((ROOT / "packs.lock").read_text(encoding="utf-8"))
+        self.assertEqual(
+            set(pack["imports"]),
+            {"core", "bd", "gc", "discord"},
+        )
+        self.assertEqual(
+            pack["imports"]["discord"],
+            {"source": DISCORD_PACK_SOURCE, "version": f"sha:{PACK_COMMIT}"},
+        )
+        self.assertEqual(
+            lock["packs"][DISCORD_PACK_SOURCE]["commit"],
+            PACK_COMMIT,
+        )
+        self.assertEqual(
+            lock["packs"][GASCITY_PACK_SOURCE]["commit"],
+            PACK_COMMIT,
+        )
+        self.assertEqual(
+            lock["packs"][GASCITY_ROLES_PACK_SOURCE]["commit"],
+            PACK_COMMIT,
+        )
+        for obsolete in (
+            "gastown",
+            "s" + "lack" + "-full",
+            "comp" + "ound" + "-engineering",
+        ):
+            self.assertNotIn(obsolete, pack["imports"])
+        for obsolete_source in (
+            "https://github.com/gastownhall/gascity-packs/tree/main/"
+            + "gas"
+            + "town",
+            "https://github.com/gastownhall/gascity-packs/tree/main/"
+            + "s"
+            + "lack-full",
+            "https://github.com/gastownhall/gascity-packs/tree/main/"
+            + "comp"
+            + "ound-engineering",
+        ):
+            self.assertNotIn(obsolete_source, lock["packs"])
+
+    def test_obsolete_local_integrations_are_deleted(self) -> None:
+        for relative in (
+            "template-fragments/"
+            + "s"
+            + "lack-progress.template.md",
+            "assets/workflows/do-work/prepare-worktree.md",
+            "assets/workflows/build-base/publish.md",
+        ):
+            self.assertFalse((ROOT / relative).exists(), relative)
 
     def test_authored_city_files_have_only_generic_source_values(self) -> None:
         text = "\n".join(
@@ -497,7 +879,7 @@ class RootPortableCityTests(unittest.TestCase):
         ) as raw_root:
             root = pathlib.Path(raw_root)
             try:
-                city = root / "city"
+                city = root / "d2b-gascity"
                 rig = root / "rig"
                 home = root / "home"
                 gc_home = root / "gc-home"
@@ -565,10 +947,10 @@ class RootPortableCityTests(unittest.TestCase):
                     encoding="utf-8",
                 )
 
-                codex = tool_bin / "codex"
                 true = shutil.which("true")
                 self.assertIsNotNone(true)
-                codex.symlink_to(true)
+                (tool_bin / "copilot").symlink_to(true)
+                (tool_bin / "codex").symlink_to(true)
                 env["PATH"] = os.pathsep.join(
                     (str(tool_bin), env.get("PATH", ""))
                 )
@@ -614,6 +996,46 @@ class RootPortableCityTests(unittest.TestCase):
                     )
                 run_gc("config", "show", "--city", str(city))
                 run_gc("import", "check", "--city", str(city))
+
+                publish_help = run_gc(
+                    "discord",
+                    "publish",
+                    "--help",
+                ).stdout
+                self.assertIn("--binding", publish_help)
+                self.assertIn("--binding room:", publish_help)
+
+                bind_room_help = run_gc(
+                    "discord",
+                    "bind-room",
+                    "--help",
+                ).stdout
+                for marker in (
+                    "--enable-ambient-read",
+                    "--allow-untargeted-ambient-delivery",
+                    "--enable-peer-fanout",
+                    "--allow-untargeted-peer-fanout",
+                ):
+                    self.assertIn(marker, bind_room_help)
+
+                release_workflow_help = run_gc(
+                    "discord",
+                    "release-workflow",
+                    "--help",
+                ).stdout
+                self.assertIn("--request-id <id>", release_workflow_help)
+
+                post_message_help = run_gc(
+                    "discord",
+                    "post-message",
+                    "--help",
+                ).stdout
+                for marker in (
+                    "--channel-id <id>",
+                    "--thread-id <id>",
+                ):
+                    self.assertIn(marker, post_message_help)
+
                 run_gc(
                     "rig",
                     "add",
@@ -624,6 +1046,242 @@ class RootPortableCityTests(unittest.TestCase):
                     str(city),
                 )
                 run_gc("config", "show", "--city", str(city))
+
+                def show_formula(name: str, *extra: str) -> dict:
+                    result = run_gc(
+                        "formula",
+                        "show",
+                        name,
+                        "--city",
+                        str(city),
+                        *extra,
+                        "--json",
+                    )
+                    self.assertEqual(result.stderr, "")
+                    payload = json.loads(result.stdout)
+                    self.assertTrue(payload["ok"])
+                    self.assertEqual(payload.get("warnings", []), [])
+                    return payload
+
+                def step_with_suffix(
+                    formula: dict,
+                    suffix: str,
+                ) -> tuple[int, dict]:
+                    matches = [
+                        (index, step)
+                        for index, step in enumerate(formula["steps"])
+                        if step["id"].rsplit(".", 1)[-1] == suffix
+                    ]
+                    self.assertEqual(len(matches), 1, suffix)
+                    return matches[0]
+
+                d2b_formula = show_formula("mol-d2b-discord-fix-issue")
+                d2b_steps = {
+                    step["id"].rsplit(".", 1)[-1]
+                    for step in d2b_formula["steps"]
+                }
+                self.assertTrue(
+                    {
+                        "load-context",
+                        "workspace-setup",
+                        "understand-bug",
+                        "write-tests-first",
+                        "implement-fix",
+                        "wrap-up",
+                    }
+                    <= d2b_steps
+                )
+                _, d2b_workspace = step_with_suffix(
+                    d2b_formula,
+                    "workspace-setup",
+                )
+                d2b_workspace_text = d2b_workspace["description"]
+                for marker in (
+                    "if ! git fetch --prune origin '+refs/heads/*:refs/remotes/origin/*'; then",
+                    "origin/v3",
+                    "base_ref=origin/v3",
+                    "fork_sha",
+                    "RECORDED_WORKTREE",
+                    "RECORDED_BRANCH",
+                    "legacy or missing extension metadata",
+                    "Recovery:",
+                    'if [ -n "$RECORDED_WORKTREE" ] && [ -d "$RECORDED_WORKTREE" ]',
+                    'git worktree add "$WORKTREE_PATH" "$BRANCH"',
+                    'git worktree add --track -b "$BRANCH" "$WORKTREE_PATH" "origin/$BRANCH"',
+                    'git worktree add "$WORKTREE_PATH" --detach origin/v3',
+                    'gc bd update {{issue}} --set-metadata work_dir="$WORKTREE"',
+                    "WORKTREE_RECREATED=1",
+                    "git branch --show-current",
+                    "recreated worktree is on",
+                    "git rebase --rebase-merges",
+                    "--reapply-cherry-picks",
+                    "--empty=stop",
+                    'git cat-file -e "$FORK_SHA^{commit}"',
+                    'git merge-base --is-ancestor "$FORK_SHA" HEAD',
+                    'git merge-base --is-ancestor "$FORK_SHA" origin/v3',
+                    "not a commit in this repository",
+                    "not an ancestor of the recorded branch HEAD",
+                    "not an ancestor of current origin/v3",
+                    "establish a verified prior origin/v3 base",
+                    "git merge-base --is-ancestor origin/v3 HEAD",
+                ):
+                    self.assertIn(marker, d2b_workspace_text)
+                self.assertNotIn(
+                    "recorded worktree does not exist",
+                    d2b_workspace_text,
+                )
+                self.assertLess(
+                    d2b_workspace_text.index(
+                        'if [ "$BASE_REF" != "origin/v3" ]'
+                    ),
+                    d2b_workspace_text.index("WORKTREE_RECREATED=0"),
+                )
+                collision_index = d2b_workspace_text.index(
+                    'if [ -e "$WORKTREE_PATH" ] || [ -L "$WORKTREE_PATH" ]'
+                )
+                local_worktree_index = d2b_workspace_text.index(
+                    'git worktree add "$WORKTREE_PATH" "$BRANCH"'
+                )
+                remote_worktree_index = d2b_workspace_text.index(
+                    'git worktree add --track -b "$BRANCH" "$WORKTREE_PATH" "origin/$BRANCH"'
+                )
+                detached_worktree_index = d2b_workspace_text.index(
+                    'git worktree add "$WORKTREE_PATH" --detach origin/v3'
+                )
+                for worktree_add_index in (
+                    local_worktree_index,
+                    remote_worktree_index,
+                    detached_worktree_index,
+                ):
+                    self.assertLess(collision_index, worktree_add_index)
+                self.assertLess(
+                    local_worktree_index,
+                    detached_worktree_index,
+                )
+                self.assertLess(
+                    remote_worktree_index,
+                    detached_worktree_index,
+                )
+                worktree_metadata_index = d2b_workspace_text.index(
+                    'gc bd update {{issue}} --set-metadata work_dir="$WORKTREE"'
+                )
+                self.assertLess(
+                    detached_worktree_index,
+                    worktree_metadata_index,
+                )
+                self.assertLess(
+                    d2b_workspace_text.index('git status --porcelain'),
+                    d2b_workspace_text.index('git checkout "$BRANCH"'),
+                )
+                self.assertLess(
+                    d2b_workspace_text.index(
+                        'if [ "$WORKTREE_RECREATED" = "1" ]'
+                    ),
+                    d2b_workspace_text.index('git checkout "$BRANCH"'),
+                )
+                rebase_index = d2b_workspace_text.index(
+                    "git rebase --rebase-merges "
+                    "--reapply-cherry-picks --empty=stop origin/v3"
+                )
+                for provenance_index in (
+                    d2b_workspace_text.index(
+                        'git cat-file -e "$FORK_SHA^{commit}"'
+                    ),
+                    d2b_workspace_text.index(
+                        'git merge-base --is-ancestor "$FORK_SHA" HEAD'
+                    ),
+                    d2b_workspace_text.index(
+                        'git merge-base --is-ancestor "$FORK_SHA" origin/v3'
+                    ),
+                ):
+                    self.assertLess(provenance_index, rebase_index)
+                self.assertLess(
+                    d2b_workspace_text.index(
+                        'git cat-file -e "$FORK_SHA^{commit}"'
+                    ),
+                    d2b_workspace_text.index(
+                        'git merge-base --is-ancestor "$FORK_SHA" HEAD'
+                    ),
+                )
+                self.assertLess(
+                    d2b_workspace_text.index(
+                        'git merge-base --is-ancestor "$FORK_SHA" HEAD'
+                    ),
+                    d2b_workspace_text.index(
+                        'git merge-base --is-ancestor "$FORK_SHA" origin/v3'
+                    ),
+                )
+                self.assertLess(
+                    rebase_index,
+                    d2b_workspace_text.index(
+                        "if ! git merge-base --is-ancestor origin/v3 HEAD;",
+                        rebase_index,
+                    ),
+                )
+                self.assertLess(
+                    detached_worktree_index,
+                    d2b_workspace_text.index(
+                        'git checkout -b "$BRANCH" origin/v3'
+                    ),
+                )
+                recorded_recreate_index = d2b_workspace_text.index(
+                    'if [ -n "$RECORDED_BRANCH" ]; then',
+                    d2b_workspace_text.index("WORKTREE_RECREATED=0"),
+                )
+                recorded_recreate_block = d2b_workspace_text[
+                    recorded_recreate_index:detached_worktree_index
+                ]
+                self.assertNotIn(
+                    'git worktree add "$WORKTREE_PATH" --detach origin/v3',
+                    recorded_recreate_block,
+                )
+                self.assertNotIn(
+                    'git checkout -b "$BRANCH" origin/v3',
+                    recorded_recreate_block,
+                )
+                self.assertNotIn(
+                    "git remote show origin",
+                    d2b_workspace_text,
+                )
+
+                build_basic = show_formula(
+                    "build-basic",
+                    "--rig",
+                    "d2b",
+                )
+                self.assertTrue(build_basic["ok"])
+                implement = show_formula(
+                    "implement",
+                    "--rig",
+                    "d2b",
+                )
+                self.assertTrue(implement["ok"])
+
+                config_result = run_gc(
+                    "config",
+                    "show",
+                    "--city",
+                    str(city),
+                    "--json",
+                )
+                resolved_config = json.loads(config_result.stdout)
+                self.assertEqual(
+                    resolved_config["config"]["Workspace"]["Name"],
+                    "d2b-gascity",
+                )
+                agents = resolved_config["config"].get("Agents")
+                self.assertIsInstance(agents, list)
+                workers = [
+                    agent
+                    for agent in agents
+                    if agent.get("Dir") == "d2b"
+                    and agent.get("Name") == "implementation-worker"
+                ]
+                self.assertEqual(len(workers), 1)
+                self.assertEqual(
+                    workers[0].get("Provider"),
+                    "copilot-code-luna",
+                )
 
                 site = city / ".gc" / "site.toml"
                 self.assertTrue(site.is_file())

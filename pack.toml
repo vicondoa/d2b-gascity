@@ -2,24 +2,20 @@
 name = "d2b-gascity"
 version = "0.1.0"
 schema = 2
-description = "Portable Gas City composition for the d2b rig."
-
-[imports.bd]
-source = "https://github.com/gastownhall/gascity.git//examples/bd"
-version = "sha:f895c0ff47d6ee9334ed282a416387eb5b084d24"
-
-[imports.compound-engineering]
-source = "https://github.com/gastownhall/gascity-packs/tree/main/compound-engineering"
-version = "sha:5d2a9d023edbb9ba24fdcff554e89fc3d7da72fe"
+description = "Portable Gas City composition for the d2b rig with the Gas City pack and Discord."
 
 [imports.core]
 source = "https://github.com/gastownhall/gascity.git//internal/bootstrap/packs/core"
 version = "sha:f895c0ff47d6ee9334ed282a416387eb5b084d24"
 
+[imports.bd]
+source = "https://github.com/gastownhall/gascity.git//examples/bd"
+version = "sha:f895c0ff47d6ee9334ed282a416387eb5b084d24"
+
+[imports.gc]
+source = "https://github.com/gastownhall/gascity-packs/tree/main/gascity"
+version = "sha:9f98ea4e1974cb49d18cd0c453eb81b2370cca84"
+
 [imports.discord]
 source = "https://github.com/gastownhall/gascity-packs/tree/main/discord"
-version = "sha:5d2a9d023edbb9ba24fdcff554e89fc3d7da72fe"
-
-[imports.slack-full]
-source = "https://github.com/gastownhall/gascity-packs/tree/main/slack-full"
-version = "sha:5d2a9d023edbb9ba24fdcff554e89fc3d7da72fe"
+version = "sha:9f98ea4e1974cb49d18cd0c453eb81b2370cca84"
