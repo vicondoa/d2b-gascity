@@ -195,6 +195,13 @@ PR_BABYSIT_LOCAL_FILES = (
 PR_BABYSIT_STATE_RUNNER = (
     PR_BABYSIT_ROOT / "commands" / "pr-babysit" / "run.sh"
 )
+PUBLISH_OPEN_PR_ASSET = (
+    CITY_ROOT / "assets" / "workflows" / "publish" / "open-pr.md"
+)
+OFFICIAL_OPEN_PR_ASSET = (
+    "If open_pr is {{open_pr}}, create a PR only after push succeeds and\n"
+    "sanitized title/body from final report {{final_report}} pass policy.\n"
+)
 
 
 def _git(command: list[str], *, cwd: pathlib.Path, env: dict[str, str]) -> None:
@@ -3599,6 +3606,498 @@ if command == "close":
             )
             + "\n",
         )
+
+
+class PrBabysitPublicationHandoffTests(unittest.TestCase):
+    _D2B_PUBLICATION = {
+        "id": "publication-1",
+        "status": "open",
+        "assignee": "",
+        "metadata": {
+            "record_kind": "publication",
+            "rig": "d2b",
+            "github_host": "github.com",
+            "owner": "octo",
+            "repository": "example",
+            "base_ref": "v3",
+            "merge_strategy": "pr",
+        },
+    }
+    _D2B_GITHUB = {
+        "number": 7,
+        "url": "https://github.com/octo/example/pull/7",
+        "state": "OPEN",
+        "isDraft": False,
+        "baseRefName": "v3",
+        "headRefName": "feature/u4",
+        "headRefOid": "b" * 40,
+        "repository": {"nameWithOwner": "octo/example"},
+    }
+
+    @staticmethod
+    def _fake_gh_script() -> str:
+        return r"""#!/usr/bin/env python3
+import json
+import os
+import sys
+from pathlib import Path
+
+root = Path(os.environ["FAKE_PUBLICATION_ROOT"])
+calls_path = root / "gh-calls.json"
+calls = []
+if calls_path.exists():
+    calls = json.loads(calls_path.read_text(encoding="utf-8"))
+calls.append(sys.argv[1:])
+calls_path.write_text(
+    json.dumps(calls, sort_keys=True, separators=(",", ":")) + "\n",
+    encoding="utf-8",
+)
+if os.environ.get("FAKE_GH_FAIL") == "1":
+    print("pull request not found", file=sys.stderr)
+    raise SystemExit(1)
+payload = json.loads(
+    (root / "github.json").read_text(encoding="utf-8")
+)
+print(json.dumps(payload, sort_keys=True))
+"""
+
+    @staticmethod
+    def _fake_gc_script() -> str:
+        return r"""#!/usr/bin/env python3
+import json
+import os
+import sys
+from pathlib import Path
+
+root = Path(os.environ["FAKE_PUBLICATION_ROOT"])
+calls_path = root / "gc-calls.json"
+calls = []
+if calls_path.exists():
+    calls = json.loads(calls_path.read_text(encoding="utf-8"))
+calls.append(sys.argv[1:])
+calls_path.write_text(
+    json.dumps(calls, sort_keys=True, separators=(",", ":")) + "\n",
+    encoding="utf-8",
+)
+if os.environ.get("FAKE_GC_FAIL") == "1":
+    print("sling failed", file=sys.stderr)
+    raise SystemExit(1)
+print(json.dumps({"ok": True}))
+"""
+
+    def _fixture(
+        self,
+        name: str,
+        *,
+        publication: dict | None = None,
+        github: dict | None = None,
+    ) -> tuple[pathlib.Path, dict[str, str]]:
+        root = ROOT / ".scratch" / f"u4-publication-{name}"
+        shutil.rmtree(root, ignore_errors=True)
+        root.mkdir(parents=True)
+        fake_beads = root / "fake-beads"
+        fake_beads.write_text(
+            PrBabysitStateTests._fake_beads_script(),
+            encoding="utf-8",
+        )
+        fake_beads.chmod(0o755)
+        fake_gh = root / "fake-gh"
+        fake_gh.write_text(self._fake_gh_script(), encoding="utf-8")
+        fake_gh.chmod(0o755)
+        fake_gc = root / "fake-gc"
+        fake_gc.write_text(self._fake_gc_script(), encoding="utf-8")
+        fake_gc.chmod(0o755)
+        (root / "beads.json").write_text(
+            json.dumps(
+                [publication or self._D2B_PUBLICATION],
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        (root / "calls.json").write_text("[]\n", encoding="utf-8")
+        (root / "github.json").write_text(
+            json.dumps(github or self._D2B_GITHUB, sort_keys=True),
+            encoding="utf-8",
+        )
+        (root / "gh-calls.json").write_text("[]\n", encoding="utf-8")
+        (root / "gc-calls.json").write_text("[]\n", encoding="utf-8")
+        return root, {
+            "PR_BABYSIT_BEADS_BIN": str(fake_beads),
+            "FAKE_BEADS_ROOT": str(root),
+            "PR_BABYSIT_BEADS_CWD": str(root),
+            "GC_RIG_ROOT": str(root),
+            "PR_BABYSIT_ALLOWED_HOSTS": "github.com,github.example",
+            "PR_BABYSIT_GH_BIN": str(fake_gh),
+            "PR_BABYSIT_GC_BIN": str(fake_gc),
+            "FAKE_PUBLICATION_ROOT": str(root),
+            "PR_BABYSIT_NOW": "2026-08-29T19:00:00Z",
+        }
+
+    def _run(
+        self,
+        env: dict[str, str],
+        action: str,
+        payload: dict[str, object] | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [str(PR_BABYSIT_STATE_RUNNER), action],
+            cwd=ROOT,
+            env=os.environ | env,
+            input=json.dumps(payload or {}),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+    def _payload(
+        self,
+        *,
+        rig: str = "d2b",
+        publication_id: str = "publication-1",
+        url: str | None = "https://github.com/octo/example/pull/7",
+        pr_number: int | None = 7,
+    ) -> dict[str, object]:
+        payload: dict[str, object] = {
+            "rig": rig,
+            "publication_bead_id": publication_id,
+        }
+        if url is not None:
+            payload["url"] = url
+        if pr_number is not None:
+            payload["pr_number"] = pr_number
+        return payload
+
+    @staticmethod
+    def _json(result: subprocess.CompletedProcess[str]) -> dict:
+        if not result.stdout:
+            raise AssertionError(result.stderr)
+        return json.loads(result.stdout)
+
+    @staticmethod
+    def _bead_calls(root: pathlib.Path) -> list[dict]:
+        return json.loads((root / "calls.json").read_text(encoding="utf-8"))
+
+    def test_shadow_retains_official_pr_creation_and_requires_verification(self):
+        asset = PUBLISH_OPEN_PR_ASSET.read_text(encoding="utf-8")
+        self.assertTrue(asset.startswith(OFFICIAL_OPEN_PR_ASSET))
+        self.assertIn("gascity/formulas/publish.formula.toml", asset)
+        handoff = asset.index("publication-handoff")
+        verify = asset.index("verify-handoff")
+        self.assertLess(handoff, verify)
+        self.assertIn("immediately before closing", asset.lower())
+        self.assertNotIn(
+            "template-fragments/pr-babysit-publication.template.md",
+            asset,
+        )
+        lowered = asset.lower()
+        for marker in (
+            "never merge",
+            "never force-push",
+            "never rebase",
+            "pull-request-only",
+        ):
+            self.assertIn(marker, lowered)
+
+    def test_verified_d2b_handoff_queries_github_and_routes_exact_target(self):
+        root, env = self._fixture("d2b")
+        try:
+            result = self._run(
+                env,
+                "publication-handoff",
+                self._payload(),
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            receipt = self._json(result)
+            self.assertTrue(receipt["verified"])
+            self.assertEqual(receipt["rig"], "d2b")
+            self.assertEqual(
+                receipt["target"],
+                "d2b/pr-babysit.pr-babysitter",
+            )
+            self.assertTrue(receipt["watch_id"].startswith("d2b-pr-"))
+
+            gh_calls = json.loads(
+                (root / "gh-calls.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(len(gh_calls), 1)
+            self.assertEqual(gh_calls[0][:3], ["pr", "view", "7"])
+            self.assertIn("--repo", gh_calls[0])
+
+            gc_calls = json.loads(
+                (root / "gc-calls.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(
+                gc_calls,
+                [[
+                    "sling",
+                    "--nudge",
+                    "d2b/pr-babysit.pr-babysitter",
+                    receipt["watch_id"],
+                    "--no-formula",
+                    "--json",
+                ]],
+            )
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
+
+    def test_verified_city_source_handoff_targets_main_and_city_binding(self):
+        publication = {
+            "id": "publication-city",
+            "status": "open",
+            "assignee": "",
+            "metadata": {
+                "record_kind": "publication",
+                "rig": "city-source",
+                "github_host": "github.com",
+                "owner": "octo",
+                "repository": "gascity",
+                "base_ref": "main",
+                "merge_strategy": "pr",
+            },
+        }
+        github = dict(
+            self._D2B_GITHUB,
+            number=8,
+            url="https://github.com/octo/gascity/pull/8",
+            baseRefName="main",
+            headRefName="feature/city-source",
+            repository={"nameWithOwner": "octo/gascity"},
+        )
+        root, env = self._fixture(
+            "city-source",
+            publication=publication,
+            github=github,
+        )
+        try:
+            result = self._run(
+                env,
+                "publication-handoff",
+                self._payload(
+                    rig="city-source",
+                    publication_id="publication-city",
+                    url=github["url"],
+                    pr_number=8,
+                ),
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            receipt = self._json(result)
+            self.assertEqual(receipt["target"], "city-source/pr-babysit.pr-babysitter")
+            self.assertTrue(receipt["watch_id"].startswith("city-pr-"))
+            gc_calls = json.loads(
+                (root / "gc-calls.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(gc_calls[0][2], "city-source/pr-babysit.pr-babysitter")
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
+
+    def test_invalid_publication_identity_writes_no_beads_or_route(self):
+        cases = (
+            ("draft", dict(self._D2B_GITHUB, isDraft=True), {}),
+            ("wrong-base", dict(self._D2B_GITHUB, baseRefName="main"), {}),
+            (
+                "wrong-repository",
+                dict(
+                    self._D2B_GITHUB,
+                    url="https://github.com/octo/other/pull/7",
+                    repository={"nameWithOwner": "octo/other"},
+                ),
+                {},
+            ),
+            ("absent-pr", self._D2B_GITHUB, {"FAKE_GH_FAIL": "1"}),
+            (
+                "malformed-head",
+                dict(self._D2B_GITHUB, headRefOid="not-a-sha"),
+                {},
+            ),
+        )
+        for name, github, extra_env in cases:
+            with self.subTest(name=name):
+                root, env = self._fixture(name, github=github)
+                try:
+                    result = self._run(
+                        env | extra_env,
+                        "publication-handoff",
+                        self._payload(),
+                    )
+                    self.assertNotEqual(result.returncode, 0)
+                    calls = self._bead_calls(root)
+                    self.assertFalse(
+                        [
+                            call
+                            for call in calls
+                            if call["argv"]
+                            and call["argv"][0] in {"create", "update", "close"}
+                        ]
+                    )
+                    self.assertEqual(
+                        json.loads(
+                            (root / "gc-calls.json").read_text(
+                                encoding="utf-8"
+                            )
+                        ),
+                        [],
+                    )
+                finally:
+                    shutil.rmtree(root, ignore_errors=True)
+
+    def test_route_failure_blocks_watch_without_receipt(self):
+        root, env = self._fixture("route-failure")
+        try:
+            result = self._run(
+                env | {"FAKE_GC_FAIL": "1"},
+                "publication-handoff",
+                self._payload(),
+            )
+            self.assertNotEqual(result.returncode, 0)
+            records = json.loads((root / "beads.json").read_text(encoding="utf-8"))
+            publication = next(
+                record for record in records if record["id"] == "publication-1"
+            )
+            watch = next(
+                record
+                for record in records
+                if record["id"] != "publication-1"
+            )
+            self.assertEqual(watch["metadata"]["state"], "blocked")
+            self.assertEqual(
+                watch["metadata"]["terminal_reason"],
+                "route-failed",
+            )
+            for record in (publication, watch):
+                self.assertNotIn("handoff_verified", record["metadata"])
+                self.assertNotIn("handoff_watch_id", record["metadata"])
+                self.assertNotIn("handoff_target", record["metadata"])
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
+
+    def test_duplicate_publisher_retry_reuses_one_watch_and_route(self):
+        root, env = self._fixture("duplicate")
+        try:
+            first = self._run(
+                env,
+                "publication-handoff",
+                self._payload(),
+            )
+            second = self._run(
+                env,
+                "publication-handoff",
+                self._payload(),
+            )
+            self.assertEqual(first.returncode, 0, first.stderr)
+            self.assertEqual(second.returncode, 0, second.stderr)
+            first_receipt = self._json(first)
+            second_receipt = self._json(second)
+            self.assertNotEqual(first_receipt["watch_id"], "")
+            self.assertEqual(first_receipt["watch_id"], second_receipt["watch_id"])
+            self.assertTrue(first_receipt["created"])
+            self.assertTrue(second_receipt["reused"])
+            records = json.loads((root / "beads.json").read_text(encoding="utf-8"))
+            self.assertEqual(
+                len(
+                    [
+                        record
+                        for record in records
+                        if record["metadata"].get("record_kind") == "watch"
+                    ]
+                ),
+                1,
+            )
+            creates = [
+                call
+                for call in self._bead_calls(root)
+                if call["argv"] and call["argv"][0] == "create"
+            ]
+            self.assertEqual(len(creates), 1)
+            gc_calls = json.loads(
+                (root / "gc-calls.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(len(gc_calls), 2)
+            self.assertEqual(gc_calls[0], gc_calls[1])
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
+
+    def test_handoff_receipt_is_safe_on_publication_and_watch_records(self):
+        root, env = self._fixture("receipt")
+        try:
+            result = self._run(
+                env,
+                "publication-handoff",
+                self._payload(),
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            receipt = self._json(result)
+            records = json.loads((root / "beads.json").read_text(encoding="utf-8"))
+            publication = next(
+                record for record in records if record["id"] == "publication-1"
+            )
+            watch = next(
+                record
+                for record in records
+                if record["id"] == receipt["watch_id"]
+            )
+            for record in (publication, watch):
+                metadata = record["metadata"]
+                self.assertEqual(metadata["handoff_verified"], "true")
+                self.assertEqual(metadata["handoff_watch_id"], receipt["watch_id"])
+                self.assertEqual(metadata["handoff_target"], receipt["target"])
+                self.assertNotIn("payload", metadata)
+                self.assertNotIn("credential", metadata)
+                self.assertNotIn("path", metadata)
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
+
+    def test_verify_handoff_re_reads_records_and_reports_failure_or_success(self):
+        root, env = self._fixture("verify")
+        try:
+            handoff = self._run(
+                env,
+                "publication-handoff",
+                self._payload(),
+            )
+            self.assertEqual(handoff.returncode, 0, handoff.stderr)
+            receipt = self._json(handoff)
+            calls_before = len(self._bead_calls(root))
+            verified = self._run(
+                env,
+                "verify-handoff",
+                self._payload(),
+            )
+            self.assertEqual(verified.returncode, 0, verified.stderr)
+            verified_receipt = self._json(verified)
+            self.assertTrue(verified_receipt["verified"])
+            self.assertEqual(verified_receipt["watch_id"], receipt["watch_id"])
+            self.assertEqual(len(self._bead_calls(root)), calls_before + 2)
+
+            records = json.loads((root / "beads.json").read_text(encoding="utf-8"))
+            publication = next(
+                record for record in records if record["id"] == "publication-1"
+            )
+            publication["metadata"]["handoff_target"] = "wrong/target"
+            (root / "beads.json").write_text(
+                json.dumps(records, sort_keys=True, separators=(",", ":")) + "\n",
+                encoding="utf-8",
+            )
+            failed = self._run(
+                env,
+                "verify-handoff",
+                self._payload(),
+            )
+            self.assertNotEqual(failed.returncode, 0)
+            self.assertEqual(
+                len(
+                    [
+                        call
+                        for call in self._bead_calls(root)
+                        if call["argv"]
+                        and call["argv"][0] in {"create", "update", "close"}
+                    ]
+                ),
+                3,
+            )
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
 
 
 if __name__ == "__main__":

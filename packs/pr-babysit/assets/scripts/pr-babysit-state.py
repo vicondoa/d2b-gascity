@@ -49,6 +49,7 @@ AMBIGUOUS_REASON = "ambiguous-outcome"
 SHA_RE = re.compile(r"^[0-9a-fA-F]{40}$")
 SLUG_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9_.-]*[A-Za-z0-9])?$")
 WATCH_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
+BEAD_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 ACTION_KIND_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,47}$")
 SAFE_REASON_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,95}$")
 SAFE_METADATA_KEYS = {
@@ -56,12 +57,17 @@ SAFE_METADATA_KEYS = {
     "watch_id",
     "rig",
     "rig_prefix",
+    "host",
     "github_host",
     "owner",
+    "repo",
     "repository",
     "pr_number",
     "url",
     "base_ref",
+    "target",
+    "target_branch",
+    "merge_strategy",
     "head_ref",
     "head_sha",
     "posture",
@@ -84,6 +90,10 @@ SAFE_METADATA_KEYS = {
     "terminal_reason",
     "active_since",
     "backstop_at",
+    "handoff_verified",
+    "handoff_watch_id",
+    "handoff_target",
+    "handoff_publication_bead",
 }
 
 
@@ -405,14 +415,15 @@ def parse_identity(payload: dict[str, Any]) -> dict[str, Any]:
 
 def watch_id_for(identity: dict[str, Any]) -> str:
     seed = "\x00".join(
-        [
-            identity["rig"],
-            identity["rig_prefix"],
-            identity["github_host"],
-            identity["owner"],
-            identity["repository"],
-            identity["pr_number"],
-        ]
+        str(identity[key])
+        for key in (
+            "rig",
+            "rig_prefix",
+            "github_host",
+            "owner",
+            "repository",
+            "pr_number",
+        )
     )
     digest = hashlib.sha256(seed.encode("utf-8")).hexdigest()
     return f'{identity["rig_prefix"]}-pr-{digest[:32]}'
@@ -552,6 +563,55 @@ def beads_cwd() -> str:
     if not os.path.isdir(candidate):
         fail("Beads working directory does not exist", "configuration")
     return candidate
+
+
+def configured_command(
+    names: tuple[str, ...],
+    default: str,
+    *,
+    label: str,
+) -> list[str]:
+    raw = next(
+        (
+            os.environ.get(name)
+            for name in names
+            if os.environ.get(name) is not None
+        ),
+        None,
+    )
+    if raw is None:
+        command = [default]
+    else:
+        command = shlex.split(raw)
+    if not command:
+        fail(f"{label} executable is empty", "configuration")
+    return command
+
+
+def gh_command() -> list[str]:
+    return configured_command(
+        (
+            "PR_BABYSIT_GH_COMMAND",
+            "PR_BABYSIT_GH_BIN",
+            "GH_BIN",
+            "GH_EXECUTABLE",
+        ),
+        "gh",
+        label="GitHub",
+    )
+
+
+def gc_command() -> list[str]:
+    return configured_command(
+        (
+            "PR_BABYSIT_GC_COMMAND",
+            "PR_BABYSIT_GC_BIN",
+            "GC_BIN",
+            "GC_EXECUTABLE",
+        ),
+        "gc",
+        label="Gas City",
+    )
 
 
 def _lock_directory_path() -> pathlib.Path:
@@ -718,6 +778,27 @@ def show_issue(
     return issue, metadata_from_issue(issue)
 
 
+def validate_bead_id(value: Any, field: str = "bead_id") -> str:
+    result = text_value(value, field)
+    if not BEAD_ID_RE.fullmatch(result):
+        fail(f"{field} is not a safe Beads ID")
+    return result
+
+
+def show_bead(
+    bead_id: str,
+    *,
+    operation: str = "show",
+) -> tuple[dict[str, Any], dict[str, str]]:
+    bead_id = validate_bead_id(bead_id)
+    result = run_beads(["show", bead_id, "--json"])
+    payload = require_beads(result, operation)
+    issue = issue_from_payload(payload)
+    if issue.get("id") != bead_id:
+        fail("Beads returned a different issue ID", "beads-invalid-response")
+    return issue, metadata_from_issue(issue)
+
+
 def show_issue_if_present(
     issue_id: str,
     *,
@@ -781,7 +862,7 @@ def metadata_response(
 
 
 def metadata_updates(
-    watch_id: str,
+    issue_id: str,
     updates: dict[str, str],
     *,
     status: str | None = None,
@@ -790,7 +871,8 @@ def metadata_updates(
 ) -> dict[str, Any]:
     if set(updates) - SAFE_METADATA_KEYS:
         fail("attempted to write an unallowlisted metadata key", "unsafe-state")
-    args = ["update", watch_id]
+    validate_bead_id(issue_id)
+    args = ["update", issue_id]
     if status is not None:
         args.extend(["--status", status])
     if assignee is not None:
@@ -1209,6 +1291,530 @@ def _handoff_locked(
         reused=reused or not created,
         absorbed=False,
     )
+
+
+def publication_repository(
+    payload: dict[str, Any],
+    metadata: dict[str, str],
+) -> tuple[str, str]:
+    owner_value = metadata.get("owner") or payload_value(payload, "owner")
+    repository_value = (
+        metadata.get("repository")
+        or metadata.get("repo")
+        or payload_value(payload, "repository", "repo")
+    )
+    owner: str | None = None
+    if owner_value is not None and owner_value != "":
+        owner = safe_slug(owner_value, "owner")
+    if repository_value is None or repository_value == "":
+        fail("publication bead is missing repository", "identity-mismatch")
+    repository_text = text_value(repository_value, "repository")
+    if "/" in repository_text:
+        if owner is not None:
+            fail(
+                "publication repository duplicates owner",
+                "identity-mismatch",
+            )
+        parts = repository_text.split("/")
+        if len(parts) != 2:
+            fail("publication repository is malformed", "identity-mismatch")
+        owner = safe_slug(parts[0], "owner")
+        repository = safe_slug(parts[1], "repository")
+    else:
+        if owner is None:
+            fail("publication bead is missing owner", "identity-mismatch")
+        repository = safe_slug(repository_text, "repository")
+    return owner.lower(), repository.lower()
+
+
+def publication_context(
+    payload: dict[str, Any],
+    metadata: dict[str, str],
+    *,
+    require_reference: bool,
+) -> dict[str, Any]:
+    rig = text_value(payload_value(payload, "rig"), "rig")
+    if rig not in RIGS:
+        fail("unknown rig")
+    expected_rig = RIGS[rig]
+    recorded_rig = metadata.get("rig", "")
+    if recorded_rig and recorded_rig != rig:
+        fail("publication bead rig does not match request", "identity-mismatch")
+    recorded_prefix = metadata.get("rig_prefix", "")
+    if recorded_prefix and recorded_prefix != expected_rig["prefix"]:
+        fail("publication bead prefix does not match rig", "identity-mismatch")
+
+    recorded_strategy = metadata.get("merge_strategy", "")
+    if recorded_strategy.lower() != "pr":
+        fail(
+            "publication bead must use pull-request merge strategy",
+            "policy",
+        )
+    owner, repository = publication_repository(payload, metadata)
+
+    host_value = (
+        metadata.get("github_host")
+        or metadata.get("host")
+        or payload_value(payload, "github_host", "host")
+    )
+    supplied_url = payload_value(
+        payload,
+        "url",
+        "pr_url",
+        "pull_request_url",
+    )
+    supplied_number = payload_value(payload, "pr_number", "number")
+    number: int | None = None
+    if supplied_number is not None:
+        number = integer_value(supplied_number, "pr_number")
+    supplied_host = ""
+    if supplied_url is not None:
+        supplied_host, _, _, parsed_number = parse_url(
+            supplied_url,
+            owner,
+            repository,
+            number,
+        )
+        if number is None:
+            number = parsed_number
+    elif number is None and require_reference:
+        fail("a pull-request URL or number is required")
+
+    if host_value is None or host_value == "":
+        if supplied_host:
+            host_value = supplied_host
+        elif number is not None:
+            host_value = "github.com"
+        else:
+            fail("publication bead is missing GitHub host", "identity-mismatch")
+    host = text_value(host_value, "github_host").lower()
+    if host not in allowed_hosts():
+        fail("GitHub host is not allowlisted", "identity-mismatch")
+    if supplied_host and supplied_host != host:
+        fail("pull-request URL host does not match publication", "identity-mismatch")
+
+    recorded_base = (
+        metadata.get("base_ref")
+        or metadata.get("target")
+        or metadata.get("target_branch")
+    )
+    if recorded_base:
+        recorded_base = validate_git_ref(recorded_base, "base_ref")
+        if recorded_base != expected_rig["base_ref"]:
+            fail(
+                f"publication base must be {expected_rig['base_ref']}",
+                "identity-mismatch",
+            )
+
+    return {
+        "rig": rig,
+        "rig_prefix": expected_rig["prefix"],
+        "github_host": host,
+        "owner": owner,
+        "repository": repository,
+        "base_ref": expected_rig["base_ref"],
+        "pr_number": number,
+        "input_url": (
+            f"https://{supplied_host}/{owner}/{repository}/pull/{number}"
+            if supplied_host and number is not None
+            else None
+        ),
+    }
+
+
+def query_github_publication(context: dict[str, Any]) -> dict[str, Any]:
+    number = context.get("pr_number")
+    if number is None:
+        fail("a pull-request number is required", "identity-mismatch")
+    repo = f'{context["owner"]}/{context["repository"]}'
+    command = gh_command() + [
+        "pr",
+        "view",
+        str(number),
+        "--repo",
+        repo,
+        "--json",
+        (
+            "number,url,state,isDraft,baseRefName,headRefName,headRefOid,"
+            "repository"
+        ),
+    ]
+    environment = os.environ.copy()
+    environment["GH_HOST"] = context["github_host"]
+    try:
+        result = subprocess.run(
+            command,
+            cwd=beads_cwd(),
+            env=environment,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError:
+        fail("could not execute GitHub executable", "github-exec")
+    if result.returncode:
+        fail("GitHub pull-request query failed", "github-query")
+    try:
+        raw = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        fail("GitHub returned invalid pull-request JSON", "github-invalid-response")
+    if not isinstance(raw, dict):
+        fail("GitHub returned an invalid pull-request object", "github-invalid-response")
+
+    number_value = raw.get("number")
+    if number_value is None:
+        fail("GitHub response is missing pull-request number", "github-invalid-response")
+    response_number = integer_value(number_value, "pr_number")
+    if response_number != context["pr_number"]:
+        fail("GitHub pull-request number does not match request", "identity-mismatch")
+
+    response_url = raw.get("url", raw.get("html_url"))
+    if response_url is None:
+        fail("GitHub response is missing pull-request URL", "github-invalid-response")
+    response_host, response_owner, response_repository, response_number = parse_url(
+        response_url,
+        context["owner"],
+        context["repository"],
+        response_number,
+    )
+    if response_host != context["github_host"]:
+        fail("GitHub pull-request host does not match publication", "identity-mismatch")
+    canonical_url = (
+        f"https://{response_host}/{response_owner.lower()}/"
+        f"{response_repository.lower()}/pull/{response_number}"
+    )
+    input_url = context.get("input_url")
+    if input_url is not None and input_url != canonical_url:
+        fail("GitHub pull-request URL does not match request", "identity-mismatch")
+
+    state_value = raw.get("state")
+    if state_value is None:
+        fail("GitHub response is missing pull-request state", "github-invalid-response")
+    state = text_value(state_value, "pr_state").upper()
+    if state != "OPEN":
+        fail("pull request is not open", "pr-not-open")
+    draft_value = raw.get("isDraft", raw.get("is_draft"))
+    if draft_value is None:
+        fail("GitHub response is missing draft status", "github-invalid-response")
+    if bool_value(draft_value, "isDraft"):
+        fail("draft pull requests cannot be handed off", "draft-pr")
+
+    base_value = raw.get("baseRefName", raw.get("base_ref"))
+    if base_value is None:
+        fail("GitHub response is missing base ref", "github-invalid-response")
+    base_ref = validate_git_ref(base_value, "base_ref")
+    if base_ref != context["base_ref"]:
+        fail(
+            f"pull-request base must be {context['base_ref']}",
+            "wrong-base",
+        )
+
+    head_value = raw.get("headRefName", raw.get("head_ref"))
+    if head_value is None:
+        fail("GitHub response is missing head ref", "github-invalid-response")
+    head_ref = validate_git_ref(head_value, "head_ref")
+    sha_value_raw = raw.get(
+        "headRefOid",
+        raw.get("head_sha", raw.get("current_sha")),
+    )
+    head_sha = sha_value(sha_value_raw, "head_sha")
+
+    repository_value = raw.get("repository")
+    if repository_value is not None:
+        if isinstance(repository_value, dict):
+            repository_value = (
+                repository_value.get("nameWithOwner")
+                or repository_value.get("name_with_owner")
+                or repository_value.get("fullName")
+                or repository_value.get("full_name")
+            )
+        if repository_value is None or not isinstance(repository_value, str):
+            fail(
+                "GitHub response repository identity is malformed",
+                "github-invalid-response",
+            )
+        response_parts = repository_value.split("/")
+        if len(response_parts) != 2:
+            fail(
+                "GitHub response repository identity is malformed",
+                "github-invalid-response",
+            )
+        response_repo_owner = safe_slug(response_parts[0], "owner")
+        response_repo_name = safe_slug(response_parts[1], "repository")
+        if (
+            response_repo_owner.lower() != context["owner"]
+            or response_repo_name.lower() != context["repository"]
+        ):
+            fail("GitHub repository does not match publication", "wrong-repository")
+
+    return {
+        "rig": context["rig"],
+        "rig_prefix": context["rig_prefix"],
+        "github_host": context["github_host"],
+        "owner": context["owner"],
+        "repository": context["repository"],
+        "pr_number": response_number,
+        "url": canonical_url,
+        "base_ref": base_ref,
+        "head_ref": head_ref,
+        "head_sha": head_sha,
+        "current_sha": head_sha,
+        "pr_state": state,
+    }
+
+
+def handoff_target(rig: str) -> str:
+    return f"{rig}/pr-babysit.pr-babysitter"
+
+
+def receipt_updates(
+    publication_bead_id: str,
+    watch_id: str,
+    target: str,
+) -> dict[str, str]:
+    return {
+        "handoff_verified": "true",
+        "handoff_watch_id": watch_id,
+        "handoff_target": target,
+        "handoff_publication_bead": publication_bead_id,
+    }
+
+
+def existing_receipt_matches(
+    metadata: dict[str, str],
+    receipt: dict[str, str],
+) -> None:
+    present = set(receipt) & set(metadata)
+    if not present:
+        return
+    for key, value in receipt.items():
+        if metadata.get(key) != value:
+            fail(
+                "existing handoff receipt does not match",
+                "identity-mismatch",
+            )
+
+
+def block_route_failure(watch_id: str) -> None:
+    _, metadata = show_issue(watch_id)
+    state = state_from_metadata(metadata)
+    if state in {"terminal", "exhausted", "merge-ready"}:
+        return
+    if state in {"watching", "repairing"}:
+        try:
+            transition(
+                {
+                    "watch_id": watch_id,
+                    "to": "blocked",
+                    "reason": "route-failed",
+                }
+            )
+            return
+        except StateError as error:
+            if error.code not in {"illegal-transition", "stale-transition"}:
+                raise
+    metadata_updates(
+        watch_id,
+        {
+            "state": "blocked",
+            "claim_status": "blocked",
+            "terminal_reason": "route-failed",
+        },
+        status="blocked",
+        assignee="",
+    )
+
+
+def route_watch(target: str, watch_id: str) -> None:
+    command = gc_command() + [
+        "sling",
+        "--nudge",
+        target,
+        watch_id,
+        "--no-formula",
+        "--json",
+    ]
+    try:
+        result = subprocess.run(
+            command,
+            cwd=beads_cwd(),
+            env=os.environ.copy(),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError:
+        fail("could not execute Gas City executable", "route-exec")
+    if result.returncode:
+        fail("Gas City babysitter route failed", "route-failed")
+
+
+def publication_handoff(payload: dict[str, Any]) -> dict[str, Any]:
+    publication_bead_id = validate_bead_id(
+        payload_value(
+            payload,
+            "publication_bead_id",
+            "workflow_bead_id",
+            "publication",
+            "workflow",
+        ),
+        "publication_bead_id",
+    )
+    _, publication_metadata = show_bead(publication_bead_id)
+    context = publication_context(
+        payload,
+        publication_metadata,
+        require_reference=True,
+    )
+    identity = parse_identity(
+        {
+            **query_github_publication(context),
+            "verified": True,
+        }
+    )
+    watch_id = watch_id_for(identity)
+    target = handoff_target(context["rig"])
+    receipt = receipt_updates(publication_bead_id, watch_id, target)
+    existing_receipt_matches(publication_metadata, receipt)
+    existing_watch = show_issue_if_present(watch_id)
+    if existing_watch is not None:
+        _, existing_watch_metadata = existing_watch
+        immutable_matches(existing_watch_metadata, identity)
+        existing_receipt_matches(existing_watch_metadata, receipt)
+
+    handoff_payload = {
+        **identity,
+        "verified": True,
+        "observed_at": payload_value(payload, "observed_at") or iso_now(),
+        "next_snapshot_at": payload_value(payload, "next_snapshot_at")
+        or payload_value(payload, "observed_at")
+        or iso_now(),
+        "active_since": payload_value(payload, "active_since")
+        or payload_value(payload, "observed_at")
+        or iso_now(),
+    }
+    handoff_result = handoff(handoff_payload)
+    try:
+        route_watch(target, watch_id)
+    except StateError as error:
+        if error.code in {"route-failed", "route-exec"}:
+            block_route_failure(watch_id)
+        raise
+
+    metadata_updates(watch_id, receipt)
+    metadata_updates(publication_bead_id, receipt)
+    return {
+        "ok": True,
+        "action": "publication-handoff",
+        "rig": context["rig"],
+        "publication_bead_id": publication_bead_id,
+        "watch_id": watch_id,
+        "target": target,
+        "verified": True,
+        "created": bool(handoff_result.get("created", False)),
+        "reused": bool(handoff_result.get("reused", False)),
+    }
+
+
+def watch_identity_from_metadata(
+    metadata: dict[str, str],
+    context: dict[str, Any],
+) -> dict[str, Any]:
+    if metadata.get("record_kind") != "watch":
+        fail("handoff target is not a watch record", "identity-mismatch")
+    for key in (
+        "github_host",
+        "owner",
+        "repository",
+        "pr_number",
+        "url",
+        "base_ref",
+        "head_ref",
+        "head_sha",
+    ):
+        if not metadata.get(key):
+            fail("watch identity is incomplete", "corrupt-state")
+    number = integer_value(metadata["pr_number"], "pr_number")
+    host, owner, repository, number = parse_url(
+        metadata["url"],
+        metadata["owner"],
+        metadata["repository"],
+        number,
+    )
+    if host != context["github_host"]:
+        fail("watch host does not match publication", "identity-mismatch")
+    if owner.lower() != context["owner"] or repository.lower() != context["repository"]:
+        fail("watch repository does not match publication", "identity-mismatch")
+    base_ref = validate_git_ref(metadata["base_ref"], "base_ref")
+    if base_ref != context["base_ref"]:
+        fail("watch base does not match publication", "identity-mismatch")
+    head_ref = validate_git_ref(metadata["head_ref"], "head_ref")
+    head_sha = sha_value(metadata["head_sha"], "head_sha")
+    return {
+        "rig": metadata.get("rig", ""),
+        "rig_prefix": metadata.get("rig_prefix", ""),
+        "github_host": host,
+        "owner": owner.lower(),
+        "repository": repository.lower(),
+        "pr_number": number,
+        "url": f"https://{host}/{owner.lower()}/{repository.lower()}/pull/{number}",
+        "base_ref": base_ref,
+        "head_ref": head_ref,
+        "head_sha": head_sha,
+    }
+
+
+def verify_handoff(payload: dict[str, Any]) -> dict[str, Any]:
+    publication_bead_id = validate_bead_id(
+        payload_value(
+            payload,
+            "publication_bead_id",
+            "workflow_bead_id",
+            "publication",
+            "workflow",
+        ),
+        "publication_bead_id",
+    )
+    _, publication_metadata = show_bead(publication_bead_id)
+    context = publication_context(
+        payload,
+        publication_metadata,
+        require_reference=False,
+    )
+    watch_id = validate_watch_id(
+        publication_metadata.get("handoff_watch_id"),
+    )
+    target = handoff_target(context["rig"])
+    expected_receipt = receipt_updates(publication_bead_id, watch_id, target)
+    existing_receipt_matches(publication_metadata, expected_receipt)
+    _, watch_metadata = show_issue(watch_id)
+    existing_receipt_matches(watch_metadata, expected_receipt)
+    identity = watch_identity_from_metadata(watch_metadata, context)
+    if watch_id_for(identity) != watch_id:
+        fail("watch ID does not match watch identity", "identity-mismatch")
+    if watch_metadata.get("rig") != context["rig"]:
+        fail("watch rig does not match publication", "identity-mismatch")
+    if watch_metadata.get("rig_prefix") != context["rig_prefix"]:
+        fail("watch prefix does not match publication", "identity-mismatch")
+    if watch_metadata.get("handoff_publication_bead") != publication_bead_id:
+        fail("watch publication binding does not match", "identity-mismatch")
+    supplied_url = context.get("input_url")
+    if supplied_url is not None and supplied_url != identity["url"]:
+        fail("watch URL does not match request", "identity-mismatch")
+    if (
+        context.get("pr_number") is not None
+        and int(context["pr_number"]) != identity["pr_number"]
+    ):
+        fail("watch PR number does not match request", "identity-mismatch")
+    return {
+        "ok": True,
+        "action": "verify-handoff",
+        "rig": context["rig"],
+        "publication_bead_id": publication_bead_id,
+        "watch_id": watch_id,
+        "target": target,
+        "verified": True,
+    }
 
 
 def show_state(payload: dict[str, Any]) -> dict[str, Any]:
@@ -1873,6 +2479,36 @@ def parse_cli_request(argv: list[str]) -> dict[str, Any]:
             ),
             "confirm-action": ("watch_id", "action_id", "current_sha",),
             "confirm": ("watch_id", "action_id", "current_sha",),
+            "publication-handoff": (
+                "rig",
+                "publication_bead_id",
+                "url",
+                "pr_number",
+            ),
+            "publish-handoff": (
+                "rig",
+                "publication_bead_id",
+                "url",
+                "pr_number",
+            ),
+            "handoff-publication": (
+                "rig",
+                "publication_bead_id",
+                "url",
+                "pr_number",
+            ),
+            "verify-handoff": (
+                "rig",
+                "publication_bead_id",
+                "url",
+                "pr_number",
+            ),
+            "verify-publication-handoff": (
+                "rig",
+                "publication_bead_id",
+                "url",
+                "pr_number",
+            ),
         }.get(request_action, ())
         for key, value in zip(positional_fields, positionals):
             data.setdefault(key, value)
@@ -1884,6 +2520,14 @@ def dispatch(payload: dict[str, Any]) -> dict[str, Any]:
     action = payload.get("action")
     if action == "handoff":
         return handoff(payload)
+    if action in {
+        "publication-handoff",
+        "publish-handoff",
+        "handoff-publication",
+    }:
+        return publication_handoff(payload)
+    if action in {"verify-handoff", "verify-publication-handoff"}:
+        return verify_handoff(payload)
     if action in {"show", "state", "state-show"}:
         return show_state(payload)
     if action == "transition":
