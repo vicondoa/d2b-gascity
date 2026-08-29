@@ -879,7 +879,7 @@ class RootPortableCityTests(unittest.TestCase):
         ) as raw_root:
             root = pathlib.Path(raw_root)
             try:
-                city = root / "city"
+                city = root / "d2b-gascity"
                 rig = root / "rig"
                 home = root / "home"
                 gc_home = root / "gc-home"
