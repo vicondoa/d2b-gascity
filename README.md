@@ -149,6 +149,72 @@ administrators; this repository does not claim that the current host is
 already configured that way.
 The policy requires pull requests and must apply to administrators.
 
+## PR babysitting and human-gate recovery
+
+After publication opens a pull request, the imported official
+`ce-babysit-pr` skill is the supported watch for that existing open GitHub PR.
+Invoke it for one named pull request:
+
+```text
+/ce-babysit-pr <PR number or URL>
+```
+
+The default is an in-session watch. The explicit `watch` form forces that
+mode; `checkpoint` runs one bounded tick and pauses monitoring:
+
+```text
+/ce-babysit-pr <PR number or URL> watch
+/ce-babysit-pr <PR number or URL> checkpoint
+```
+
+This city supports target-only babysitting. The skill observes review
+feedback, checks, branch currency, and mergeability through the official
+GitHub tooling, but does not expand the run to other pull requests. Its
+reported vocabulary includes `looks-ready`, `cautiously looks ready`,
+`blocked-external-drained`, `terminal` (`MERGED` or `CLOSED`), `budget
+exhausted`, and `paused`. `needs-human` and `blocked-failing` remain explicit
+residual blockers rather than success. A looks-ready report is a readiness
+signal and says "your call"; human owners retain approval and merge authority.
+No city-supported babysitting invocation performs automatic approval, a merge,
+or a force-push.
+
+The d2b rig remains targeted to `v3` with `merge_strategy=pr`. This
+city-source change is delivered to `main` through a pull request.
+
+### Native human-gate recovery
+
+The imported Gas City core schedules these native orders; the city does not
+add a watcher, relay, or replacement scheduler:
+
+| Order | Trigger and defaults | Behavior |
+| --- | --- | --- |
+| `notify-on-human-gate-creation` | `bead.created` event | Re-reads an open `await_type=human` gate, resolves `assignee`, `gc.deferred_assignee`, or the `human` fallback, then sends one `gc mail send --notify` notification. |
+| `renudge-stale-human-gates` | Cooldown sweep every `5m` | Re-reads open human gates after `GC_STALE_GATE_THRESHOLD` (`1h`) and re-notifies each gate no more often than `GC_STALE_GATE_RENUDGE_INTERVAL` (`1h`). |
+
+The existing mechanical `gate-sweep` remains separate. The order scripts
+require `jq` on `PATH` and run as native supervisor exec orders. Successful
+delivery advances per-gate deduplication state; an undeliverable send exits
+non-zero, leaves the marker unchanged, and remains eligible for a later retry.
+Resolving a gate removes it from the open set, so stale re-notification stops.
+Durable Beads state and native pack state let normal supervisor restart and
+reconciliation resume the same gate without a second lifecycle owner.
+
+The upstream defaults and host-local override names are:
+
+| Override | Default | Purpose |
+| --- | --- | --- |
+| `GC_NOTIFY_GATE_LOOKBACK` | `5m` | Creation-event lookback window. |
+| `GC_NOTIFY_GATE_RETENTION` | `1h` | Creation-notification dedup retention. |
+| `GC_STALE_GATE_THRESHOLD` | `1h` | Age before the first stale-gate re-notification. |
+| `GC_STALE_GATE_RENUDGE_INTERVAL` | `1h` | Minimum interval between stale-gate re-notifications. |
+| `GC_STALE_GATE_STATE_RETENTION` | `24h` | Retention for stale-gate dedup state. |
+| `GC_ESCALATION_RECIPIENT` | `human` | Fallback addressee when no gate owner is recorded. |
+
+Keep override values, notification bodies, gate identifiers, and runtime
+state host-local. Operators can inspect safe gate status with
+`gc bd gate list --json` and `gc bd gate show <gate-id> --json`, and resolve a
+gate through native `gc bd gate resolve <gate-id>`.
+
 ## Clean reset
 
 The reset and bind-mount removal are human-only actions. Follow the

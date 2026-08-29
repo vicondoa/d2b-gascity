@@ -77,6 +77,84 @@ committed test code, fixtures, reports, prompts, responses, or pull-request
 payloads. The focused suite never starts Discord, Copilot, Codex, or an
 external publication flow.
 
+### PR babysitting
+
+This is a host-owned, redacted smoke for the imported `ce-babysit-pr` skill,
+not a credential-free repository test. Stop the smoke before starting if the
+host lacks all of the following:
+
+- a disposable open GitHub pull request;
+- authenticated `gh` access through a least-privilege identity that can
+  inspect the PR and its working branch but cannot approve, merge, force-push,
+  or administer the repository;
+- a host capable of running the native skill and, for a continuous run,
+  keeping its in-session watch alive.
+
+Invoke only the named target form:
+
+```text
+/ce-babysit-pr <PR number or URL>
+```
+
+Use the explicit `watch` form to exercise the normal self-sustaining watch, or
+`checkpoint` to exercise one bounded tick and its paused handback:
+
+```text
+/ce-babysit-pr <PR number or URL> watch
+/ce-babysit-pr <PR number or URL> checkpoint
+```
+
+Confirm that a pending check remains pending, review feedback is handled
+before a final readiness report, and a failed check remains an explicit
+`blocked-failing` residual. A clean settled PR may report `looks-ready` or
+`cautiously looks ready`; an external approval gate may report
+`blocked-external-drained`; an observed `MERGED` or `CLOSED` PR is
+`terminal`; a bounded run can end as `budget exhausted` or `paused`.
+`needs-human` decisions remain visible and do not become a success result.
+Verify that the run never performs automatic approval, a merge, or a
+force-push. Human owners decide what happens after a readiness report.
+
+Record only redacted pass/fail notes outside this repository. Do not save the
+PR URL, identifiers, review text, check output, prompts, responses, logs, or
+watch state in source control.
+
+### Human-gate recovery
+
+Use a disposable Beads issue and a disposable notification recipient. Stop
+before the smoke if no restartable native supervisor, notification path, or
+safe host-owned fixture is available. Create a generic human gate through the
+native command:
+
+```text
+gc bd gate create --type=human --blocks <disposable-issue-id> \
+  --reason="Disposable smoke gate"
+```
+
+Verify the following in order:
+
+1. `notify-on-human-gate-creation` sends one native notification for the new
+   open human gate and does not duplicate it when the creation event is
+   observed again.
+2. `renudge-stale-human-gates` waits until
+   `GC_STALE_GATE_THRESHOLD` (default `1h`) and then re-notifies no more often
+   than `GC_STALE_GATE_RENUDGE_INTERVAL` (default `1h`). A disposable
+   host-local shorter duration may be used to bound the smoke; do not commit
+   that override.
+3. A deliberately unavailable notification path produces a visible,
+   non-zero order result and leaves the deduplication marker eligible for a
+   later retry rather than recording false success.
+4. `gc bd gate resolve <gate-id>` stops further stale notifications.
+5. Restarting the native supervisor while the gate is open preserves the same
+   durable gate and resumes native handling without duplicate messages inside
+   the configured interval.
+
+The orders require `jq` on `PATH`; they are native supervisor orders, not a
+repository-local watcher, relay, service, or scheduler. Keep all recipient
+mappings, gate identifiers, notification bodies, runtime state, and delivery
+evidence host-local. Record only redacted pass/fail notes outside the
+repository, and treat missing disposable resources as a preflight stop rather
+than a passing or skipped behavioral result.
+
 ### Gas City pack
 
 - Confirm native `gc status` shows the `gc.mayor` skill path and d2b rig

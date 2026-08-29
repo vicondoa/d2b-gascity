@@ -261,6 +261,108 @@ and keep merge decisions human-owned.
 Mappings and command sync are native pack state. The city does not copy or
 hard-code them.
 
+## PR babysitting and human-gate recovery
+
+### Supported target-only PR watch
+
+The official imported `ce-babysit-pr` skill is a post-publication watch for an
+existing open GitHub pull request. It is GitHub-only and requires the host's
+authenticated `gh` tooling plus a checkout that can read the target PR and
+push only the authorized working branch when the official skill delegates an
+approved fix. The city supports one named PR at a time:
+
+```text
+/ce-babysit-pr <PR number or URL>
+```
+
+The empty-argument current-branch form is also an upstream capability, but
+using an explicit number or URL is the operator contract here. The default
+is the skill's self-sustaining in-session watch. These target-only forms are
+also supported when the host needs to select the execution mode:
+
+```text
+/ce-babysit-pr <PR number or URL> watch
+/ce-babysit-pr <PR number or URL> checkpoint
+```
+
+`watch` keeps the detector and tick loop in session. `checkpoint` performs
+one bounded tick, reports the current state, and pauses monitoring; re-run
+the same target-only invocation for another tick. Do not run a second polling
+process or copy the skill into this repository.
+
+The official result vocabulary is intentionally preserved:
+
+| Result or residual | Meaning |
+| --- | --- |
+| `looks-ready` | GitHub reports certain `MERGEABLE` and `CLEAN`, checks and feedback are settled, and the cooling-off rules hold. The report says "your call", not approval. |
+| `cautiously looks ready` | An incomplete review lifecycle reached its bounded stale path; this is still not reviewer approval. |
+| `blocked-external-drained` | A fork PR's checks still await maintainer approval after the bounded review drain. |
+| `needs-human` | A typed review or CI decision, or an unresolved semantic conflict, remains parked. |
+| `blocked-failing` | A dispatched check remains terminally failed and is an actionable blocker. |
+| `terminal` (`MERGED` or `CLOSED`) | GitHub reports that the PR is no longer open. |
+| `budget exhausted` | The active watch budget or its wall-clock backstop ended the run. |
+| `paused` | Checkpoint mode ended the one-tick run with monitoring paused. |
+
+`needs-human` and `blocked-failing` are standing residuals while an
+in-session watch continues; they are never success-shaped fallbacks. A
+failed check remains visible as `blocked-failing`, and an operator
+cancellation or checkpoint is reported as a paused handback. The city does
+not provide a stack-wide or merge-capable babysitting invocation, automatic
+approval, merge, or force-push. Human owners retain all approval and merge
+decisions.
+
+Observe the native state without recording private payloads:
+
+```text
+gc status
+gc bd gate list --json
+gc bd gate show <gate-id> --json
+gc bd gate resolve <gate-id>
+```
+
+For the external d2b rig, publication still persists and re-reads
+`metadata.target=v3` and `metadata.merge_strategy=pr`. This city-source
+documentation change is delivered to `main` through a pull request.
+
+### Native human-gate orders
+
+The selected Gas City core schedules both human-gate recovery orders as native
+supervisor exec orders. The existing mechanical `gate-sweep` remains
+composed, but it does not replace these human-gate orders.
+
+| Order | Native behavior |
+| --- | --- |
+| `notify-on-human-gate-creation` | Runs on `bead.created`, re-fetches the bead, and handles only an open `await_type=human` gate. The addressee is selected from `assignee`, then `gc.deferred_assignee`, then `GC_ESCALATION_RECIPIENT` (default `human`). It sends through `gc mail send --notify` at most once per gate. |
+| `renudge-stale-human-gates` | Runs as a `5m` cooldown sweep across the city and rigs. It re-fetches open human gates after `GC_STALE_GATE_THRESHOLD` (default `1h`) and re-notifies a gate no more often than `GC_STALE_GATE_RENUDGE_INTERVAL` (default `1h`). |
+
+Both scripts require `jq` on `PATH`. A successful send advances the
+per-gate deduplication timestamp only after delivery. A failed send exits
+non-zero, remains visible to the supervisor, and does not advance that
+timestamp, so a later sweep can retry it. Resolving the gate removes it from
+the open-gate set and stops further stale reminders. The creation order's
+lookback retry is opportunistic; the stale sweep is the durable backstop for
+an open gate.
+
+Native Beads owns the gate record and native pack state owns the dedup ledgers
+under runtime state. After a normal supervisor restart and reconciliation,
+the same durable gate is eligible for the same orders without a replacement
+watcher, duplicate scheduler, or duplicate notification inside the applicable
+interval.
+
+The selected upstream defaults and host-local override names are:
+
+| Override | Default | Applies to |
+| --- | --- | --- |
+| `GC_NOTIFY_GATE_LOOKBACK` | `5m` | Creation-event lookback. |
+| `GC_NOTIFY_GATE_RETENTION` | `1h` | Creation-notification dedup retention. |
+| `GC_STALE_GATE_THRESHOLD` | `1h` | Time a gate must remain open before its first re-nudge. |
+| `GC_STALE_GATE_RENUDGE_INTERVAL` | `1h` | Minimum time between stale-gate re-nudges. |
+| `GC_STALE_GATE_STATE_RETENTION` | `24h` | Stale-gate dedup-state retention. |
+| `GC_ESCALATION_RECIPIENT` | `human` | Fallback addressee. |
+
+Override values, recipient mappings, gate identifiers, notification bodies,
+and runtime paths belong to the host and must not be committed here.
+
 ## Chat bindings, ambient reads, and launchers
 
 Room/thread bindings and exact DM bindings route messages to named sessions:
