@@ -56,6 +56,8 @@ CORE_PACK_FILES = (
     "model-tiers.base.toml",
     "commands/gen-model-tiers/command.toml",
     "commands/gen-model-tiers/run.sh",
+    "template-fragments/command-glossary.template.md",
+    "template-fragments/operational-awareness.template.md",
     "template-fragments/mayor-operating-rhythm.template.md",
     "template-fragments/efficient-routing-rules.template.md",
     "template-fragments/sdlc-mayor-coding-rules.template.md",
@@ -306,6 +308,32 @@ class RootPortableCityTests(unittest.TestCase):
                 ],
             },
         )
+        local_global_fragments = {
+            "command-glossary": (
+                CORE_PACK_ROOT
+                / "template-fragments"
+                / "command-glossary.template.md"
+            ),
+            "operational-awareness": (
+                CORE_PACK_ROOT
+                / "template-fragments"
+                / "operational-awareness.template.md"
+            ),
+            "d2b-governance": (
+                CITY_ROOT
+                / "template-fragments"
+                / "d2b-governance.template.md"
+            ),
+        }
+        for name in config["workspace"]["global_fragments"]:
+            if name == "discord-v0":
+                continue
+            self.assertIn(name, local_global_fragments)
+            path = local_global_fragments[name]
+            self.assertRegex(
+                path.read_text(encoding="utf-8"),
+                rf'\{{\{{\s*define\s+"{re.escape(name)}"',
+            )
         expected_args = {
             "copilot-deep-sol": [
                 "--yolo",
@@ -851,7 +879,6 @@ class RootPortableCityTests(unittest.TestCase):
             / "template-fragments"
             / "d2b-governance.template.md"
         ).read_text(encoding="utf-8")
-        self.assertRegex(fragment, r'\{\{ define "d2b-governance"')
         for marker in (
             "build-basic",
             "implement",
@@ -1695,9 +1722,14 @@ class RootPortableCityTests(unittest.TestCase):
                     },
                     expected_role_providers,
                 )
-                rendered_mayor = run_gc("prime", "mayor", "--strict").stdout
+                rendered_mayor_result = run_gc("prime", "mayor", "--strict")
+                self.assertEqual(rendered_mayor_result.stderr, "")
+                rendered_mayor = rendered_mayor_result.stdout
                 rendered_mayor_flat = " ".join(rendered_mayor.split())
                 for marker in (
+                    "Use `gc --help`",
+                    "`gc doctor --json`",
+                    "At the start of each turn",
                     "Your default state is idle",
                     "Gas City may show provider profiles as implicit agents",
                     "Do not implement source changes in the mayor session",
