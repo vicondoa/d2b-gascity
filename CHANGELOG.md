@@ -9,6 +9,9 @@ and this project follows semantic versioning where releases are published.
 
 ### Changed
 
+- Added a suspended-on-start `city-source` rig for native workflows that modify
+  this repository, with `main` governance and the same model-tier projection as
+  the external `d2b` product rig.
 - Added local definitions for the global `command-glossary` and
   `operational-awareness` fragments so strict prompt rendering cannot silently
   omit them without importing the full Gastown workflow pack.

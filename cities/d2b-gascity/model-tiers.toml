@@ -7,7 +7,17 @@ name = "requirements-planner"
 provider = "deep-thinker"
 
 [[patches.agent]]
+dir = "city-source"
+name = "requirements-planner"
+provider = "deep-thinker"
+
+[[patches.agent]]
 dir = "d2b"
+name = "design-author"
+provider = "deep-thinker"
+
+[[patches.agent]]
+dir = "city-source"
 name = "design-author"
 provider = "deep-thinker"
 
@@ -17,7 +27,17 @@ name = "task-decomposer"
 provider = "deep-thinker"
 
 [[patches.agent]]
+dir = "city-source"
+name = "task-decomposer"
+provider = "deep-thinker"
+
+[[patches.agent]]
 dir = "d2b"
+name = "design-implementation-reviewer"
+provider = "reviewer"
+
+[[patches.agent]]
+dir = "city-source"
 name = "design-implementation-reviewer"
 provider = "reviewer"
 
@@ -27,7 +47,17 @@ name = "design-test-risk-reviewer"
 provider = "reviewer"
 
 [[patches.agent]]
+dir = "city-source"
+name = "design-test-risk-reviewer"
+provider = "reviewer"
+
+[[patches.agent]]
 dir = "d2b"
+name = "implementation-reviewer"
+provider = "reviewer"
+
+[[patches.agent]]
+dir = "city-source"
 name = "implementation-reviewer"
 provider = "reviewer"
 
@@ -37,7 +67,17 @@ name = "gap-analyst"
 provider = "reviewer"
 
 [[patches.agent]]
+dir = "city-source"
+name = "gap-analyst"
+provider = "reviewer"
+
+[[patches.agent]]
 dir = "d2b"
+name = "review-synthesizer"
+provider = "reviewer"
+
+[[patches.agent]]
+dir = "city-source"
 name = "review-synthesizer"
 provider = "reviewer"
 
@@ -47,7 +87,17 @@ name = "issue-triager"
 provider = "reviewer"
 
 [[patches.agent]]
+dir = "city-source"
+name = "issue-triager"
+provider = "reviewer"
+
+[[patches.agent]]
 dir = "d2b"
+name = "implementation-worker"
+provider = "solid-worker"
+
+[[patches.agent]]
+dir = "city-source"
 name = "implementation-worker"
 provider = "solid-worker"
 
@@ -57,6 +107,16 @@ name = "run-operator"
 provider = "fast-worker"
 
 [[patches.agent]]
+dir = "city-source"
+name = "run-operator"
+provider = "fast-worker"
+
+[[patches.agent]]
 dir = "d2b"
+name = "publisher"
+provider = "fast-worker"
+
+[[patches.agent]]
+dir = "city-source"
 name = "publisher"
 provider = "fast-worker"

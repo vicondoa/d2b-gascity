@@ -55,3 +55,20 @@ target_branch = "v3"
 open_pr = "true"
 push = "true"
 drain_policy = "separate"
+
+[[rigs]]
+name = "city-source"
+prefix = "city"
+default_branch = "main"
+suspended_on_start = true
+
+[rigs.imports.gc]
+source = "https://github.com/gastownhall/gascity-packs/tree/main/gascity/roles"
+version = "sha:9f98ea4e1974cb49d18cd0c453eb81b2370cca84"
+
+[rigs.formula_vars]
+base_branch = "main"
+target_branch = "main"
+open_pr = "true"
+push = "true"
+drain_policy = "separate"

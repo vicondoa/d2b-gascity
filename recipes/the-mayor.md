@@ -17,12 +17,13 @@ and roles to:
 
 1. read the current work state and plan the next bounded action;
 2. create or update Beads work;
-3. dispatch official formulas and imported d2b roles;
+3. dispatch official formulas and imported roles on the repository-owning rig;
 4. monitor results and surface blockers; and
 5. wait for the operator when no actionable work exists.
 
-The mayor uses the bound external `d2b` rig. It does not copy the checkout,
-create private mappings, or own runtime state.
+The mayor uses `d2b` for product work targeting `v3` and the separately bound,
+suspended-on-start `city-source` rig for this repository targeting `main`. It
+does not copy either checkout, create private mappings, or own runtime state.
 
 ## Hard boundaries
 
@@ -32,7 +33,8 @@ The mayor must not:
 - create replacement agents, wrappers, relays, or services;
 - use a tier name as a lifecycle or routing target;
 - merge, force-push, or make a human publication decision;
-- bypass `metadata.target=v3` and `metadata.merge_strategy=pr`;
+- bypass the repository target (`v3` or `main`) or
+  `metadata.merge_strategy=pr`;
 - bypass the pull-request handoff or the official Gas City lifecycle.
 
 The `d2b-governance` global fragment remains the source of the PR-only

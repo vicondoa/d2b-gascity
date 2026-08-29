@@ -1,7 +1,8 @@
 # Contributing
 
-This private repository is the portable source for one Gas City city and one
-external `vicondoa/d2b` rig on branch `v3`. The only active city root is
+This private repository is the portable source for one Gas City city, one
+external `vicondoa/d2b` product rig on branch `v3`, and one separate
+city-source clone for work targeting `main`. The only active city root is
 `cities/d2b-gascity`. Keep the repository a city source, not a second d2b
 product tree or a host deployment repository.
 
@@ -40,8 +41,9 @@ state.
   its recorded branch and must fail closed for missing branches or guessed
   legacy provenance.
 - Use the official Gas City formulas (`build-basic`, `implement`,
-  `github-issue-fix`, `publish`) for d2b work. Publication must persist and
-  re-read `target=v3` and `merge_strategy=pr`.
+  `github-issue-fix`, `publish`) on the repository-owning rig. Publication
+  must persist and re-read `merge_strategy=pr` plus `target=v3` for d2b or
+  `target=main` for city-source.
 - Publication must refuse direct merges and never merge or force-push. Host
   branch protection for `v3` is defense-in-depth and must require pull
   requests and apply to administrators; this repository does not claim the
@@ -68,9 +70,11 @@ unmount the d2b bind mount without recursive deletion, preserve the external
 checkout's product-local `.beads/`, `.gitignore`, and hooks, and remove only
 confirmed old root-city runtime paths. Set host-local `GC_CITY_PATH`, run
 `gc init --file city.toml --preserve-existing --no-start .` from
-`cities/d2b-gascity`, bind the verified source checkout with `gc rig add`,
-and re-import Discord with stdin token input, least-privilege permissions,
-allowlists, and the documented service exposure boundaries.
+`cities/d2b-gascity`, bind the verified d2b checkout, and provision a separate
+city-source clone with `gc rig add --start-suspended`. Never bind city-source
+to the live nested city checkout. Re-import Discord with stdin token input,
+least-privilege permissions, allowlists, and the documented service exposure
+boundaries.
 
 ## Validation and evidence
 

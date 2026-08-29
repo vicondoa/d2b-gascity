@@ -72,10 +72,11 @@ The principal formulas include:
 - `mol-d2b-discord-fix-issue` for Discord first-run `origin/v3` workspace
   setup.
 
-The d2b rig formula defaults set both `base_branch = "v3"` and
-`target_branch = "v3"`. Publication must persist `metadata.target=v3` and
-`metadata.merge_strategy=pr` and refuse direct merges. Never merge or
-force-push. Host branch protection for `v3` is defense-in-depth and must
+The d2b rig formula defaults set `base_branch = "v3"` and
+`target_branch = "v3"`; city-source uses `main` for both. Publication must
+persist `metadata.merge_strategy=pr` plus `metadata.target=v3` for d2b or
+`metadata.target=main` for city-source and refuse direct merges. Never merge
+or force-push. Host branch protection for `v3` is defense-in-depth and must
 require pull requests and apply to administrators; this repository does not
 claim the current host is already configured that way. Merge decisions remain
 human-owned.
@@ -96,21 +97,38 @@ session that receives a Discord event the explicit reply contract. The daemon us
 `patrol_interval=30s`, `max_restarts=5`, `restart_window=1h`,
 `shutdown_timeout=5s`, and `formula_v2=true`.
 
-## Bind the d2b rig
+## Bind the product and city-source rigs
 
-The nested `cities/d2b-gascity/city.toml` declares exactly one pathless rig
-named `d2b`, with prefix `d2b` and default branch `v3`. From that nested city,
-bind a verified external checkout through native Gas City:
+The nested `cities/d2b-gascity/city.toml` declares two pathless native work
+surfaces. The `d2b` product rig uses prefix `d2b` and branch `v3`.
+The suspended-on-start `city-source` rig uses prefix `city` and branch `main`
+for changes to this repository.
+
+Because `gc rig add` validates every declared rig and accepts one binding per
+invocation, seed the machine-local `city-source` binding in `.gc/site.toml`
+before binding the external product checkout. The path must be a separate
+clone or worktree of `d2b-gascity`, never the live nested city checkout:
+
+```toml
+[[rig]]
+name = "city-source"
+path = "/path/to/a/d2b-gascity-checkout"
+```
+
+Then provision both rigs through native Gas City:
 
 ```text
 gc rig add <d2b-checkout> --name d2b --city .
+gc rig add <separate-d2b-gascity-checkout> \
+  --name city-source --start-suspended --city .
 gc status
 ```
 
-The checkout path is written to live `.gc/site.toml` only. Do not add a site
-mapping, provider patch, named worker, or service definition to this source
-repository. The city model-tier projection selects the `solid-worker` Luna
-tier for `implementation-worker`; it does not copy an inherited formula body.
+Checkout paths are written to live `.gc/site.toml` only. Do not add a committed
+path, named worker, or service definition to this source repository. The same
+model-tier projection applies to both rigs: Sol plans, Grok reviews, Luna
+implements, and fast Luna performs mechanical operations. Product publication
+targets `v3`; city-source publication targets `main`.
 
 ## Discord services and ingress
 
@@ -236,9 +254,9 @@ ancestry, rebases with `--rebase-merges --reapply-cherry-picks --empty=stop`,
 and stops on conflicts or missing refs with recovery instructions. All other
 official Discord workflow behavior is retained.
 
-d2b publication is PR-only: persist and verify `target=v3` plus
-`merge_strategy=pr`, refuse direct merges, and keep merge decisions
-human-owned.
+Publication is PR-only: persist and verify `merge_strategy=pr` plus
+`target=v3` for d2b or `target=main` for city-source, refuse direct merges,
+and keep merge decisions human-owned.
 
 Mappings and command sync are native pack state. The city does not copy or
 hard-code them.
@@ -398,7 +416,8 @@ evidence in this repository.
 The adapted city-local mayor uses the official `gc.mayor` skill and official
 Gas City formulas and roles. It plans, creates beads, dispatches work,
 monitors results, and waits when idle. It must never implement source changes,
-merge, force-push, or bypass the d2b `v3` pull-request handoff.
+merge, force-push, or bypass either the d2b `v3` or city-source `main`
+pull-request handoff.
 
 ## Human-only clean reset and cutover
 
@@ -473,16 +492,32 @@ place:
 export GC_CITY_PATH="<host-local>/cities/d2b-gascity"
 cd cities/d2b-gascity
 gc init --file city.toml --preserve-existing --no-start .
+```
+
+Create a separate clone or worktree for city-source automation. Never bind
+`city-source` to the live nested city checkout. Seed the machine-local binding:
+
+```toml
+[[rig]]
+name = "city-source"
+path = "/path/to/separate/d2b-gascity-checkout"
+```
+
+Provision both rigs:
+
+```text
 gc rig add <verified-d2b-checkout> --name d2b --city .
+gc rig add <separate-d2b-gascity-checkout> \
+  --name city-source --start-suspended --city .
 gc status
 ```
 
 `GC_CITY_PATH` is host-local and must not be committed. The `gc init` command
 must run from `cities/d2b-gascity`, preserve the authored `city.toml`,
 `pack.toml`, `packs.lock`, and local pack import, and create fresh native
-state. The rig path must appear only in live `.gc/site.toml`. Verify that
-the source checkout remains external and that exactly one city and one d2b
-rig are registered.
+state. Rig paths must appear only in live `.gc/site.toml`. Verify one
+registered city, the external d2b product rig, and the separate city-source
+rig.
 
 ### 6. Re-import Discord under the private inventory
 
@@ -514,8 +549,9 @@ Preserve service exposure boundaries: `discord-interactions` is public for
 signed `/v0/discord/interactions`, `discord-admin` is tenant/access-policy
 protected, and `discord-gateway` is private. The official Discord pack owns
 all three services. Keep Copilot Requests, d2b publication, and Discord app
-credentials separate, then verify `target=v3` and `merge_strategy=pr` before
-any human-owned pull-request publication.
+credentials separate, then verify `merge_strategy=pr` plus `target=v3` for
+d2b or `target=main` for city-source before any human-owned pull-request
+publication.
 
 ## Stop or unregister
 

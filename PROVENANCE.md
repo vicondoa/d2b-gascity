@@ -40,11 +40,13 @@ create first-run work from `origin/v3` and apply fail-closed recorded branch
 resume and rebase checks; the official Discord workflow remains the source
 for all other steps.
 
-The local `d2b-governance` fragment records the `v3` target, PR-only
-publication policy, and human-owned merge boundary without adding a service
-or transport. The city-local mayor adapts the cookbook coordinator concept
-through the official `gc.mayor` skill and official Gas City formulas and
-roles; it never implements or merges.
+The local `d2b-governance` fragment records repository-specific targets (`v3`
+for the d2b product rig and `main` for the separate city-source rig), PR-only
+publication, and the human-owned merge boundary without adding a service or
+transport. The d2b Discord formula extension remains product-only. The
+city-local mayor adapts the cookbook coordinator concept through the official
+`gc.mayor` skill and official Gas City formulas and roles; it never implements
+or merges.
 
 The local core pack independently defines the `command-glossary` and
 `operational-awareness` fragments referenced by the city. Their text is local
