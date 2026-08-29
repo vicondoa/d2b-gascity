@@ -490,6 +490,15 @@ class RootPortableCityTests(unittest.TestCase):
             self.assertNotEqual(invalid_name.returncode, 0)
             self.assertIn("invalid rig name", invalid_name.stderr)
 
+            empty_rig = temporary / "empty-rig.toml"
+            empty_rig.write_text(
+                '[[rigs]]\nname = ""\n',
+                encoding="utf-8",
+            )
+            empty_name = generate(empty_rig)
+            self.assertNotEqual(empty_name.returncode, 0)
+            self.assertIn("invalid rig name: empty", empty_name.stderr)
+
             multi_rig = temporary / "multi-rig.toml"
             multi_rig.write_text(
                 '[[rigs]]\nname = "alpha"\n\n[[rigs]]\nname = "beta"\n',
@@ -1571,8 +1580,98 @@ class RootPortableCityTests(unittest.TestCase):
                     resolved_config["config"]["Workspace"]["Name"],
                     "d2b-gascity",
                 )
+                resolved_providers = resolved_config["config"]["Providers"]
+                expected_resolved_args = {
+                    "copilot-deep-sol": [
+                        "--yolo",
+                        "--model",
+                        "gpt-5.6-sol",
+                        "--context",
+                        "long_context",
+                        "--effort",
+                        "medium",
+                    ],
+                    "copilot-review-grok": [
+                        "--yolo",
+                        "--model",
+                        "grok-4.6",
+                        "--context",
+                        "long_context",
+                        "--effort",
+                        "high",
+                    ],
+                    "copilot-solid-luna": [
+                        "--yolo",
+                        "--model",
+                        "gpt-5.6-luna",
+                        "--context",
+                        "long_context",
+                        "--effort",
+                        "max",
+                    ],
+                    "copilot-fast-luna": [
+                        "--yolo",
+                        "--model",
+                        "gpt-5.6-luna",
+                        "--context",
+                        "default",
+                        "--effort",
+                        "medium",
+                    ],
+                }
+                for provider_name, provider_args in expected_resolved_args.items():
+                    provider = resolved_providers[provider_name]
+                    self.assertEqual(provider["Base"], "builtin:copilot")
+                    self.assertEqual(provider["Args"], provider_args)
+                self.assertEqual(
+                    {
+                        name: resolved_providers[name]["Base"]
+                        for name in (
+                            "deep-thinker",
+                            "reviewer",
+                            "solid-worker",
+                            "fast-worker",
+                        )
+                    },
+                    {
+                        "deep-thinker": "copilot-deep-sol",
+                        "reviewer": "copilot-review-grok",
+                        "solid-worker": "copilot-solid-luna",
+                        "fast-worker": "copilot-fast-luna",
+                    },
+                )
                 agents = resolved_config["config"].get("Agents")
                 self.assertIsInstance(agents, list)
+                mayors = [
+                    agent
+                    for agent in agents
+                    if agent.get("Name") == "mayor"
+                    and agent.get("Scope") == "city"
+                ]
+                self.assertEqual(len(mayors), 1)
+                self.assertEqual(mayors[0]["Provider"], "deep-thinker")
+                self.assertEqual(
+                    mayors[0]["AppendFragments"],
+                    [
+                        "mayor-operating-rhythm",
+                        "efficient-routing-rules",
+                        "sdlc-mayor-coding-rules",
+                    ],
+                )
+                self.assertEqual(mayors[0]["WakeMode"], "fresh")
+                self.assertEqual(mayors[0]["MaxActiveSessions"], 1)
+                self.assertEqual(
+                    resolved_config["config"]["NamedSessions"],
+                    [
+                        {
+                            "Name": "",
+                            "Template": "mayor",
+                            "Scope": "city",
+                            "Dir": "",
+                            "Mode": "always",
+                        }
+                    ],
+                )
                 expected_role_providers = {
                     "requirements-planner": "deep-thinker",
                     "design-author": "deep-thinker",
@@ -1596,6 +1695,15 @@ class RootPortableCityTests(unittest.TestCase):
                     },
                     expected_role_providers,
                 )
+                rendered_mayor = run_gc("prime", "mayor", "--strict").stdout
+                rendered_mayor_flat = " ".join(rendered_mayor.split())
+                for marker in (
+                    "Your default state is idle",
+                    "Gas City may show provider profiles as implicit agents",
+                    "Do not implement source changes in the mayor session",
+                    "d2b governance",
+                ):
+                    self.assertIn(marker, rendered_mayor_flat)
 
                 site = city / ".gc" / "site.toml"
                 self.assertTrue(site.is_file())

@@ -55,6 +55,10 @@ while IFS='=' read -r role tier; do
       ;;
   esac
   for rig in "${rigs[@]}"; do
+    if [ -z "$rig" ]; then
+      echo "gen-model-tiers: invalid rig name: empty" >&2
+      exit 1
+    fi
     case "$rig" in
       *[!A-Za-z0-9._-]*)
         echo "gen-model-tiers: invalid rig name: $rig" >&2
