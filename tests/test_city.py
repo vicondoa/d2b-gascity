@@ -14,6 +14,10 @@ import unittest
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
+CITY_RELATIVE = pathlib.Path("cities") / "d2b-gascity"
+CITY_ROOT = ROOT / CITY_RELATIVE
+CORE_PACK_RELATIVE = pathlib.Path("packs") / "core-city"
+CORE_PACK_ROOT = ROOT / CORE_PACK_RELATIVE
 PACK_COMMIT = "9f98ea4e1974cb49d18cd0c453eb81b2370cca84"
 GASCITY_PACK_SOURCE = (
     "https://github.com/gastownhall/gascity-packs/tree/main/gascity"
@@ -37,14 +41,28 @@ DOLT_VERSION = "2.1.7"
 DOLT_ARCHIVE_SHA256 = (
     "15983e811341ed94e5d47fbfc41d2f57d8c7aa65eee511d25a3c3fd5477e28e7"
 )
-AUTHORED_FILES = (
+CITY_AUTHORED_FILES = (
     "city.toml",
     "pack.toml",
     "packs.lock",
+    "model-tiers.toml",
     "formulas/mol-d2b-discord-fix-issue.toml",
     "template-fragments/d2b-governance.template.md",
     "agents/mayor/agent.toml",
     "agents/mayor/prompt.template.md",
+)
+CORE_PACK_FILES = (
+    "pack.toml",
+    "model-tiers.base.toml",
+    "commands/gen-model-tiers/command.toml",
+    "commands/gen-model-tiers/run.sh",
+    "template-fragments/mayor-operating-rhythm.template.md",
+    "template-fragments/efficient-routing-rules.template.md",
+    "template-fragments/sdlc-mayor-coding-rules.template.md",
+)
+AUTHORED_FILES = (
+    *(str(CITY_RELATIVE / relative) for relative in CITY_AUTHORED_FILES),
+    *(str(CORE_PACK_RELATIVE / relative) for relative in CORE_PACK_FILES),
 )
 RUNTIME_PATHS = (
     ".gc",
@@ -172,11 +190,18 @@ def _tracked_text_files() -> list[pathlib.Path]:
 
 
 class RootPortableCityTests(unittest.TestCase):
-    def test_root_layout_has_only_authored_city_files(self) -> None:
+    def test_nested_layout_has_only_authored_city_files(self) -> None:
         for relative in AUTHORED_FILES:
             self.assertTrue((ROOT / relative).is_file(), relative)
 
         for relative in (
+            "city.toml",
+            "pack.toml",
+            "packs.lock",
+            "agents/mayor/agent.toml",
+            "agents/mayor/prompt.template.md",
+            "formulas/mol-d2b-discord-fix-issue.toml",
+            "template-fragments/d2b-governance.template.md",
             "city/city.toml",
             "city/pack.toml",
             "city/packs.lock",
@@ -188,21 +213,36 @@ class RootPortableCityTests(unittest.TestCase):
         ):
             self.assertFalse((ROOT / relative).exists(), relative)
         self.assertEqual(
-            {path.name for path in (ROOT / "formulas").glob("*.toml")},
+            {path.name for path in (CITY_ROOT / "formulas").glob("*.toml")},
             {
                 pathlib.Path(relative).name
-                for relative in AUTHORED_FILES
+                for relative in CITY_AUTHORED_FILES
                 if relative.startswith("formulas/")
             },
         )
+        self.assertEqual(
+            {
+                str(path.relative_to(CORE_PACK_ROOT))
+                for path in CORE_PACK_ROOT.rglob("*")
+                if path.is_file()
+            },
+            set(CORE_PACK_FILES),
+        )
 
-    def test_city_has_one_pathless_d2b_rig_and_stock_providers(
+    def test_city_has_one_pathless_d2b_rig_and_model_tiers(
         self,
     ) -> None:
-        path = ROOT / "city.toml"
+        path = CITY_ROOT / "city.toml"
         text = path.read_text(encoding="utf-8")
         config = tomllib.loads(text)
+        core_pack = tomllib.loads(
+            (CORE_PACK_ROOT / "pack.toml").read_text(encoding="utf-8")
+        )
+        model_tiers = tomllib.loads(
+            (CITY_ROOT / "model-tiers.toml").read_text(encoding="utf-8")
+        )
 
+        self.assertEqual(config["include"], ["model-tiers.toml"])
         self.assertNotIn("api", config)
         self.assertNotIn("suspended_on_start", config)
         self.assertNotIn("[[session]]", text.lower())
@@ -245,12 +285,18 @@ class RootPortableCityTests(unittest.TestCase):
 
         self.assertEqual(
             set(config["providers"]),
-            {"copilot-planning-grok", "copilot-code-luna", "codex"},
+            {
+                "deep-thinker",
+                "reviewer",
+                "solid-worker",
+                "fast-worker",
+                "codex",
+            },
         )
         self.assertEqual(
             config["workspace"],
             {
-                "provider": "copilot-planning-grok",
+                "provider": "deep-thinker",
                 "global_fragments": [
                     "command-glossary",
                     "operational-awareness",
@@ -260,7 +306,16 @@ class RootPortableCityTests(unittest.TestCase):
             },
         )
         expected_args = {
-            "copilot-planning-grok": [
+            "copilot-deep-sol": [
+                "--yolo",
+                "--model",
+                "gpt-5.6-sol",
+                "--context",
+                "long_context",
+                "--effort",
+                "medium",
+            ],
+            "copilot-review-grok": [
                 "--yolo",
                 "--model",
                 "grok-4.6",
@@ -269,22 +324,44 @@ class RootPortableCityTests(unittest.TestCase):
                 "--effort",
                 "high",
             ],
-            "copilot-code-luna": [
+            "copilot-solid-luna": [
+                "--yolo",
+                "--model",
+                "gpt-5.6-luna",
+                "--context",
+                "long_context",
+                "--effort",
+                "max",
+            ],
+            "copilot-fast-luna": [
                 "--yolo",
                 "--model",
                 "gpt-5.6-luna",
                 "--context",
                 "default",
                 "--effort",
-                "max",
+                "medium",
             ],
         }
         for name, args in expected_args.items():
-            provider = config["providers"][name]
+            provider = core_pack["providers"][name]
             self.assertEqual(provider["base"], "builtin:copilot")
             self.assertEqual(provider["args"], args)
             for key in ("command", "env", "option_defaults"):
                 self.assertNotIn(key, provider)
+        self.assertEqual(
+            {
+                name: provider["base"]
+                for name, provider in config["providers"].items()
+                if name != "codex"
+            },
+            {
+                "deep-thinker": "copilot-deep-sol",
+                "reviewer": "copilot-review-grok",
+                "solid-worker": "copilot-solid-luna",
+                "fast-worker": "copilot-fast-luna",
+            },
+        )
         codex = config["providers"]["codex"]
         self.assertEqual(codex["base"], "builtin:codex")
         self.assertEqual(codex["ready_delay_ms"], 0)
@@ -297,17 +374,33 @@ class RootPortableCityTests(unittest.TestCase):
         ):
             self.assertNotIn(marker, text)
 
+        expected_tiers = {
+            "requirements-planner": "deep-thinker",
+            "design-author": "deep-thinker",
+            "task-decomposer": "deep-thinker",
+            "design-implementation-reviewer": "reviewer",
+            "design-test-risk-reviewer": "reviewer",
+            "implementation-reviewer": "reviewer",
+            "gap-analyst": "reviewer",
+            "review-synthesizer": "reviewer",
+            "issue-triager": "reviewer",
+            "implementation-worker": "solid-worker",
+            "run-operator": "fast-worker",
+            "publisher": "fast-worker",
+        }
+        patches = model_tiers["patches"]["agent"]
+        self.assertEqual(len(patches), len(expected_tiers))
         self.assertEqual(
-            config["patches"],
             {
-                "agent": [
-                    {
-                        "dir": "d2b",
-                        "name": "implementation-worker",
-                        "provider": "copilot-code-luna",
-                    }
-                ]
+                patch["name"]: patch["provider"]
+                for patch in patches
+                if patch["dir"] == "d2b"
             },
+            expected_tiers,
+        )
+        self.assertEqual(
+            {patch["dir"] for patch in patches},
+            {"d2b"},
         )
         for marker in (
             "secret",
@@ -333,9 +426,95 @@ class RootPortableCityTests(unittest.TestCase):
             },
         )
 
+    def test_model_tier_projection_is_deterministic(self) -> None:
+        generator = (
+            CORE_PACK_ROOT / "commands" / "gen-model-tiers" / "run.sh"
+        )
+        result = subprocess.run(
+            [str(generator), str(CITY_ROOT / "city.toml")],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            result.stdout,
+            (CITY_ROOT / "model-tiers.toml").read_text(encoding="utf-8"),
+        )
+
+        with tempfile.TemporaryDirectory() as raw_root:
+            invalid_base = pathlib.Path(raw_root) / "model-tiers.base.toml"
+            invalid_base.write_text(
+                '[tiers]\nimplementation-worker = "invalid tier"\n',
+                encoding="utf-8",
+            )
+            env = os.environ.copy()
+            env["MODEL_TIERS_BASE"] = str(invalid_base)
+            invalid = subprocess.run(
+                [str(generator), str(CITY_ROOT / "city.toml")],
+                cwd=ROOT,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        self.assertNotEqual(invalid.returncode, 0)
+
+    def test_mayor_is_single_native_coordinator(self) -> None:
+        agent = tomllib.loads(
+            (
+                CITY_ROOT / "agents" / "mayor" / "agent.toml"
+            ).read_text(encoding="utf-8")
+        )
+        self.assertEqual(agent["provider"], "deep-thinker")
+        self.assertEqual(agent["scope"], "city")
+        self.assertEqual(agent["wake_mode"], "fresh")
+        self.assertEqual(agent["max_active_sessions"], 1)
+        self.assertEqual(agent["work_dir"], ".gc/agents/mayor")
+        self.assertEqual(
+            agent["append_fragments"],
+            [
+                "mayor-operating-rhythm",
+                "efficient-routing-rules",
+                "sdlc-mayor-coding-rules",
+            ],
+        )
+
+        text = (
+            CITY_ROOT / "agents" / "mayor" / "prompt.template.md"
+        ).read_text(
+            encoding="utf-8",
+        )
+        fragments = "\n".join(
+            path.read_text(encoding="utf-8")
+            for path in (
+                CORE_PACK_ROOT
+                / "template-fragments"
+            ).glob("*.template.md")
+        )
+        policy = (text + "\n" + fragments).lower()
+        for marker in (
+            "gc.mayor",
+            "do not implement",
+            "official gas city roles and formulas",
+            "never merge",
+            "force-push",
+            "default state is idle",
+        ):
+            self.assertIn(marker, policy)
+        for marker in (
+            "claude",
+            "feature-workflow",
+            "gc.routed_to",
+            "gc agent add",
+            "hourly",
+        ):
+            self.assertNotIn(marker, policy)
+
     def test_city_has_no_obsolete_routing_or_delivery_verification(self) -> None:
         text = "\n".join(
-            (ROOT / relative).read_text(encoding="utf-8")
+            (CITY_ROOT / relative).read_text(encoding="utf-8")
             for relative in ("city.toml", "pack.toml")
         ).lower()
         for marker in (
@@ -351,12 +530,15 @@ class RootPortableCityTests(unittest.TestCase):
     def test_pack_pins_canonical_sources_and_uses_imported_services(
         self,
     ) -> None:
-        pack = tomllib.loads((ROOT / "pack.toml").read_text(encoding="utf-8"))
+        pack = tomllib.loads(
+            (CITY_ROOT / "pack.toml").read_text(encoding="utf-8")
+        )
         self.assertEqual(pack["pack"]["schema"], 2)
         self.assertEqual(
             {
                 name: import_config["version"]
                 for name, import_config in pack["imports"].items()
+                if "version" in import_config
             },
             {
                 "core": f"sha:{GASCITY_COMMIT}",
@@ -364,6 +546,10 @@ class RootPortableCityTests(unittest.TestCase):
                 "gc": f"sha:{PACK_COMMIT}",
                 "discord": f"sha:{PACK_COMMIT}",
             },
+        )
+        self.assertEqual(
+            pack["imports"]["core-city"],
+            {"source": "../../packs/core-city"},
         )
         self.assertEqual(
             {
@@ -379,6 +565,7 @@ class RootPortableCityTests(unittest.TestCase):
                     "https://github.com/gastownhall/"
                     "gascity.git//examples/bd"
                 ),
+                "core-city": "../../packs/core-city",
                 "gc": GASCITY_PACK_SOURCE,
                 "discord": DISCORD_PACK_SOURCE,
             },
@@ -404,10 +591,12 @@ class RootPortableCityTests(unittest.TestCase):
             "gc-discord-adapter",
             "gc-discord-cli",
         ):
-            self.assertFalse((ROOT / relative).exists(), relative)
+            self.assertFalse((CITY_ROOT / relative).exists(), relative)
 
     def test_lock_pins_exact_sources(self) -> None:
-        lock = tomllib.loads((ROOT / "packs.lock").read_text(encoding="utf-8"))
+        lock_path = CITY_ROOT / "packs.lock"
+        lock_text = lock_path.read_text(encoding="utf-8")
+        lock = tomllib.loads(lock_text)
         expected = {
             GASCITY_PACK_SOURCE: PACK_COMMIT,
             GASCITY_ROLES_PACK_SOURCE: PACK_COMMIT,
@@ -422,12 +611,17 @@ class RootPortableCityTests(unittest.TestCase):
             ): GASCITY_COMMIT,
         }
         self.assertEqual(set(lock["packs"]), set(expected))
+        self.assertNotIn("file://", lock_text)
+        self.assertNotIn(str(ROOT), lock_text)
+        self.assertNotIn("../../packs/core-city", lock_text)
         for source, commit in expected.items():
             self.assertEqual(lock["packs"][source]["version"], f"sha:{commit}")
             self.assertEqual(lock["packs"][source]["commit"], commit)
 
     def test_local_formula_extensions_and_governance_fragment(self) -> None:
-        formula_path = ROOT / "formulas" / "mol-d2b-discord-fix-issue.toml"
+        formula_path = (
+            CITY_ROOT / "formulas" / "mol-d2b-discord-fix-issue.toml"
+        )
         formula = tomllib.loads(formula_path.read_text(encoding="utf-8"))
         self.assertEqual(
             set(formula),
@@ -593,7 +787,9 @@ class RootPortableCityTests(unittest.TestCase):
         self.assertNotIn("git remote show origin", step["description"])
 
         fragment = (
-            ROOT / "template-fragments" / "d2b-governance.template.md"
+            CITY_ROOT
+            / "template-fragments"
+            / "d2b-governance.template.md"
         ).read_text(encoding="utf-8")
         self.assertRegex(fragment, r'\{\{ define "d2b-governance"')
         for marker in (
@@ -628,10 +824,26 @@ class RootPortableCityTests(unittest.TestCase):
                 "SECURITY.md",
                 "AGENTS.md",
                 "PROVENANCE.md",
+                "CHANGELOG.md",
+                "docs/designs/2026-08-28-001-cookbook-layout-and-model-tiers.md",
+                "recipes/model-tiers.md",
+                "recipes/the-mayor.md",
             )
         )
         docs_flat = " ".join(docs.lower().split())
         for marker in (
+            "cities/d2b-gascity",
+            "packs/core-city",
+            "repository-local d2b checkout",
+            "bind mount",
+            "gc rig add",
+            "private preflight inventory",
+            "old root city",
+            "unmount",
+            "recursive deletion",
+            "product-local `.beads/`",
+            "agent hooks",
+            "gc init --file city.toml --preserve-existing --no-start .",
             GASCITY_PACK_SOURCE,
             GASCITY_ROLES_PACK_SOURCE,
             DISCORD_PACK_SOURCE,
@@ -703,15 +915,26 @@ class RootPortableCityTests(unittest.TestCase):
             "publish",
             "Copilot Requests",
             "GH_TOKEN",
+            "deep-thinker",
+            "reviewer",
+            "solid-worker",
+            "fast-worker",
+            "gpt-5.6-sol",
             "grok-4.6",
+            "gpt-5.6-luna",
+            "medium",
             "high",
-            "long_context",
-            "Luna",
             "max",
-            "copilot-planning-grok",
-            "copilot-code-luna",
+            "long_context",
+            "default",
+            "Luna",
             "builtin:copilot",
             "builtin:codex",
+            "thinkjones/gascity-cookbook",
+            "MIT",
+            "rencire/gascity-flake",
+            "no license",
+            "no content was copied",
         ):
             self.assertIn(marker, docs)
         self.assertIn(
@@ -740,19 +963,33 @@ class RootPortableCityTests(unittest.TestCase):
         )
         self.assertIn("source-only", docs.lower())
         self.assertIn("credential separation", docs.lower())
+        self.assertIn("never implement", docs.lower())
+        self.assertIn("never merge", docs.lower())
+        self.assertIn("stock `builtin:codex`", docs.lower())
+        self.assertNotIn(
+            "\n|-- city.toml\n",
+            (ROOT / "README.md").read_text(encoding="utf-8"),
+        )
         for marker in (
             "s" + "lack",
             "comp" + "ound" + "-engineering",
             "comp" + "ound" + " engineering",
+            "copilot-planning-grok",
+            "copilot-code-luna",
+            "cc.mayor",
         ):
             self.assertNotIn(marker, docs.lower())
 
     def test_discord_and_gascity_pack_are_enabled_and_pinned(self) -> None:
-        pack = tomllib.loads((ROOT / "pack.toml").read_text(encoding="utf-8"))
-        lock = tomllib.loads((ROOT / "packs.lock").read_text(encoding="utf-8"))
+        pack = tomllib.loads(
+            (CITY_ROOT / "pack.toml").read_text(encoding="utf-8")
+        )
+        lock = tomllib.loads(
+            (CITY_ROOT / "packs.lock").read_text(encoding="utf-8")
+        )
         self.assertEqual(
             set(pack["imports"]),
-            {"core", "bd", "gc", "discord"},
+            {"core", "bd", "core-city", "gc", "discord"},
         )
         self.assertEqual(
             pack["imports"]["discord"],
@@ -879,28 +1116,33 @@ class RootPortableCityTests(unittest.TestCase):
         ) as raw_root:
             root = pathlib.Path(raw_root)
             try:
-                city = root / "d2b-gascity"
+                source = root / "source"
+                city = source / CITY_RELATIVE
                 rig = root / "rig"
                 home = root / "home"
                 gc_home = root / "gc-home"
                 git_config = root / "git-config"
                 tool_bin = root / "tools"
-                city.mkdir()
+                city.mkdir(parents=True)
                 rig.mkdir()
                 home.mkdir()
                 gc_home.mkdir()
                 tool_bin.mkdir()
 
                 for relative in AUTHORED_FILES:
-                    destination = city / relative
+                    destination = source / relative
                     destination.parent.mkdir(parents=True, exist_ok=True)
                     shutil.copy2(ROOT / relative, destination)
                 city_before = {
-                    relative: (city / relative).read_bytes()
+                    relative: (source / relative).read_bytes()
                     for relative in AUTHORED_FILES
                 }
 
-                env = os.environ.copy()
+                env = {
+                    key: value
+                    for key, value in os.environ.items()
+                    if not key.startswith(("GC_", "BEADS_", "DOLT_"))
+                }
                 env.update(
                     {
                         "HOME": str(home),
@@ -913,9 +1155,9 @@ class RootPortableCityTests(unittest.TestCase):
                         "GIT_COMMITTER_EMAIL": "gas-city-test@example.invalid",
                     }
                 )
-                _git(["init", "--quiet", "-b", "main"], cwd=city, env=env)
+                _git(["init", "--quiet", "-b", "main"], cwd=source, env=env)
                 _git(["init", "--quiet", "-b", "v3"], cwd=rig, env=env)
-                for repository in (city, rig):
+                for repository in (source, rig):
                     _git(
                         [
                             "config",
@@ -991,11 +1233,20 @@ class RootPortableCityTests(unittest.TestCase):
                 )
                 for relative, contents in city_before.items():
                     self.assertEqual(
-                        (city / relative).read_bytes(),
+                        (source / relative).read_bytes(),
                         contents,
                     )
                 run_gc("config", "show", "--city", str(city))
                 run_gc("import", "check", "--city", str(city))
+                generated_tiers = run_gc(
+                    "core-city",
+                    "gen-model-tiers",
+                    "city.toml",
+                )
+                self.assertEqual(
+                    generated_tiers.stdout,
+                    (city / "model-tiers.toml").read_text(encoding="utf-8"),
+                )
 
                 publish_help = run_gc(
                     "discord",
@@ -1271,16 +1522,28 @@ class RootPortableCityTests(unittest.TestCase):
                 )
                 agents = resolved_config["config"].get("Agents")
                 self.assertIsInstance(agents, list)
-                workers = [
-                    agent
-                    for agent in agents
-                    if agent.get("Dir") == "d2b"
-                    and agent.get("Name") == "implementation-worker"
-                ]
-                self.assertEqual(len(workers), 1)
+                expected_role_providers = {
+                    "requirements-planner": "deep-thinker",
+                    "design-author": "deep-thinker",
+                    "task-decomposer": "deep-thinker",
+                    "design-implementation-reviewer": "reviewer",
+                    "design-test-risk-reviewer": "reviewer",
+                    "implementation-reviewer": "reviewer",
+                    "gap-analyst": "reviewer",
+                    "review-synthesizer": "reviewer",
+                    "issue-triager": "reviewer",
+                    "implementation-worker": "solid-worker",
+                    "run-operator": "fast-worker",
+                    "publisher": "fast-worker",
+                }
                 self.assertEqual(
-                    workers[0].get("Provider"),
-                    "copilot-code-luna",
+                    {
+                        agent.get("Name"): agent.get("Provider")
+                        for agent in agents
+                        if agent.get("Dir") == "d2b"
+                        and agent.get("Name") in expected_role_providers
+                    },
+                    expected_role_providers,
                 )
 
                 site = city / ".gc" / "site.toml"
@@ -1302,7 +1565,7 @@ class RootPortableCityTests(unittest.TestCase):
                 for relative in AUTHORED_FILES:
                     self.assertNotIn(
                         str(rig).encode(),
-                        (city / relative).read_bytes(),
+                        (source / relative).read_bytes(),
                     )
                 self.assertFalse(
                     (home / ".config" / "systemd" / "user").exists()

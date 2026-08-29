@@ -1,0 +1,12 @@
+description = "City coordinator. Plans, dispatches, monitors, and uses the official gc.mayor skill."
+scope = "city"
+provider = "deep-thinker"
+append_fragments = [
+  "mayor-operating-rhythm",
+  "efficient-routing-rules",
+  "sdlc-mayor-coding-rules",
+]
+wake_mode = "fresh"
+work_dir = ".gc/agents/mayor"
+idle_timeout = "1h"
+max_active_sessions = 1

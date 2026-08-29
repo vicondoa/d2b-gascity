@@ -1,9 +1,14 @@
 # Operations
 
-This repository is the portable city source. Native Gas City owns the
-supervisor, city, imported services, retry, stop, and per-user state
+This repository is the portable source for one Gas City city. The only
+active city root is `cities/d2b-gascity`. Native Gas City owns the supervisor,
+city registration, imported services, retry, stop, and per-user state
 lifecycle. The imported packs are source-only; there is no repository-specific
 wrapper, relay, or second supervisor.
+
+The external d2b checkout is not repository content and must not be a local
+checkout or bind mount under this repository. Bind it through native
+`gc rig add`; the path belongs only in live `.gc/site.toml`.
 
 ## Install and initialize
 
@@ -11,13 +16,15 @@ Install the pinned `gc`, `copilot`, and `gh` runtimes, plus optional `codex`
 and ingress tooling, through the separate private `vicondoa/gascity.nix`
 repository or another compatible host source. The city defaults to Gas
 City's stock builtin Copilot CLI provider and keeps stock Codex available.
-Planning and primary review use Grok `grok-4.6` with `high` effort and
-`long_context`. Coding uses Luna with `max` effort.
+The exact four model tiers are documented below and in
+[recipes/model-tiers.md](../recipes/model-tiers.md).
 
 The core distribution is inert: installation does not start a supervisor,
-city, tunnel, or custom service. From a checkout of this repository:
+city, tunnel, or custom service. From the nested city directory:
 
 ```text
+cd cities/d2b-gascity
+export GC_CITY_PATH="$(pwd)"  # host-local; do not commit this value
 gc init --file city.toml --preserve-existing --no-start .
 ```
 
@@ -91,19 +98,19 @@ explicit reply contract. The daemon uses
 
 ## Bind the d2b rig
 
-The root `city.toml` declares exactly one pathless rig named `d2b`, with
-prefix `d2b` and default branch `v3`. Bind a checkout through native Gas
-City:
+The nested `cities/d2b-gascity/city.toml` declares exactly one pathless rig
+named `d2b`, with prefix `d2b` and default branch `v3`. From that nested city,
+bind a verified external checkout through native Gas City:
 
 ```text
 gc rig add <d2b-checkout> --name d2b --city .
 gc status
 ```
 
-The checkout path is written to live `.gc/site.toml` only. Do not add a site mapping, provider patch, named worker, or service definition
-to this source repository. The one city patch for the imported
-`implementation-worker` agent selects the Luna coding lane; it does not copy
-an inherited formula body.
+The checkout path is written to live `.gc/site.toml` only. Do not add a site
+mapping, provider patch, named worker, or service definition to this source
+repository. The city model-tier projection selects the `solid-worker` Luna
+tier for `implementation-worker`; it does not copy an inherited formula body.
 
 ## Discord services and ingress
 
@@ -361,10 +368,20 @@ reads.
 ## Copilot CLI, Codex, and credential boundaries
 
 Gas City defaults to the stock `copilot` command through `builtin:copilot`.
-The workspace default is `copilot-planning-grok`. The d2b
-`implementation-worker` uses `copilot-code-luna`. Stock `providers.codex`
-remains available as `builtin:codex` for explicit agent patches. See
-[the provider design](designs/2026-08-27-001-copilot-cli-provider.md).
+The workspace uses `deep-thinker`, and the d2b role projection uses exactly
+these four tier aliases:
+
+| Tier | Model | Effort | Context | Primary roles |
+| --- | --- | --- | --- | --- |
+| `deep-thinker` | `gpt-5.6-sol` | `medium` | `long_context` | mayor, requirements-planner, design-author, task-decomposer |
+| `reviewer` | `grok-4.6` | `high` | `long_context` | six review, analysis, and triage roles |
+| `solid-worker` | `gpt-5.6-luna` | `max` | `long_context` | implementation-worker |
+| `fast-worker` | `gpt-5.6-luna` | `medium` | `default` | run-operator, publisher |
+
+Stock `providers.codex` remains available as `builtin:codex` for an explicit
+alternate agent patch only. It is not a tier or a default role assignment.
+See [the cookbook layout and model-tier design](designs/2026-08-28-001-cookbook-layout-and-model-tiers.md)
+and [the model-tier recipe](../recipes/model-tiers.md).
 
 The host supplies the Copilot CLI binary and may export `COPILOT_GITHUB_TOKEN`
 in the operator environment. Optional `codex` and Codex Router are host
@@ -378,13 +395,136 @@ state and are never used as GitHub, Copilot, or Codex credentials. Do not
 store prompts, model responses, private pull-request payloads, or live
 evidence in this repository.
 
-## Stop
+The adapted city-local mayor uses the official `gc.mayor` skill and official
+Gas City formulas and roles. It plans, creates beads, dispatches work,
+monitors results, and waits when idle. It must never implement source changes,
+merge, force-push, or bypass the d2b `v3` pull-request handoff.
 
-Stop and unregister the city with native Gas City:
+## Human-only clean reset and cutover
+
+This procedure is intentionally human-only. It replaces old native state; it
+does not migrate or copy runtime state. Stop if any verification is
+ambiguous, if the external checkout cannot be identified, or if a process or
+worktree still uses the bind mount.
+
+### 1. Make a private preflight inventory
+
+Before touching the old city, record a redacted inventory outside this
+repository. Include:
+
+- active work, sessions, worktrees, branches, pending requests, in-flight
+  formulas, and recovery metadata;
+- the external d2b checkout's recorded source identity, remotes, branches,
+  open pull requests, and product-local `.beads/`, `.gitignore`, and agent
+  hooks;
+- Discord apps and app owners, guild/channel/role allowlists, channel and
+  rig maps, room and DM bindings, launcher rooms, and service exposure.
+
+Record only safe labels and counts. Do not copy tokens, identifiers, live
+prompts, responses, reports, or pull-request payloads into this repository.
+The inventory is private operator evidence, not a committed migration
+artifact.
+
+### 2. Stop and unregister the old root city
+
+Select the old root city explicitly and confirm the nested target is not
+registered. Stop its sessions, then unregister that exact old path:
+
+```text
+gc stop <old-root-city-path>
+gc unregister <old-root-city-path>
+```
+
+`gc stop` and `gc unregister` are distinct commands in the pinned CLI.
+Verify with native status that the old root city is no longer registered and
+that no root and nested city definitions are active together. Do not
+unregister by bare name after the nested directory exists, and do not start
+or initialize the nested city until this check passes.
+
+### 3. Confirm and unmount the d2b bind mount
+
+Resolve the bind-mount source and mountpoint from host mount inspection.
+Confirm that the source is the recorded external d2b checkout, that its Git
+identity, remotes, branch, open pull requests, product-local `.beads/`,
+`.gitignore`, and agent hooks are intact, and that no process or worktree is
+using it.
+
+Unmount the mountpoint only after those checks pass. Unmounting is not
+checkout deletion. Do not recursively delete the mount source, and do not
+run cleanup that can traverse into the external checkout. If the source,
+mountpoint, or users are ambiguous, stop and ask the human owner to resolve
+the inventory.
+
+### 4. Remove only confirmed old root-city runtime paths
+
+After the old city is stopped and unregistered, remove only the confirmed
+old root-city `.gc`, `.beads`, session, and worktree paths. Verify each path
+belongs to the old root city before removal. Never remove the external
+checkout's product-local `.beads/`, `.gitignore`, or hooks, and never reuse
+old sessions, mappings, worktrees, credentials, logs, prompts, responses, or
+reports.
+
+### 5. Initialize and bind the nested city
+
+Set the host-local city selector to the nested source and initialize in
+place:
+
+```text
+export GC_CITY_PATH="<host-local>/cities/d2b-gascity"
+cd cities/d2b-gascity
+gc init --file city.toml --preserve-existing --no-start .
+gc rig add <verified-d2b-checkout> --name d2b --city .
+gc status
+```
+
+`GC_CITY_PATH` is host-local and must not be committed. The `gc init` command
+must run from `cities/d2b-gascity`, preserve the authored `city.toml`,
+`pack.toml`, `packs.lock`, and local pack import, and create fresh native
+state. The rig path must appear only in live `.gc/site.toml`. Verify that
+the source checkout remains external and that exactly one city and one d2b
+rig are registered.
+
+### 6. Re-import Discord under the private inventory
+
+Re-import the default app and any named chat app with native commands. Stream
+each token through stdin and keep values out of shell history and this
+repository:
+
+```text
+<host-secret-command> |
+  gc discord import-app \
+    --application-id <application-id> \
+    --public-key <public-key> \
+    --bot-token-file /dev/stdin \
+    --guild-allowlist <guild-id> \
+    --channel-allowlist <channel-id> \
+    --role-allowlist <role-id>
+```
+
+Restore only the private inventory's intended guild, channel, and role
+allowlists, room and DM bindings, channel and rig maps, and launchers. Use
+least-privilege Discord permissions: `View Channels`, `Send Messages`, `Read
+Message History`, `Create Public Threads`, and `Send Messages in Threads`;
+enable `Message Content Intent` only when ambient or launcher reads require
+it. Keep `Administrator`, management permissions, webhooks, attachments,
+reactions, embeds, and presence controls disabled unless a separately
+approved host policy requires them.
+
+Preserve service exposure boundaries: `discord-interactions` is public for
+signed `/v0/discord/interactions`, `discord-admin` is tenant/access-policy
+protected, and `discord-gateway` is private. The official Discord pack owns
+all three services. Keep Copilot Requests, d2b publication, and Discord app
+credentials separate, then verify `target=v3` and `merge_strategy=pr` before
+any human-owned pull-request publication.
+
+## Stop or unregister
+
+Stop the city's sessions with native Gas City:
 
 ```text
 gc stop
 ```
 
-Native stop closes the city and its managed services. Do not add a custom
-shutdown hook or host lifecycle service.
+The city remains registered. Use `gc unregister <city-path>` only when
+decommissioning or moving that exact city. Do not add a custom shutdown hook
+or host lifecycle service.

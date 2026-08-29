@@ -1,0 +1,15 @@
+# Base assignments for the imported gascity/roles agents.
+
+[tiers]
+requirements-planner = "deep-thinker"
+design-author = "deep-thinker"
+task-decomposer = "deep-thinker"
+design-implementation-reviewer = "reviewer"
+design-test-risk-reviewer = "reviewer"
+implementation-reviewer = "reviewer"
+gap-analyst = "reviewer"
+review-synthesizer = "reviewer"
+issue-triager = "reviewer"
+implementation-worker = "solid-worker"
+run-operator = "fast-worker"
+publisher = "fast-worker"
