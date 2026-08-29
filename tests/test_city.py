@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import pathlib
@@ -74,6 +75,103 @@ RUNTIME_PATHS = (
     ".state",
     "run",
 )
+PR_BABYSIT_ROOT = ROOT / "packs" / "pr-babysit"
+PR_BABYSIT_SKILL_ROOT = PR_BABYSIT_ROOT / "skills" / "pr-babysit"
+PR_BABYSIT_UPSTREAM_REPOSITORY = (
+    "https://github.com/EveryInc/compound-engineering-plugin"
+)
+PR_BABYSIT_UPSTREAM_TAG = "compound-engineering-v3.23.4"
+PR_BABYSIT_UPSTREAM_COMMIT = (
+    "33d9bd92689d60580e732890f94466e5793385b1"
+)
+PR_BABYSIT_FILES = {
+    "LICENSE": {
+        "source": "LICENSE",
+        "sha256": (
+            "61d89de7646effdaba2d0a4ab7bd0eba60b4094b83efe5bc"
+            "73c7940e43e93fc6"
+        ),
+    },
+    "skills/pr-babysit/SKILL.md": {
+        "source": "skills/ce-babysit-pr/SKILL.md",
+        "sha256": (
+            "a611e493ae6979063d71f4990c2f6cda9c9f1a4b114a8371"
+            "7c26c66c4cf4bd90"
+        ),
+    },
+    "skills/pr-babysit/references/branch-currency.md": {
+        "source": "skills/ce-babysit-pr/references/branch-currency.md",
+        "sha256": (
+            "8e0101ac1b73946746579630259ae5bac12ed4dd1df78aaad4"
+            "df02e0c9934429"
+        ),
+    },
+    "skills/pr-babysit/references/envelope.md": {
+        "source": "skills/ce-babysit-pr/references/envelope.md",
+        "sha256": (
+            "74ffa9b65afccbb8add39cd9cc4b76af1a4cc9532eabde3523"
+            "d78ae28e62e59a"
+        ),
+    },
+    "skills/pr-babysit/references/pipeline.md": {
+        "source": "skills/ce-babysit-pr/references/pipeline.md",
+        "sha256": (
+            "6b8403bcc7093d5def36e5dd84096ecc05535c4099e652b38e8"
+            "ec98700b91c87"
+        ),
+    },
+    "skills/pr-babysit/references/report.md": {
+        "source": "skills/ce-babysit-pr/references/report.md",
+        "sha256": (
+            "31774e3ad7d5ea97d6360ff5d404ade79331d42a53ec50e8cd"
+            "5bae531dc98e5b"
+        ),
+    },
+    "skills/pr-babysit/references/settle.md": {
+        "source": "skills/ce-babysit-pr/references/settle.md",
+        "sha256": (
+            "e83f49cb2511f68cf9131584737b73a91ae9a2a92435f7fd70"
+            "cba40b99fc1759"
+        ),
+    },
+    "skills/pr-babysit/references/setup.md": {
+        "source": "skills/ce-babysit-pr/references/setup.md",
+        "sha256": (
+            "0465242d6116c3f958f76cc332c1af34896f48d8e8cc4c9716b"
+            "0f089d1809954"
+        ),
+    },
+    "skills/pr-babysit/references/tick.md": {
+        "source": "skills/ce-babysit-pr/references/tick.md",
+        "sha256": (
+            "cf1fc87e87a3520c9446d997ff09ba2cccacb4a5e0a33f33fb"
+            "9752325ede820c"
+        ),
+    },
+    "skills/pr-babysit/references/watch-loop.md": {
+        "source": "skills/ce-babysit-pr/references/watch-loop.md",
+        "sha256": (
+            "f2abb846f4a5fd20468c7e5a4eefa4bf2929d7dcd6256da9442b"
+            "751b96213f67"
+        ),
+    },
+    "skills/pr-babysit/scripts/pr-snapshot": {
+        "source": "skills/ce-babysit-pr/scripts/pr-snapshot",
+        "sha256": (
+            "fd8a0b403703714a1257530e7053461e437b662b0ef381f780"
+            "b8850439d980e7"
+        ),
+    },
+}
+PR_BABYSIT_EXCLUDED_SURFACES = {
+    "stack and stack-landing behavior",
+    "merge, force-push, and raw-rebase mutations",
+    "workflow approval",
+    "delegation to host plugins",
+    "user-global skill installation",
+    "scheduler or daemon lifecycle",
+    "durable /tmp state",
+}
 
 
 def _git(command: list[str], *, cwd: pathlib.Path, env: dict[str, str]) -> None:
@@ -1923,6 +2021,186 @@ class RootPortableCityTests(unittest.TestCase):
             _tracked_runtime_state(),
             "tracked or staged runtime state is present",
         )
+
+
+class VendoredPrBabysitTests(unittest.TestCase):
+    def test_pr_babysit_manifest_pins_exact_upstream_subset(self) -> None:
+        manifest = json.loads(
+            (PR_BABYSIT_ROOT / "UPSTREAM.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(
+            manifest["upstream"],
+            {
+                "repository": PR_BABYSIT_UPSTREAM_REPOSITORY,
+                "tag": PR_BABYSIT_UPSTREAM_TAG,
+                "commit": PR_BABYSIT_UPSTREAM_COMMIT,
+            },
+        )
+        self.assertEqual(
+            set(manifest["excluded_surfaces"]),
+            PR_BABYSIT_EXCLUDED_SURFACES,
+        )
+        entries = manifest["files"]
+        self.assertEqual(
+            {entry["local"] for entry in entries},
+            set(PR_BABYSIT_FILES),
+        )
+        for entry in entries:
+            self.assertEqual(
+                set(entry),
+                {"local", "source", "sha256"},
+            )
+            expected = PR_BABYSIT_FILES[entry["local"]]
+            self.assertEqual(entry["source"], expected["source"])
+            self.assertEqual(entry["sha256"], expected["sha256"])
+            self.assertRegex(entry["sha256"], r"^[0-9a-f]{64}$")
+            self.assertTrue(
+                (PR_BABYSIT_ROOT / entry["local"]).is_file(),
+                entry["local"],
+            )
+
+    def test_pr_babysit_license_retains_mit_notice(self) -> None:
+        license_path = PR_BABYSIT_ROOT / "LICENSE"
+        license_bytes = license_path.read_bytes()
+        self.assertEqual(
+            hashlib.sha256(license_bytes).hexdigest(),
+            PR_BABYSIT_FILES["LICENSE"]["sha256"],
+        )
+        license_text = license_bytes.decode("utf-8")
+        for marker in (
+            "MIT License",
+            "Copyright (c) 2025 Every",
+            "Permission is hereby granted",
+            "THE SOFTWARE IS PROVIDED \"AS IS\"",
+        ):
+            self.assertIn(marker, license_text)
+
+    def test_pr_babysit_files_are_self_contained(self) -> None:
+        expected_files = set(PR_BABYSIT_FILES)
+        actual_files = {
+            str(path.relative_to(PR_BABYSIT_ROOT))
+            for path in PR_BABYSIT_ROOT.rglob("*")
+            if path.is_file() and path.name != "UPSTREAM.json"
+        }
+        self.assertEqual(actual_files, expected_files)
+        for relative in sorted(expected_files):
+            path = PR_BABYSIT_ROOT / relative
+            text = path.read_text(encoding="utf-8")
+            self.assertNotIn("../", text, relative)
+            for reference in re.findall(r"`(references/[^`]+)`", text):
+                target = PR_BABYSIT_SKILL_ROOT / reference
+                self.assertTrue(target.is_file(), f"{relative}: {reference}")
+        self.assertTrue(
+            (PR_BABYSIT_SKILL_ROOT / "scripts" / "pr-snapshot").stat().st_mode
+            & 0o111
+        )
+
+    def test_pr_babysit_keeps_target_watch_contract_only(self) -> None:
+        text = "\n".join(
+            path.read_text(encoding="utf-8")
+            for path in PR_BABYSIT_SKILL_ROOT.rglob("*")
+            if path.is_file()
+        ).lower()
+        for marker in (
+            "snapshot-first",
+            "pr-snapshot",
+            "current head",
+            "stale-sha",
+            "branch_currency",
+            "expected_head_sha",
+            "feedback before ci",
+            "untrusted",
+            "never execute commands",
+            "merge-ready",
+        ):
+            self.assertIn(marker, text)
+        for marker in (
+            "stack",
+            "stack-ready",
+            "stack-land",
+            "upstack",
+            "gh stack",
+            "git merge",
+            "gh pr merge",
+            "force-push",
+            "raw rebase",
+            "git rebase",
+            "workflow approval",
+            "approve-ci",
+            "ce-debug",
+            "ce-resolve-pr-feedback",
+            "plugin",
+            "delegate",
+            "user-global",
+            "global install",
+            "scheduler",
+            "daemon",
+            "/tmp",
+            "mktemp",
+        ):
+            self.assertNotIn(marker, text)
+
+    def test_pr_snapshot_keeps_review_text_as_data(self) -> None:
+        script = PR_BABYSIT_SKILL_ROOT / "scripts" / "pr-snapshot"
+        root = ROOT / ".u1-pr-babysit-test"
+        shutil.rmtree(root, ignore_errors=True)
+        root.mkdir()
+        try:
+            marker = root / "review-command-ran"
+            planted = f"$(touch {marker})"
+            fixture = root / "snapshot.json"
+            fixture.write_text(
+                json.dumps(
+                    {
+                        "url": "https://github.com/octo/example/pull/1",
+                        "pr_state": "OPEN",
+                        "head_sha": "a" * 40,
+                        "mergeable": "MERGEABLE",
+                        "merge_state_status": "CLEAN",
+                        "base": {
+                            "ref": "main",
+                            "oid": "b" * 40,
+                            "identity": "current",
+                        },
+                        "checks": [],
+                        "threads": [],
+                        "feedback": [
+                            {
+                                "id": "comment-1",
+                                "body": planted,
+                                "edit_id": "edit-1",
+                            }
+                        ],
+                        "review_decision": None,
+                        "review_in_progress": False,
+                        "awaiting_approval": 0,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            result = subprocess.run(
+                [
+                    str(script),
+                    "snapshot",
+                    "--pr",
+                    "1",
+                    "--repo",
+                    "octo/example",
+                    "--state-dir",
+                    str(root / "state"),
+                    "--fetch-file",
+                    str(fixture),
+                    "--start-invocation",
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn(planted, result.stdout)
+            self.assertFalse(marker.exists())
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
 
 
 if __name__ == "__main__":

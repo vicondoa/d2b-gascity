@@ -1,0 +1,758 @@
+#!/usr/bin/env python3
+"""Take one deterministic, target-PR snapshot.
+
+The skill owns judgment and remote mutations.  This helper owns the read,
+diff, and durable journal boundary.  Review and log text is copied into JSON
+only; it is never interpreted as a command.
+
+The state directory is supplied by the caller and is the only durable
+location used by this script.  ``snapshot`` is one fetch/diff/write operation.
+``watch`` is a single checkpoint tick that emits a wake line when the next
+skill turn should inspect the result.  Neither command owns a lifecycle.
+"""
+
+from __future__ import annotations
+
+import argparse
+import contextlib
+import datetime as dt
+import fcntl
+import hashlib
+import json
+import os
+import re
+import subprocess
+import sys
+import time
+import uuid
+from pathlib import Path
+from typing import Any, Iterator, NoReturn
+
+
+FAILING = {
+    "ACTION_REQUIRED",
+    "CANCELLED",
+    "ERROR",
+    "FAILURE",
+    "STARTUP_FAILURE",
+    "STALE",
+    "TIMED_OUT",
+}
+OPEN = "open"
+DISPATCHED = "dispatched"
+NEEDS_HUMAN = "needs-human"
+CLAIMED = "claimed"
+CONFIRMED = "confirmed"
+ISO_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
+
+
+def _error(message: str) -> NoReturn:
+    raise SystemExit(message)
+
+
+def _now() -> str:
+    return time.strftime(ISO_FORMAT, time.gmtime())
+
+
+def _elapsed(timestamp: Any) -> int:
+    if not isinstance(timestamp, str):
+        return 0
+    try:
+        parsed = dt.datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+    except ValueError:
+        return 0
+    return max(0, int(time.time() - parsed.timestamp()))
+
+
+def _sha(value: Any) -> str:
+    return hashlib.sha256(
+        json.dumps(value, sort_keys=True, ensure_ascii=False).encode("utf-8")
+    ).hexdigest()[:16]
+
+
+def _body_id(body: Any) -> str:
+    return hashlib.sha256(str(body or "").encode("utf-8")).hexdigest()[:16]
+
+
+def _repo_parts(repo: str | None) -> tuple[str, str, str | None]:
+    if not repo:
+        return "", "", None
+    pieces = repo.split("/")
+    if len(pieces) == 2:
+        return pieces[0], pieces[1], None
+    if len(pieces) == 3:
+        return pieces[1], pieces[2], pieces[0]
+    _error("repo must be OWNER/REPO or HOST/OWNER/REPO")
+
+
+def _valid_sha(value: Any) -> bool:
+    return isinstance(value, str) and bool(
+        re.fullmatch(r"[0-9a-fA-F]{40}", value)
+    )
+
+
+def _as_list(value: Any) -> list[dict[str, Any]]:
+    if isinstance(value, dict):
+        return [item for item in value.values() if isinstance(item, dict)]
+    return [item for item in value or [] if isinstance(item, dict)]
+
+
+def _check_key(raw: dict[str, Any]) -> str:
+    workflow = raw.get("workflowName") or raw.get("workflow")
+    name = raw.get("name") or raw.get("context") or raw.get("key")
+    name = str(name or "check")
+    return f"{workflow}/{name}" if workflow else name
+
+
+def _normalize_check(raw: dict[str, Any]) -> dict[str, Any]:
+    typename = raw.get("__typename")
+    if typename == "StatusContext":
+        state = str(raw.get("state") or "").upper()
+        status = (
+            "COMPLETED"
+            if state in {"SUCCESS", "FAILURE", "ERROR"}
+            else "IN_PROGRESS"
+        )
+        conclusion = "FAILURE" if state == "ERROR" else (state or None)
+        return {
+            "key": _check_key(raw),
+            "name": raw.get("context") or "status",
+            "status": status,
+            "conclusion": conclusion,
+            "details_url": raw.get("targetUrl"),
+            "created_at": raw.get("createdAt"),
+        }
+    status = str(raw.get("status") or "IN_PROGRESS").upper()
+    conclusion = raw.get("conclusion")
+    return {
+        "key": _check_key(raw),
+        "name": raw.get("name") or "check",
+        "status": status,
+        "conclusion": (
+            str(conclusion).upper() if conclusion is not None else None
+        ),
+        "details_url": raw.get("detailsUrl") or raw.get("targetUrl"),
+        "created_at": raw.get("createdAt"),
+    }
+
+
+def _normalize_feedback(
+    raw: dict[str, Any], *, kind: str, index: int
+) -> dict[str, Any]:
+    identifier = raw.get("id") or raw.get("databaseId") or f"{kind}-{index}"
+    body = raw.get("body") or raw.get("text") or ""
+    edit_id = raw.get("edit_id") or raw.get("updatedAt") or _body_id(body)
+    return {
+        "id": str(identifier),
+        "kind": kind,
+        "body": body,
+        "edit_id": str(edit_id),
+        "author": (raw.get("author") or {}).get("login")
+        if isinstance(raw.get("author"), dict)
+        else raw.get("author"),
+        "url": raw.get("url"),
+    }
+
+
+def _normalize_thread(raw: dict[str, Any], index: int) -> dict[str, Any]:
+    identifier = raw.get("thread_id") or raw.get("id") or f"thread-{index}"
+    last_id = raw.get("last_comment_id") or raw.get("lastCommentId")
+    last_at = raw.get("last_comment_at") or raw.get("lastCommentAt")
+    if last_id is None:
+        last_id = raw.get("comment_id") or identifier
+    return {
+        "thread_id": str(identifier),
+        "last_comment_id": str(last_id),
+        "last_comment_at": last_at,
+        "body": raw.get("body") or "",
+        "url": raw.get("url"),
+    }
+
+
+def _normalize(raw: dict[str, Any], pr: int, repo: str | None) -> dict[str, Any]:
+    """Normalize a fixture or a GitHub response without interpreting payload text."""
+    state = raw.get("pr_state", raw.get("state", "OPEN"))
+    head = raw.get("head_sha", raw.get("headRefOid"))
+    url = raw.get("url")
+    checks = raw.get("checks")
+    if checks is None:
+        checks = [_normalize_check(item) for item in _as_list(raw.get("statusCheckRollup"))]
+    else:
+        checks = [
+            _normalize_check(item) if "status" not in item else dict(item)
+            for item in _as_list(checks)
+        ]
+
+    threads = [
+        _normalize_thread(item, index)
+        for index, item in enumerate(_as_list(raw.get("threads")))
+    ]
+    feedback = [
+        _normalize_feedback(item, kind="comment", index=index)
+        for index, item in enumerate(_as_list(raw.get("feedback")))
+    ]
+    if raw.get("feedback") is None:
+        feedback.extend(
+            _normalize_feedback(item, kind="comment", index=index)
+            for index, item in enumerate(_as_list(raw.get("comments")))
+        )
+        feedback.extend(
+            _normalize_feedback(item, kind="review", index=index)
+            for index, item in enumerate(_as_list(raw.get("reviews")))
+            if (item.get("body") or "").strip()
+        )
+
+    base = raw.get("base")
+    if not isinstance(base, dict):
+        base = {
+            "ref": raw.get("baseRefName"),
+            "oid": raw.get("baseRefOid"),
+            "identity": raw.get("base_identity", "unknown"),
+        }
+    else:
+        base = dict(base)
+
+    result = {
+        "pr": pr,
+        "repo": repo,
+        "url": url,
+        "pr_state": str(state).upper(),
+        "pr_is_draft": raw.get("pr_is_draft", raw.get("isDraft")),
+        "head_sha": head,
+        "mergeable": raw.get("mergeable", "UNKNOWN"),
+        "merge_state_status": raw.get(
+            "merge_state_status", raw.get("mergeStateStatus", "UNKNOWN")
+        ),
+        "review_decision": raw.get(
+            "review_decision", raw.get("reviewDecision")
+        ),
+        "review_in_progress": bool(raw.get("review_in_progress", False)),
+        "review_signal_count": int(raw.get("review_signal_count", 0) or 0),
+        "awaiting_approval": raw.get("awaiting_approval", 0),
+        "host_branch_update_capability": raw.get(
+            "host_branch_update_capability", "unknown"
+        ),
+        "base": base,
+        "checks": checks,
+        "threads": threads,
+        "feedback": feedback,
+        "branch_currency": raw.get("branch_currency"),
+        "unrequested_base_merge": raw.get("unrequested_base_merge"),
+    }
+    if not result["url"] and repo and head:
+        owner, name, host = _repo_parts(repo)
+        if owner and name:
+            result["url"] = (
+                f"https://{host or 'github.com'}/{owner}/{name}/pull/{pr}"
+            )
+    return result
+
+
+def _fetch(args: argparse.Namespace) -> dict[str, Any]:
+    if args.fetch_file:
+        try:
+            raw = json.loads(Path(args.fetch_file).read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            _error(f"cannot read fetch fixture: {exc}")
+        if not isinstance(raw, dict):
+            _error("fetch fixture must contain a JSON object")
+        return _normalize(raw, args.pr, args.repo)
+
+    command = ["gh", "pr", "view", str(args.pr)]
+    if args.repo:
+        command.extend(["--repo", args.repo])
+    command.extend(
+        [
+            "--json",
+            (
+                "state,isDraft,mergeable,mergeStateStatus,reviewDecision,"
+                "headRefOid,baseRefOid,baseRefName,url,statusCheckRollup,"
+                "comments,reviews"
+            ),
+        ]
+    )
+    result = subprocess.run(
+        command,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode:
+        _error((result.stderr or result.stdout).strip() or "gh pr view failed")
+    try:
+        raw = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        _error(f"gh returned invalid JSON: {exc}")
+    return _normalize(raw, args.pr, args.repo)
+
+
+def _empty_state(pr: int, repo: str | None) -> dict[str, Any]:
+    return {
+        "pr": {"number": pr, "repo": repo, "url": None},
+        "head_sha": None,
+        "tick": 0,
+        "state_created_at": _now(),
+        "last_change_at": None,
+        "last_action": None,
+        "invocation_id": None,
+        "started_at": None,
+        "invocation_budget_seconds": None,
+        "checks": {},
+        "threads": {},
+        "feedback": {},
+        "ci_dispatched": {},
+        "branch_currency_state": {"current_key": None, "items": {}},
+        "needs_human_residuals": [],
+    }
+
+
+def _atomic_write(path: Path, value: dict[str, Any]) -> None:
+    replacement = path.with_name(f"{path.name}.next")
+    replacement.write_text(
+        json.dumps(value, indent=2, sort_keys=True, ensure_ascii=False)
+        + "\n",
+        encoding="utf-8",
+    )
+    os.chmod(replacement, 0o600)
+    os.replace(replacement, path)
+
+
+@contextlib.contextmanager
+def _locked_state(
+    state_dir: Path, pr: int, repo: str | None
+) -> Iterator[dict[str, Any]]:
+    state_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+    os.chmod(state_dir, 0o700)
+    lock_path = state_dir / "lock"
+    state_path = state_dir / "state.json"
+    fd = os.open(lock_path, os.O_RDWR | os.O_CREAT, 0o600)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        if state_path.exists():
+            try:
+                state = json.loads(state_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError) as exc:
+                _error(f"cannot read state: {exc}")
+            if not isinstance(state, dict):
+                _error("state must contain a JSON object")
+        else:
+            state = _empty_state(pr, repo)
+        yield state
+        _atomic_write(state_path, state)
+    finally:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        os.close(fd)
+
+
+def _apply_invocation(
+    state: dict[str, Any], args: argparse.Namespace
+) -> None:
+    if args.start_invocation:
+        state["invocation_id"] = uuid.uuid4().hex
+        state["started_at"] = _now()
+        state["invocation_budget_seconds"] = (
+            args.invocation_budget_seconds or 8 * 60 * 60
+        )
+        args.invocation_id = state["invocation_id"]
+        args.session_started_at = state["started_at"]
+        args._started_new_invocation = True
+        return
+    required = (
+        args.invocation_id,
+        args.session_started_at,
+        args.invocation_budget_seconds,
+    )
+    if any(value in (None, "") for value in required):
+        _error(
+            "resume requires --invocation-id, --session-started-at, "
+            "and --invocation-budget-seconds"
+        )
+    if (
+        state.get("invocation_id") != args.invocation_id
+        or state.get("started_at") != args.session_started_at
+        or float(state.get("invocation_budget_seconds", 0))
+        != float(args.invocation_budget_seconds)
+    ):
+        _error("invocation values do not match persisted state")
+
+
+def _merge_records(
+    current: list[dict[str, Any]],
+    previous: dict[str, Any],
+    identifier: str,
+    *,
+    identity_fields: tuple[str, ...],
+) -> dict[str, dict[str, Any]]:
+    records: dict[str, dict[str, Any]] = {}
+    for item in current:
+        key = str(item.get(identifier))
+        if not key:
+            continue
+        old = previous.get(key) if isinstance(previous.get(key), dict) else {}
+        identity = [item.get(field) for field in identity_fields]
+        old_identity = old.get("identity")
+        disposition = old.get("disposition", OPEN)
+        if old_identity is not None and old_identity != identity:
+            disposition = OPEN
+        records[key] = {
+            **item,
+            "identity": identity,
+            "disposition": disposition,
+        }
+    return records
+
+
+def _currency(
+    state: dict[str, Any], current: dict[str, Any], head: str | None
+) -> dict[str, Any] | None:
+    supplied = current.get("branch_currency")
+    if isinstance(supplied, dict):
+        item = dict(supplied)
+    else:
+        status = str(current.get("merge_state_status") or "").upper()
+        if status not in {"BEHIND", "DIRTY", "CONFLICTING"}:
+            state["branch_currency_state"] = {"current_key": None, "items": {}}
+            return None
+        base = current.get("base") or {}
+        item = {
+            "status": "BEHIND" if status == "BEHIND" else "DIRTY",
+            "route": "normal-base",
+            "head_sha": head,
+            "base_oid": base.get("oid"),
+            "expected_head_sha": head,
+            "host_branch_update_capability": current.get(
+                "host_branch_update_capability", "unknown"
+            ),
+        }
+    key = str(item.get("key") or f"currency:{_sha(item)}")
+    prior_state = state.get("branch_currency_state") or {
+        "current_key": None,
+        "items": {},
+    }
+    prior_items = prior_state.get("items") or {}
+    prior = prior_items.get(key) if isinstance(prior_items, dict) else None
+    item["key"] = key
+    item["head_sha"] = item.get("head_sha") or head
+    item["expected_head_sha"] = item.get("expected_head_sha") or head
+    item["disposition"] = (
+        prior.get("disposition", OPEN) if isinstance(prior, dict) else OPEN
+    )
+    if item["disposition"] == OPEN:
+        capability = item.get("host_branch_update_capability")
+        item["attention"] = (
+            "claim"
+            if item.get("status") == "BEHIND" and capability is True
+            else "decide"
+        )
+    else:
+        item["attention"] = None
+    state["branch_currency_state"] = {
+        "current_key": key,
+        "items": {key: item},
+    }
+    return item
+
+
+def _snapshot(
+    state: dict[str, Any], current: dict[str, Any], args: argparse.Namespace
+) -> dict[str, Any]:
+    old_head = state.get("head_sha")
+    head = current.get("head_sha") or old_head
+    head_changed = old_head is not None and head != old_head
+    if head_changed:
+        state["ci_dispatched"] = {}
+    state["head_sha"] = head
+    state["pr"] = {
+        "number": args.pr,
+        "repo": args.repo,
+        "url": current.get("url"),
+    }
+    checks: dict[str, dict[str, Any]] = {}
+    duplicate_counts: dict[str, int] = {}
+    for item in current.get("checks") or []:
+        if not item.get("key"):
+            continue
+        key = str(item["key"])
+        count = duplicate_counts.get(key, 0)
+        duplicate_counts[key] = count + 1
+        if count:
+            key = f"{key}#{count + 1}"
+        checks[key] = {**item, "key": key, "head_sha": head}
+    state["checks"] = checks
+    state["threads"] = _merge_records(
+        current.get("threads") or [],
+        state.get("threads") or {},
+        "thread_id",
+        identity_fields=("last_comment_id", "last_comment_at"),
+    )
+    state["feedback"] = _merge_records(
+        current.get("feedback") or [],
+        state.get("feedback") or {},
+        "id",
+        identity_fields=("edit_id",),
+    )
+    currency = _currency(state, current, head)
+    dispatched = set(
+        (state.get("ci_dispatched") or {}).get(head or "", [])
+    )
+    actionable_ci = [
+        item
+        for key, item in state["checks"].items()
+        if str(item.get("conclusion") or "").upper() in FAILING
+        and key not in dispatched
+    ]
+    actionable_threads = [
+        item
+        for item in state["threads"].values()
+        if item.get("disposition") == OPEN
+    ]
+    actionable_feedback = [
+        item
+        for item in state["feedback"].values()
+        if item.get("disposition") == OPEN
+    ]
+    checks_terminal = all(
+        item.get("status") == "COMPLETED"
+        for item in state["checks"].values()
+    )
+    has_failing = any(
+        str(item.get("conclusion") or "").upper() in FAILING
+        for item in state["checks"].values()
+    )
+    observation = {
+        "pr_state": current.get("pr_state"),
+        "head_sha": head,
+        "mergeable": current.get("mergeable"),
+        "merge_state_status": current.get("merge_state_status"),
+        "review_decision": current.get("review_decision"),
+        "review_in_progress": current.get("review_in_progress"),
+        "checks": state["checks"],
+        "threads": state["threads"],
+        "feedback": state["feedback"],
+        "branch_currency": currency,
+        "unrequested_base_merge": current.get("unrequested_base_merge"),
+    }
+    observation_id = _sha(observation)
+    previous_change = state.get("observation_id") != observation_id
+    state["observation_id"] = observation_id
+    if previous_change:
+        state["last_change_at"] = _now()
+    state["tick"] = int(state.get("tick") or 0) + 1
+    state["last_action"] = "snapshot"
+    base = current.get("base") or {}
+    base_ref_blocker = (
+        None if base.get("identity") == "current" else base.get("identity")
+    )
+    result = {
+        **current,
+        "head_sha": head,
+        "head_changed": head_changed,
+        "base_ref_blocker": base_ref_blocker,
+        "branch_currency": currency,
+        "branch_currency_blocker": (
+            {
+                "key": currency.get("key"),
+                "disposition": currency.get("disposition"),
+            }
+            if currency is not None
+            else None
+        ),
+        "checks_terminal": checks_terminal,
+        "checks_present": bool(state["checks"]),
+        "has_failing_checks": has_failing,
+        "all_checks_ok": (
+            bool(state["checks"]) and checks_terminal and not has_failing
+        ),
+        "mergeability_certain": current.get("mergeable") in {
+            "MERGEABLE",
+            "CONFLICTING",
+        }
+        and base.get("identity") == "current",
+        "actionable": {
+            "threads": actionable_threads,
+            "comments": actionable_feedback,
+            "ci": actionable_ci,
+        },
+        "counts": {
+            "threads": len(actionable_threads),
+            "comments": len(actionable_feedback),
+            "ci": len(actionable_ci),
+            "needs_human": len(state.get("needs_human_residuals") or []),
+        },
+        "needs_human_residuals": state.get("needs_human_residuals") or [],
+        "changed_this_tick": previous_change,
+        "quiet_seconds": _elapsed(state.get("last_change_at")),
+        "tick": state["tick"],
+        "invocation_id": state.get("invocation_id"),
+        "invocation_started_at": state.get("started_at"),
+        "invocation_budget_seconds": state.get("invocation_budget_seconds"),
+        "unrequested_base_merge": current.get("unrequested_base_merge"),
+    }
+    return result
+
+
+def _run_snapshot(args: argparse.Namespace) -> dict[str, Any]:
+    current = _fetch(args)
+    with _locked_state(Path(args.state_dir), args.pr, args.repo) as state:
+        _apply_invocation(state, args)
+        result = _snapshot(state, current, args)
+    return result
+
+
+def _print_json(value: Any) -> None:
+    print(json.dumps(value, indent=2, sort_keys=True, ensure_ascii=False))
+
+
+def cmd_snapshot(args: argparse.Namespace) -> None:
+    _print_json(_run_snapshot(args))
+
+
+def _verify_mark_invocation(
+    state: dict[str, Any], args: argparse.Namespace
+) -> None:
+    if (
+        state.get("invocation_id") != args.invocation_id
+        or state.get("started_at") != args.session_started_at
+        or float(state.get("invocation_budget_seconds", 0))
+        != float(args.invocation_budget_seconds)
+    ):
+        _error("invocation values do not match persisted state")
+    if args.head_sha and args.head_sha != state.get("head_sha"):
+        _error("mark rejected: snapshot head SHA is stale")
+
+
+def cmd_mark(args: argparse.Namespace) -> None:
+    with _locked_state(Path(args.state_dir), args.pr, args.repo) as state:
+        _verify_mark_invocation(state, args)
+        disposition = args.disposition
+        if args.thread:
+            record = state.setdefault("threads", {}).get(args.thread)
+            if record is None:
+                _error(f"unknown thread: {args.thread}")
+            record["disposition"] = disposition
+        if args.comment:
+            record = state.setdefault("feedback", {}).get(args.comment)
+            if record is None:
+                _error(f"unknown comment: {args.comment}")
+            record["disposition"] = disposition
+        if args.check:
+            head = state.get("head_sha") or ""
+            checks = state.setdefault("ci_dispatched", {}).setdefault(head, [])
+            if disposition == DISPATCHED:
+                if args.check not in checks:
+                    checks.append(args.check)
+            else:
+                state["ci_dispatched"][head] = [
+                    key for key in checks if key != args.check
+                ]
+        if args.currency_key:
+            items = (
+                state.setdefault("branch_currency_state", {})
+                .setdefault("items", {})
+            )
+            item = items.get(args.currency_key)
+            if item is None:
+                _error(f"unknown currency item: {args.currency_key}")
+            item["disposition"] = args.currency_disposition or disposition
+            item["attention"] = None
+        if args.residual_file:
+            try:
+                residual = json.loads(
+                    Path(args.residual_file).read_text(encoding="utf-8")
+                )
+            except (OSError, json.JSONDecodeError) as exc:
+                _error(f"cannot read residual: {exc}")
+            if not isinstance(residual, dict):
+                _error("residual must contain a JSON object")
+            state.setdefault("needs_human_residuals", []).append(residual)
+        state["last_action"] = "mark"
+        _print_json({"ok": True, "head_sha": state.get("head_sha")})
+
+
+def cmd_watch(args: argparse.Namespace) -> None:
+    result = _run_snapshot(args)
+    reasons: list[str] = []
+    if result.get("pr_state") in {"MERGED", "CLOSED"}:
+        reasons.append("terminal")
+    if result["counts"]["threads"] or result["counts"]["comments"]:
+        reasons.append("feedback")
+    if result["counts"]["ci"]:
+        reasons.append("ci")
+    if result.get("branch_currency"):
+        reasons.append("branch-currency")
+    if result.get("needs_human_residuals"):
+        reasons.append("needs-human")
+    if not reasons and result.get("all_checks_ok"):
+        reasons.append("merge-ready")
+    if reasons:
+        payload = {
+            "reason": reasons[0],
+            "reasons": reasons,
+            "head_sha": result.get("head_sha"),
+            "url": result.get("url"),
+            "tick": result.get("tick"),
+        }
+        print(f"BABYSIT_WAKE {json.dumps(payload, sort_keys=True)}")
+    else:
+        _print_json(result)
+
+
+def _parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="pr-snapshot")
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    snapshot = sub.add_parser("snapshot")
+    snapshot.add_argument("--pr", type=int, required=True)
+    snapshot.add_argument("--repo")
+    snapshot.add_argument("--state-dir", required=True)
+    snapshot.add_argument("--fetch-file")
+    snapshot.add_argument("--start-invocation", action="store_true")
+    snapshot.add_argument("--invocation-id")
+    snapshot.add_argument("--session-started-at")
+    snapshot.add_argument("--invocation-budget-seconds", type=float)
+    snapshot.set_defaults(handler=cmd_snapshot)
+
+    mark = sub.add_parser("mark")
+    mark.add_argument("--pr", type=int, default=0)
+    mark.add_argument("--repo")
+    mark.add_argument("--state-dir", required=True)
+    mark.add_argument("--invocation-id", required=True)
+    mark.add_argument("--session-started-at", required=True)
+    mark.add_argument("--invocation-budget-seconds", type=float, required=True)
+    mark.add_argument("--head-sha")
+    mark.add_argument("--thread")
+    mark.add_argument("--comment")
+    mark.add_argument("--check")
+    mark.add_argument(
+        "--disposition",
+        choices=[OPEN, DISPATCHED, NEEDS_HUMAN],
+        default=DISPATCHED,
+    )
+    mark.add_argument("--currency-key")
+    mark.add_argument(
+        "--currency-disposition",
+        choices=[OPEN, CLAIMED, CONFIRMED],
+    )
+    mark.add_argument("--residual-file")
+    mark.set_defaults(handler=cmd_mark)
+
+    watch = sub.add_parser("watch")
+    watch.add_argument("--pr", type=int, required=True)
+    watch.add_argument("--repo")
+    watch.add_argument("--state-dir", required=True)
+    watch.add_argument("--fetch-file")
+    watch.add_argument("--start-invocation", action="store_true")
+    watch.add_argument("--invocation-id")
+    watch.add_argument("--session-started-at")
+    watch.add_argument("--invocation-budget-seconds", type=float)
+    watch.set_defaults(handler=cmd_watch)
+    return parser
+
+
+def main() -> None:
+    args = _parser().parse_args()
+    args.handler(args)
+
+
+if __name__ == "__main__":
+    main()
