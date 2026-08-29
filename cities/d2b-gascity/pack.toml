@@ -12,6 +12,9 @@ version = "sha:f895c0ff47d6ee9334ed282a416387eb5b084d24"
 source = "https://github.com/gastownhall/gascity.git//examples/bd"
 version = "sha:f895c0ff47d6ee9334ed282a416387eb5b084d24"
 
+[imports.core-city]
+source = "../../packs/core-city"
+
 [imports.gc]
 source = "https://github.com/gastownhall/gascity-packs/tree/main/gascity"
 version = "sha:9f98ea4e1974cb49d18cd0c453eb81b2370cca84"

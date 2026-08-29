@@ -1,5 +1,7 @@
+include = ["model-tiers.toml"]
+
 [workspace]
-provider = "copilot-planning-grok"
+provider = "deep-thinker"
 global_fragments = [
   "command-glossary",
   "operational-awareness",
@@ -8,13 +10,17 @@ global_fragments = [
 ]
 
 [providers]
-[providers.copilot-planning-grok]
-base = "builtin:copilot"
-args = ["--yolo", "--model", "grok-4.6", "--context", "long_context", "--effort", "high"]
+[providers.deep-thinker]
+base = "copilot-deep-sol"
 
-[providers.copilot-code-luna]
-base = "builtin:copilot"
-args = ["--yolo", "--model", "gpt-5.6-luna", "--context", "default", "--effort", "max"]
+[providers.reviewer]
+base = "copilot-review-grok"
+
+[providers.solid-worker]
+base = "copilot-solid-luna"
+
+[providers.fast-worker]
+base = "copilot-fast-luna"
 
 [providers.codex]
 base = "builtin:codex"
@@ -49,8 +55,3 @@ target_branch = "v3"
 open_pr = "true"
 push = "true"
 drain_policy = "separate"
-
-[[patches.agent]]
-dir = "d2b"
-name = "implementation-worker"
-provider = "copilot-code-luna"

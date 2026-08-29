@@ -1,0 +1,62 @@
+# Generated from packs/core-city/model-tiers.base.toml.
+# Regenerate from the city directory with: gc core-city gen-model-tiers city.toml
+
+[[patches.agent]]
+dir = "d2b"
+name = "requirements-planner"
+provider = "deep-thinker"
+
+[[patches.agent]]
+dir = "d2b"
+name = "design-author"
+provider = "deep-thinker"
+
+[[patches.agent]]
+dir = "d2b"
+name = "task-decomposer"
+provider = "deep-thinker"
+
+[[patches.agent]]
+dir = "d2b"
+name = "design-implementation-reviewer"
+provider = "reviewer"
+
+[[patches.agent]]
+dir = "d2b"
+name = "design-test-risk-reviewer"
+provider = "reviewer"
+
+[[patches.agent]]
+dir = "d2b"
+name = "implementation-reviewer"
+provider = "reviewer"
+
+[[patches.agent]]
+dir = "d2b"
+name = "gap-analyst"
+provider = "reviewer"
+
+[[patches.agent]]
+dir = "d2b"
+name = "review-synthesizer"
+provider = "reviewer"
+
+[[patches.agent]]
+dir = "d2b"
+name = "issue-triager"
+provider = "reviewer"
+
+[[patches.agent]]
+dir = "d2b"
+name = "implementation-worker"
+provider = "solid-worker"
+
+[[patches.agent]]
+dir = "d2b"
+name = "run-operator"
+provider = "fast-worker"
+
+[[patches.agent]]
+dir = "d2b"
+name = "publisher"
+provider = "fast-worker"
