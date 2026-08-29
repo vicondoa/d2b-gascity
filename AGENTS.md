@@ -50,6 +50,46 @@ product-only. Human owners make merge decisions. Host branch protection for
 administrators, but this repository does not claim the current host is already
 configured that way.
 
+The rig-imported `pr-babysit` pack provides one binding-qualified babysitter
+per rig: `d2b/pr-babysit.pr-babysitter` and
+`city-source/pr-babysit.pr-babysitter`. Each is a fresh on-demand
+`fast-worker` with one active session and a workdir-local dual projection at
+`.github/skills/pr-babysit` and `.agents/skills/pr-babysit`. The mandatory
+projection gate runs before any GitHub or repository action.
+
+Publication calls the native pack command
+`gc pr-babysit pr-babysit publication-handoff` and must follow it with
+`gc pr-babysit pr-babysit verify-handoff` before closing. The handoff receipt
+binds the verified repository, PR number or URL, base, head, current SHA,
+watch bead, and babysitter identity. Use `gc pr-babysit pr-babysit show` to
+inspect safe watch metadata.
+
+Watch states are `watching`, `waiting`, `repairing`, `merge-ready`, `blocked`,
+`exhausted`, and `terminal`. The `claim -> act -> confirm` protocol links an
+action child with `bd dep <action-id> --blocks <watch-id>`; native dependency
+closure wakes the watch. The `pr-babysit-sweep` cooldown order runs every
+`1m` and performs one short checkpoint, not a daemon or resident watcher.
+Checkpoint order is snapshot, terminal, head, review, current-head CI, exact
+branch currency, then one state write.
+
+`mol-pr-babysit-repair` is Formula v2. It validates `make check`, pushes only
+the existing PR head, and records the resulting SHA. Budgets are three CI
+attempts, two review attempts, eight active hours, and a three-day backstop.
+The first version does not use `update-branch`: repair is operator-attested
+with Contents write and Pull requests read only, while the agent cannot
+introspect fine-grained permissions. Pull requests write, merge/admin,
+workflow approval, and Copilot Requests authority are refused. `GH_TOKEN` and
+`GITHUB_TOKEN` must never reuse Copilot tokens. Stale, dirty, conflicting,
+unknown, or ambiguous push evidence blocks; an ambiguous push is never
+retried. Never use `--force-with-lease` or a raw rebase. `rearm=true` may
+rearm an open blocked, exhausted, or merge-ready watch, but never a terminal
+watch.
+
+Enable d2b first. The `city-source` rig remains suspended-on-start and must
+not be enabled for live repair until the U8 disposable d2b acceptance passes.
+Static and native credential-free tests cover both targets without mutating
+GitHub; authenticated evidence stays private and redacted.
+
 ## Source, host, and reset boundaries
 
 Use the official Gas City core, Beads, Gas City pack, and Discord packs pinned

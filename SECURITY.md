@@ -58,6 +58,39 @@ those values outside this repository.
   not claim that the current host is already configured that way. Merge
   decisions remain human-owned.
 
+### PR babysitting credentials and authority
+
+The rig-imported `pr-babysit` pack is target-only. Its repair identity is
+operator-attested with repository Contents write and Pull requests read only.
+It must not have Pull requests write, merge or administration authority,
+workflow-approval authority, or Copilot Requests authority. The agent cannot
+introspect fine-grained permissions, so the operator attestation is the setup
+boundary rather than an inferred permission check.
+
+Keep publication credentials, repair GitHub credentials, Copilot Requests
+credentials, and Discord app credentials separate. `GH_TOKEN` and
+`GITHUB_TOKEN` must not reuse any Copilot token or token variable. Never print
+or persist any of these credentials. The repair path fails closed when the
+attestation is missing or when a GitHub token is coupled to a Copilot token.
+
+The repair path uses only the existing PR head and normal push. Version 1 does
+not use `update-branch`; `BEHIND`, dirty, conflicting, stale-head, unknown
+capability, and ambiguous push evidence become human blockers. An ambiguous
+push records `ambiguous-outcome` and is never retried. The agent never merges,
+force-pushes (including `--force-with-lease`), performs a raw rebase, approves
+workflows, creates a replacement PR, or changes another target. A
+`merge-ready` result is a handoff, not human merge authorization. No service
+change, daemon, webhook, relay, custom provider, or separate custom
+publication machinery is introduced.
+
+### PR babysitting rollout
+
+d2b is enabled first. The `city-source` rig remains suspended-on-start and
+must not be enabled for live repair until the U8 disposable d2b acceptance
+passes. Static and native credential-free tests cover both d2b/`v3` and
+city-source/`main` without mutating GitHub. Live authenticated acceptance
+evidence stays private and redacted; only safe pass/fail results may be shared.
+
 ## Human-only clean reset
 
 Reset is a destructive operator action, not an agent or automated service

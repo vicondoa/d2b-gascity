@@ -192,6 +192,32 @@ PR_BABYSIT_LOCAL_FILES = (
     "agents/pr-babysitter/prompt.template.md",
     "assets/scripts/project-copilot-skill.sh",
 )
+PR_BABYSIT_AUTHORED_FILES = (
+    "LICENSE",
+    "UPSTREAM.json",
+    "pack.toml",
+    "agents/pr-babysitter/agent.toml",
+    "agents/pr-babysitter/prompt.template.md",
+    "commands/pr-babysit/command.toml",
+    "commands/pr-babysit/run.sh",
+    "formulas/mol-pr-babysit-repair.toml",
+    "orders/pr-babysit-sweep.toml",
+    "assets/scripts/pr-babysit-state.py",
+    "assets/scripts/pr-babysit-sweep.sh",
+    "assets/scripts/project-copilot-skill.sh",
+    "assets/workflows/pr-babysit/prepare-worktree.md",
+    "assets/workflows/pr-babysit/validate-and-report.md",
+    "skills/pr-babysit/SKILL.md",
+    "skills/pr-babysit/references/branch-currency.md",
+    "skills/pr-babysit/references/envelope.md",
+    "skills/pr-babysit/references/pipeline.md",
+    "skills/pr-babysit/references/report.md",
+    "skills/pr-babysit/references/settle.md",
+    "skills/pr-babysit/references/setup.md",
+    "skills/pr-babysit/references/tick.md",
+    "skills/pr-babysit/references/watch-loop.md",
+    "skills/pr-babysit/scripts/pr-snapshot",
+)
 PR_BABYSIT_STATE_RUNNER = (
     PR_BABYSIT_ROOT / "commands" / "pr-babysit" / "run.sh"
 )
@@ -1250,7 +1276,6 @@ class RootPortableCityTests(unittest.TestCase):
         )
         for marker in (
             "s" + "lack",
-            "comp" + "ound" + "-engineering",
             "comp" + "ound" + " engineering",
             "copilot-planning-grok",
             "copilot-code-luna",
@@ -1258,59 +1283,195 @@ class RootPortableCityTests(unittest.TestCase):
         ):
             self.assertNotIn(marker, docs.lower())
 
-    def test_docs_record_blocked_babysitting_and_gate_recovery(
+    def test_docs_record_enabled_babysitting_and_gate_recovery(
         self,
     ) -> None:
         documents = {
             relative: (ROOT / relative).read_text(encoding="utf-8")
             for relative in (
                 "README.md",
+                "AGENTS.md",
+                "CONTRIBUTING.md",
+                "PROVENANCE.md",
+                "SECURITY.md",
+                "CHANGELOG.md",
                 "docs/operations.md",
                 "docs/testing.md",
+                "recipes/the-mayor.md",
+                "cities/d2b-gascity/template-fragments/d2b-governance.template.md",
             )
         }
         docs_flat = " ".join("\n".join(documents.values()).lower().split())
         for marker in (
-            "`ce-babysit-pr`",
-            "official pack v2 export",
-            "compatible gas city core revision",
-            "not imported",
-            "not scheduled",
-            "existing native `gate-sweep`",
+            "rig-imported `pr-babysit` pack",
+            "`d2b/pr-babysit.pr-babysitter`",
+            "`city-source/pr-babysit.pr-babysitter`",
+            "workdir-local",
+            ".github/skills/pr-babysit",
+            ".agents/skills/pr-babysit",
+            "mandatory projection gate",
+            "publication-handoff",
+            "verify-handoff",
+            "check-credentials",
+            "deterministic",
+            "one durable watch record",
+            "watching",
+            "waiting",
+            "repairing",
+            "merge-ready",
+            "blocked",
+            "exhausted",
+            "terminal",
+            "claim -> act -> confirm",
+            "result-recorded",
+            "--blocks <watch-id>",
+            "pr-babysit-sweep",
+            "cooldown",
+            "1m",
+            "mol-pr-babysit-repair",
+            "formula v2",
+            "d2b",
+            "`v3`",
+            "city-source",
+            "`main`",
+            "update-branch",
+            "pull requests read only",
+            "contents write",
+            "operator-attested",
+            "cannot introspect fine-grained permissions",
+            "ci repairs get three",
+            "review repairs get two",
+            "eight active hours",
+            "three-day",
+            "ambiguous push",
+            "rearm=true",
             "target-only",
             "metadata.target=v3",
             "metadata.merge_strategy=pr",
-            "no local watcher",
             "human-owned",
-            "never approve",
-            "force-push",
+            "human merge",
         ):
-            self.assertIn(marker, docs_flat)
-        self.assertIn(
-            "`ce-babysit-pr` is not imported",
-            documents["docs/testing.md"].lower(),
-        )
-        self.assertIn(
-            "`notify-on-human-gate-creation`",
-            documents["docs/testing.md"].lower(),
-        )
-        self.assertIn(
-            "`renudge-stale-human-gates`",
-            documents["docs/testing.md"].lower(),
-        )
-        self.assertIn(
-            "are not scheduled by the pinned gas city core",
-            documents["docs/testing.md"].lower(),
-        )
+            self.assertIn(marker, docs_flat, marker)
         for marker in (
-            "/ce-babysit-pr ",
-            "the imported official `ce-babysit-pr` skill",
-            "official imported `ce-babysit-pr` skill",
-            "schedules both human-gate recovery orders",
-            "the selected gas city core schedules both",
-            "native supervisor exec orders",
+            "current status: blocked",
+            "official pack v2 export",
+            "compatible gas city core revision",
+            "not imported; do not invoke",
+            "not scheduled by the pinned gas city core",
+            "no local watcher",
+            "blocked upstream request",
         ):
-            self.assertNotIn(marker, docs_flat)
+            self.assertNotIn(marker, docs_flat, marker)
+
+    def test_u7_pack_docs_and_governance_preserve_target_only_privacy(
+        self,
+    ) -> None:
+        documents = [
+            ROOT / relative
+            for relative in (
+                "README.md",
+                "AGENTS.md",
+                "CONTRIBUTING.md",
+                "PROVENANCE.md",
+                "SECURITY.md",
+                "CHANGELOG.md",
+                "docs/operations.md",
+                "docs/testing.md",
+                "recipes/the-mayor.md",
+                "cities/d2b-gascity/template-fragments/d2b-governance.template.md",
+            )
+        ]
+        pack_files = [
+            PR_BABYSIT_ROOT / relative
+            for relative in PR_BABYSIT_AUTHORED_FILES
+            if relative not in {"LICENSE", "UPSTREAM.json"}
+        ]
+        docs_text = "\n".join(
+            path.read_text(encoding="utf-8")
+            for path in documents
+        )
+        pack_text = "\n".join(
+            path.read_text(encoding="utf-8")
+            for path in pack_files
+        )
+        text = docs_text + "\n" + pack_text
+        lowered = text.lower()
+        pack_lowered = pack_text.lower()
+        for marker in (
+            "copilot requests",
+            "d2b publication",
+            "discord app credentials",
+            "contents write",
+            "pull requests read",
+            "pull requests write",
+            "merge/admin",
+            "workflow-approval",
+            "operator-attested",
+            "fine-grained permissions",
+            "gh_token",
+            "github_token",
+            "must not reuse",
+            "suspended-on-start",
+            "u8",
+        ):
+            self.assertIn(marker, lowered, marker)
+        for marker in (
+            "[[service]]",
+            "[[services]]",
+            "webhook handler",
+            "custom provider adapter",
+            "gh pr merge",
+            "git merge --",
+            "git rebase --",
+            "--force-with-lease",
+        ):
+            self.assertNotIn(marker, pack_lowered, marker)
+        self.assertFalse((PR_BABYSIT_ROOT / "services").exists())
+        self.assertFalse((PR_BABYSIT_ROOT / "relay").exists())
+        self.assertFalse((PR_BABYSIT_ROOT / "daemon").exists())
+
+        governance = (
+            ROOT
+            / "cities"
+            / "d2b-gascity"
+            / "template-fragments"
+            / "d2b-governance.template.md"
+        ).read_text(encoding="utf-8")
+        governance = " ".join(governance.lower().split())
+        for marker in (
+            "pr-babysitter",
+            "mol-pr-babysit-repair",
+            "target-only",
+            "never merge",
+            "never force-push",
+            "pull-request handoff",
+            "human-owned",
+        ):
+            self.assertIn(marker, governance, marker)
+
+    def test_u7_documentation_has_no_forbidden_private_values(self) -> None:
+        documents = [
+            ROOT / relative
+            for relative in (
+                "README.md",
+                "AGENTS.md",
+                "CONTRIBUTING.md",
+                "PROVENANCE.md",
+                "SECURITY.md",
+                "CHANGELOG.md",
+                "docs/operations.md",
+                "docs/testing.md",
+                "recipes/the-mayor.md",
+                "cities/d2b-gascity/template-fragments/d2b-governance.template.md",
+            )
+        ]
+        text = "\n".join(
+            path.read_text(encoding="utf-8")
+            for path in documents
+        )
+        self.assertNotRegex(text, r"/(?:home|Users|private|var)/")
+        for address in re.findall(r"\b(?:\d{1,3}\.){3}\d{1,3}\b", text):
+            self.assertEqual(address, "127.0.0.1")
 
     def test_discord_and_gascity_pack_are_enabled_and_pinned(self) -> None:
         pack = tomllib.loads(
@@ -2161,6 +2322,16 @@ class RootPortableCityTests(unittest.TestCase):
 
 
 class VendoredPrBabysitTests(unittest.TestCase):
+    def test_pr_babysit_authored_files_are_fully_inventoried(self) -> None:
+        actual_files = {
+            str(path.relative_to(PR_BABYSIT_ROOT))
+            for path in PR_BABYSIT_ROOT.rglob("*")
+            if path.is_file() and "__pycache__" not in path.parts
+        }
+        self.assertEqual(actual_files, set(PR_BABYSIT_AUTHORED_FILES))
+        for relative in PR_BABYSIT_AUTHORED_FILES:
+            self.assertTrue((PR_BABYSIT_ROOT / relative).is_file(), relative)
+
     def test_pr_babysit_manifest_pins_exact_upstream_subset(self) -> None:
         manifest = json.loads(
             (PR_BABYSIT_ROOT / "UPSTREAM.json").read_text(encoding="utf-8")

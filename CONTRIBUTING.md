@@ -44,11 +44,36 @@ state.
   `github-issue-fix`, `publish`) on the repository-owning rig. Publication
   must persist and re-read `merge_strategy=pr` plus `target=v3` for d2b or
   `target=main` for city-source.
+- The rig-imported `pr-babysit` pack is the only babysitting surface. Use the
+  binding-qualified targets `d2b/pr-babysit.pr-babysitter` and
+  `city-source/pr-babysit.pr-babysitter`; keep the workdir-local
+  `.github/skills/pr-babysit` and `.agents/skills/pr-babysit` projection and
+  its mandatory prompt gate intact.
 - Publication must refuse direct merges and never merge or force-push. Host
   branch protection for `v3` is defense-in-depth and must require pull
   requests and apply to administrators; this repository does not claim the
   current host is already configured that way. Merge decisions remain
   human-owned.
+- Keep publication handoff deterministic: run
+  `gc pr-babysit pr-babysit publication-handoff`, then
+  `gc pr-babysit pr-babysit verify-handoff`, before a publish bead closes.
+  The `1m` `pr-babysit-sweep` order and native dependency-close wake own
+  checkpoint routing; do not add a daemon, webhook, relay, service, or
+  publication helper.
+- Preserve the seven watch states (`watching`, `waiting`, `repairing`,
+  `merge-ready`, `blocked`, `exhausted`, `terminal`) and the
+  `claim -> act -> confirm` action protocol. Link repair children with
+  `bd dep <action-id> --blocks <watch-id>`. Keep Formula v2 repair bounded to
+  three CI attempts, two review attempts, eight active hours, and three days.
+- The v1 repair identity is operator-attested Contents write plus Pull
+  requests read only. The agent cannot introspect fine-grained permissions;
+  refuse Pull requests write, merge/admin, workflow approval, and Copilot
+  Requests authority. Do not use `update-branch`; `BEHIND`, stale, dirty,
+  conflicting, unknown, and ambiguous push outcomes block, and an ambiguous
+  push is never retried. Keep `GH_TOKEN` and `GITHUB_TOKEN` separate from
+  Copilot tokens. Never use `--force-with-lease` or a raw rebase. Rearm only
+  an open blocked, exhausted, or merge-ready watch with `rearm=true`; terminal
+  watches stay terminal.
 - Preserve upstream licenses and notices. Use ASCII hyphens only.
 - Keep portable source in Git. Keep credentials, runtime state, logs,
   prompts, responses, mappings, bindings, and host configuration outside the
@@ -91,6 +116,12 @@ coverage. Authenticated Discord ingress, Copilot CLI, optional Codex, and
 credentialed publication are live, redacted smokes, not test code or
 committed reports. Keep Copilot Requests, d2b publication credentials, and
 Discord app credentials separate; never couple `GH_TOKEN` to a Copilot token.
+
+U7 static and native credential-free tests cover both `d2b`/`v3` and
+`city-source`/`main` without mutating GitHub. Enable d2b first; keep
+city-source suspended-on-start and defer live repair there until the U8
+disposable d2b acceptance passes. Record live evidence privately and redact
+it before sharing.
 
 Before staging, inspect `git status --short`, the staged file list, and the
 complete diff. Remove private values, live payloads, and runtime artifacts.

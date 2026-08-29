@@ -20,8 +20,13 @@ work. Use the stock official workflows without the Discord extension.
 Both rigs default to `open_pr=true`, `push=true`, and `drain_policy=separate`
 so implementation uses worktrees and publication opens a pull request.
 Publication must refuse direct merges and accept only the pull-request
-handoff. Never merge or force-push; merge decisions remain human-owned. Host
-branch protection for `v3` is defense-in-depth: it must require pull requests
-and apply to administrators. This repository does not claim that the current
-host is already configured that way.
+handoff. The rig-imported `pr-babysit` agent
+`pr-babysit.pr-babysitter` and
+`mol-pr-babysit-repair` Formula v2 are target-only: they may inspect and repair
+the named pull request on its existing head branch, but may not create a
+replacement pull request. It may never merge; it may never force-push or
+rebase, approve workflow runs, or update branch currency. Merge decisions
+remain human-owned. Host branch protection for `v3` is defense-in-depth: it must
+require pull requests and apply to administrators. This repository does not
+claim that the current host is already configured that way.
 {{- end }}

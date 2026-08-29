@@ -33,10 +33,17 @@ is connected only through native `gc rig add`; its path is live site state in
 |       |-- formulas/
 |       `-- template-fragments/
 |-- packs/
-|   `-- core-city/
-|       |-- model-tiers.base.toml
-|       |-- commands/gen-model-tiers/
-|       `-- template-fragments/
+|   |-- core-city/
+|   |   |-- model-tiers.base.toml
+|   |   |-- commands/gen-model-tiers/
+|   |   `-- template-fragments/
+|   `-- pr-babysit/
+|       |-- pack.toml
+|       |-- agents/pr-babysitter/
+|       |-- commands/pr-babysit/
+|       |-- formulas/
+|       |-- orders/
+|       `-- skills/pr-babysit/
 |-- docs/
 |   |-- designs/
 |   |-- operations.md
@@ -151,31 +158,85 @@ The policy requires pull requests and must apply to administrators.
 
 ## PR babysitting and human-gate recovery
 
-**Current status: blocked.** The pinned city composition does not import
-`ce-babysit-pr`, and it does not schedule
-`notify-on-human-gate-creation` or `renudge-stale-human-gates`. The required
-official Pack v2 export and compatible Gas City core revision are not available
-at the immutable revisions recorded in `cities/d2b-gascity/pack.toml` and
-`packs.lock`.
+The enabled target-only capability is the rig-imported `pr-babysit` Pack v2
+pack. It is imported once by each rig, not by the city or `packs/core-city`.
+The binding-qualified native identities are
+`d2b/pr-babysit.pr-babysitter` and
+`city-source/pr-babysit.pr-babysitter`; each is a fresh, on-demand
+`fast-worker` session with one active session and workdir
+`.gc/agents/pr-babysitter`.
 
-Do not invoke the unavailable skill from this city or treat either named gate
-order as enabled. The existing native `gate-sweep` remains the only composed
-mechanical gate sweep. There is no local watcher, relay, wrapper, or scheduler
-to fill the upstream gap, and the city must not add one or copy the unavailable
-skill.
+The session setup script projects the vendored skill into both
+`.github/skills/pr-babysit` and `.agents/skills/pr-babysit` inside the
+workdir. The mandatory projection gate checks the pinned commit and hashes
+before any GitHub or repository action. It never writes the rig root or a
+user-global skill directory. Inspect the native surfaces with:
 
-The blocked upstream request is for target-only observation of an existing pull
-request and native creation and stale-gate notifications. If official
-immutable dependencies become available, any integration must preserve
-human-owned approval and merge decisions, report blockers explicitly, and never
-approve, merge, or force-push. Credentialed PR and gate behavior remains a
-host-owned smoke, not a claim made by this documentation.
+```text
+gc config show --json
+gc config explain --rig d2b --agent pr-babysitter
+gc skill list --agent d2b/pr-babysit.pr-babysitter --json
+gc skill list --agent city-source/pr-babysit.pr-babysitter --json
+```
 
-The d2b rig remains targeted to `v3` with `metadata.target=v3` and
-`metadata.merge_strategy=pr`. This city-source change is delivered to `main`
-with `metadata.target=main` through a pull request. Until the upstream
-prerequisite is published, repository checks can verify only this blocked
-composition and its no-local-watcher boundary.
+Publication uses deterministic handoff and receipt commands. The handoff
+verifies the repository, PR number or URL, base, head, and current head SHA;
+it creates or reuses one durable watch record, routes it, and writes a safe
+receipt. Publication must verify that receipt before it closes:
+
+```text
+gc pr-babysit pr-babysit publication-handoff \
+  --rig d2b --publication-bead-id <publication-bead-id> \
+  --url <pull-request-url> --pr-number <number> --json
+gc pr-babysit pr-babysit verify-handoff \
+  --rig d2b --publication-bead-id <publication-bead-id> \
+  --url <pull-request-url> --pr-number <number> --json
+gc pr-babysit pr-babysit show --watch-id <watch-id> --json
+```
+
+The durable Beads watch states are `watching`, `waiting`, `repairing`,
+`merge-ready`, `blocked`, `exhausted`, and `terminal`. The action protocol is
+`claim -> act -> confirm`; an action child is linked with
+`bd dep <action-id> --blocks <watch-id>`, so native dependency-close wake
+resumes the watch only after confirmation. The `pr-babysit-sweep` cooldown
+order runs every `1m`, calls `list-due`, and routes
+`<rig>/pr-babysit.pr-babysitter` with `gc sling --nudge`; it is one short
+checkpoint, not a daemon or in-session watcher.
+Action claim statuses are `claimed`, `result-recorded`, `closed`, `blocked`,
+`ambiguous`, and `stale`; watch exhaustion is recorded on the watch. Only a
+confirmed passed result closes the action child.
+
+Each checkpoint takes one fresh snapshot, then handles terminal state, head
+reconciliation, review feedback, current-head CI, exact branch currency, and
+one state write in that order. `mol-pr-babysit-repair` is a bounded Formula v2
+with prepare, repair, review, validate-and-report, and close-action steps.
+It runs `make check` before a normal push to the existing PR head and records
+the resulting SHA. CI repairs get three attempts per head and fingerprint;
+review repairs get two attempts. The active budget is eight active hours and
+the hard backstop is a three-day backstop.
+
+The first version does not use `update-branch`: the repair identity is
+operator-attested with Contents write and Pull requests read only, and the
+agent cannot introspect fine-grained permissions. `BEHIND`, dirty, conflicting,
+unknown capability, stale-head, or ambiguous push evidence is a human blocker;
+an ambiguous push records `ambiguous-outcome` and is never retried. `MERGED`
+and `CLOSED` are absorbing `terminal` outcomes. An open `blocked`,
+`exhausted`, or `merge-ready` watch may be explicitly rearmed with
+`rearm=true`; a terminal watch cannot be rearmed.
+
+The non-network credential check is
+`gc pr-babysit pr-babysit check-credentials --json` with the operator
+attestation `contents-write,pull-requests-read`; it verifies separation but
+does not introspect fine-grained permissions.
+
+The d2b rig accepts only `v3`; city-source accepts only `main` and remains
+suspended-on-start. d2b is enabled first. Do not enable city-source for live
+repair until the U8 disposable d2b acceptance passes. Static and native
+credential-free tests cover both configurations without mutating GitHub.
+Authenticated live evidence remains private and redacted. The capability never
+merges, force-pushes, rebases, approves workflow runs, creates a replacement
+PR, or changes another target. Human merge ownership remains with human
+owners, who retain the final merge decision.
 
 ## Clean reset
 

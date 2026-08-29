@@ -22,6 +22,7 @@ is never copied into this repository.
 | Discord pack | [gastownhall/gascity-packs/discord](https://github.com/gastownhall/gascity-packs/tree/9f98ea4e1974cb49d18cd0c453eb81b2370cca84/discord) | `9f98ea4e1974cb49d18cd0c453eb81b2370cca84` | Retain upstream notices |
 | Beads | [steveyegge/beads](https://github.com/steveyegge/beads) | `v1.2.2`, `6c124203e771433a3550c348771a5b5e27fd3c21` | MIT |
 | Dolt | [dolthub/dolt](https://github.com/dolthub/dolt) | `2.1.7` | Apache-2.0 |
+| PR babysitting source | [EveryInc/compound-engineering-plugin](https://github.com/EveryInc/compound-engineering-plugin) | `compound-engineering-v3.23.4`, `33d9bd92689d60580e732890f94466e5793385b1` | MIT |
 
 The official Gas City core, Beads, Gas City pack, and Discord pack imports
 are recorded in the nested city's `pack.toml` and `packs.lock`. The city
@@ -53,6 +54,40 @@ The local core pack independently defines the `command-glossary` and
 Apache-2.0 content and does not import the Gastown pack, its agents, sessions,
 or workflow machinery. The official Discord pack remains the source of the
 `discord-v0` fragment.
+
+### Target-only PR babysitting import
+
+The rig-imported `pr-babysit` pack vendors a selected target-only subset from
+EveryInc's MIT-licensed `compound-engineering-plugin` source. The source tag is
+`compound-engineering-v3.23.4` at commit
+`33d9bd92689d60580e732890f94466e5793385b1`. The selected upstream files are:
+
+- `skills/ce-babysit-pr/SKILL.md`;
+- `skills/ce-babysit-pr/references/branch-currency.md`,
+  `envelope.md`, `pipeline.md`, `report.md`, `settle.md`, `setup.md`,
+  `tick.md`, and `watch-loop.md`; and
+- `skills/ce-babysit-pr/scripts/pr-snapshot`.
+
+They are copied to the local `packs/pr-babysit/skills/pr-babysit` namespace
+with the original MIT notice retained in `packs/pr-babysit/LICENSE`.
+`UPSTREAM.json` records the selected-file hashes and the excluded surfaces.
+All existing upstream notices remain alongside their imported sources; local
+documentation, Pack v2 glue, and city configuration remain Apache-2.0.
+
+Local modifications are deliberately narrow: the skill is renamed to
+`pr-babysit`; stack and land behavior is removed; the first version treats
+`BEHIND` as a human blocker and does not call `update-branch`; user-global
+installation, plugin delegation, scheduler or daemon lifecycle, and durable
+`/tmp` state are removed; and native Gas City agent, Beads, projection,
+publication-handoff, checkpoint, and Formula v2 repair seams are added.
+These local Pack v2 files are repository-owned Apache-2.0 content unless a
+file retains an upstream notice.
+
+The excluded surfaces are stack and stack-landing behavior; merge,
+force-push, and raw-rebase mutations; workflow approval; delegation to host
+plugins; user-global skill installation; scheduler or daemon lifecycle; and
+durable `/tmp` state. The pack remains target-only and never creates a
+replacement pull request or makes the human merge decision.
 
 ## Adapted cookbook material
 
