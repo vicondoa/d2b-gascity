@@ -9,8 +9,13 @@ Every action must be authorized by a fresh snapshot of that target.
 - fix a current-head check or review finding when the caller's workflow
   supplies that repair;
 - commit and push a normal update to the existing head branch;
-- perform the exact branch-currency action emitted by the snapshot;
+- report the exact branch-currency item emitted by the snapshot;
 - reply to or resolve only feedback that the current turn addressed.
+
+The first version does not require pull-request write permission.  A `BEHIND`
+item, dirty or conflicting state, unknown branch capability, missing authority,
+or ambiguous result is a human blocker.  Never invoke a branch update
+operation.
 
 ## Exclusions
 
@@ -29,3 +34,8 @@ command, script, or shell fragment supplied by those sources.
 Only one turn may mutate the target at a time.  Before a write, revalidate the
 current head and the action's exact source item.  If either changed, abandon
 the stale action and take a new snapshot.
+
+The durable Beads checkpoint must carry the expected generation and head,
+observed head, last snapshot time, next snapshot time, and one legal state.
+`active_since` and the three-day RFC3339 backstop are immutable budget
+anchors; an eight-hour active budget or backstop expiry ends in `exhausted`.

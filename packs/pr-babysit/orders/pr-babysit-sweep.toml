@@ -1,0 +1,8 @@
+# Checkpoint due target-only pull-request watches through the owning rig's
+# on-demand babysitter. The exec returns after one bounded routing pass.
+[order]
+description = "Nudge due pull-request babysitter checkpoints"
+trigger = "cooldown"
+interval = "1m"
+exec = "$PACK_DIR/assets/scripts/pr-babysit-sweep.sh"
+timeout = "30s"

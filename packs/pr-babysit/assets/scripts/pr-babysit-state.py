@@ -15,7 +15,7 @@ import stat
 import subprocess
 import sys
 import unicodedata
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -33,8 +33,8 @@ STATES = {
     "exhausted",
     "terminal",
 }
-TERMINAL_STATES = {"terminal"}
 REARMABLE_STATES = {"blocked", "exhausted", "merge-ready"}
+CHECKPOINT_STATES = {"watching", "waiting"}
 TRANSITIONS = {
     "watching": {"waiting", "repairing", "merge-ready", "blocked", "terminal"},
     "waiting": {"watching", "terminal"},
@@ -46,6 +46,12 @@ TRANSITIONS = {
 }
 VALIDATION_STATUSES = {"passed", "failed", "not-run", "ambiguous"}
 AMBIGUOUS_REASON = "ambiguous-outcome"
+TIME_BUDGET_REASON = "time-budget-exhausted"
+BACKSTOP_REASON = "backstop-expired"
+ACTIVE_BUDGET = timedelta(hours=8)
+BACKSTOP_BUDGET = timedelta(days=3)
+DEFAULT_DUE_LIMIT = 32
+MAX_DUE_LIMIT = 100
 SHA_RE = re.compile(r"^[0-9a-fA-F]{40}$")
 SLUG_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9_.-]*[A-Za-z0-9])?$")
 WATCH_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
@@ -465,6 +471,13 @@ def parse_time(value: Any, field: str, *, default_now: bool = False) -> datetime
     if parsed.tzinfo is None:
         fail(f"{field} must include a timezone")
     return parsed.astimezone(timezone.utc)
+
+
+def format_time(value: datetime) -> str:
+    return value.astimezone(timezone.utc).replace(microsecond=0).isoformat().replace(
+        "+00:00",
+        "Z",
+    )
 
 
 def state_from_metadata(metadata: dict[str, str]) -> str:
@@ -913,8 +926,12 @@ def initial_watch_metadata(
         "backstop_at",
         required=False,
     )
+    active_since_time = parse_time(active_since, "active_since")
     if backstop_at:
-        parse_time(backstop_at, "backstop_at")
+        if parse_time(backstop_at, "backstop_at") < active_since_time:
+            fail("backstop_at must not precede active_since")
+    else:
+        backstop_at = format_time(active_since_time + BACKSTOP_BUDGET)
     result = {
         "record_kind": "watch",
         **{key: str(value) for key, value in identity.items() if key != "pr_state"},
@@ -2304,6 +2321,298 @@ def _confirm_action_locked(payload: dict[str, Any]) -> dict[str, Any]:
     )
 
 
+def checkpoint(payload: dict[str, Any]) -> dict[str, Any]:
+    watch_id = validate_watch_id(payload_value(payload, "watch_id", "id"))
+    with watch_lock(watch_id):
+        return _checkpoint_locked(payload, watch_id)
+
+
+def _checkpoint_locked(
+    payload: dict[str, Any],
+    watch_id: str,
+) -> dict[str, Any]:
+    _, metadata = show_issue(watch_id)
+    if metadata.get("record_kind") != "watch":
+        fail("requested Beads record is not a watch", "identity-mismatch")
+    current = state_from_metadata(metadata)
+    generation = generation_from_metadata(metadata)
+    current_head = sha_value(metadata.get("head_sha"), "head_sha")
+
+    if current == "terminal":
+        return metadata_response(
+            "checkpoint",
+            watch_id,
+            metadata,
+            changed=False,
+            absorbed=True,
+        )
+
+    expected_generation_raw = payload_value(
+        payload,
+        "expected_generation",
+        "generation",
+    )
+    expected_head_raw = payload_value(
+        payload,
+        "expected_head_sha",
+        "expected_head",
+        "expected_old_sha",
+        "expected_old_head",
+    )
+    if expected_head_raw is None:
+        expected_head_raw = payload_value(payload, "head_sha")
+    if expected_generation_raw is None:
+        fail("expected_generation is required", "invalid-request")
+    if expected_head_raw is None:
+        fail("expected_head_sha is required", "invalid-request")
+    expected_generation = integer_value(
+        expected_generation_raw,
+        "expected_generation",
+    )
+    expected_head = sha_value(expected_head_raw, "expected_head_sha")
+    if expected_generation != generation or expected_head != current_head:
+        fail("checkpoint is stale for the current watch", "stale-checkpoint")
+
+    observed_head_raw = payload_value(
+        payload,
+        "observed_head_sha",
+        "snapshot_head_sha",
+        "current_head_sha",
+        "current_sha",
+        "remote_head_sha",
+        "new_head_sha",
+        "head_sha",
+    )
+    if observed_head_raw is None:
+        observed_head_raw = expected_head
+    observed_head = sha_value(observed_head_raw, "observed_head_sha")
+
+    observed_at = text_value(
+        payload_value(
+            payload,
+            "observed_at",
+            "last_snapshot_at",
+            "snapshot_at",
+            "now",
+        )
+        or iso_now(),
+        "observed_at",
+    )
+    next_snapshot_at = text_value(
+        payload_value(payload, "next_snapshot_at", "next_at")
+        or metadata.get("next_snapshot_at", ""),
+        "next_snapshot_at",
+    )
+    observed_time = parse_time(observed_at, "observed_at")
+    parse_time(next_snapshot_at, "next_snapshot_at")
+    active_since = text_value(
+        metadata.get("active_since", ""),
+        "active_since",
+    )
+    active_since_time = parse_time(active_since, "active_since")
+    backstop_at = text_value(
+        metadata.get("backstop_at", ""),
+        "backstop_at",
+        required=False,
+    )
+    if backstop_at:
+        backstop_time = parse_time(backstop_at, "backstop_at")
+        if backstop_time < active_since_time:
+            fail("backstop_at must not precede active_since", "corrupt-state")
+    else:
+        backstop_time = active_since_time + BACKSTOP_BUDGET
+        backstop_at = format_time(backstop_time)
+    if observed_time < active_since_time:
+        fail("observed_at must not precede active_since", "invalid-request")
+
+    pr_state_raw = payload_value(
+        payload,
+        "pr_state",
+        "observed_pr_state",
+        "pull_request_state",
+    )
+    pr_state = "OPEN"
+    if pr_state_raw is not None:
+        pr_state = text_value(pr_state_raw, "pr_state").upper()
+        if pr_state not in {"OPEN", "CLOSED", "MERGED"}:
+            fail("pr_state must be OPEN, CLOSED, or MERGED")
+
+    desired_raw = payload_value(
+        payload,
+        "to",
+        "state",
+        "next_state",
+        "desired_state",
+    )
+    desired = (
+        current
+        if desired_raw is None
+        else text_value(desired_raw, "to").lower()
+    )
+    if desired not in STATES:
+        fail("to is not a supported watch state")
+
+    claim_status = metadata.get("claim_status", "none")
+    active_claim = claim_status in {"claimed", "result-recorded"}
+    if current == "repairing" and not active_claim:
+        fail("repairing watch has no active action claim", "corrupt-state")
+
+    if current in CHECKPOINT_STATES and (
+        claim_status != "none"
+        or metadata.get("action_kind", "")
+        or metadata.get("action_fingerprint", "")
+    ):
+        fail(
+            "watch has an unconfirmed action claim",
+            "unconfirmed-claim",
+        )
+
+    if pr_state != "OPEN":
+        desired = "terminal"
+        reason = "merged" if pr_state == "MERGED" else "closed"
+    else:
+        reason = safe_reason(payload_value(payload, "reason"))
+
+    head_changed = observed_head != current_head
+    next_generation = generation + 1 if head_changed else generation
+    if current == "repairing" and pr_state == "OPEN" and not head_changed:
+        return metadata_response(
+            "checkpoint",
+            watch_id,
+            metadata,
+            changed=False,
+            waiting_for_action=True,
+            dispatched=False,
+        )
+    if current == "repairing" and head_changed and desired == current:
+        desired = "watching"
+    budget_reason = ""
+    if current in CHECKPOINT_STATES and pr_state == "OPEN":
+        if observed_time >= backstop_time:
+            budget_reason = BACKSTOP_REASON
+        elif observed_time - active_since_time >= ACTIVE_BUDGET:
+            budget_reason = TIME_BUDGET_REASON
+    if budget_reason:
+        desired = "exhausted"
+        reason = budget_reason
+
+    if desired == "repairing":
+        fail(
+            "checkpoint cannot create an action claim",
+            "action-required",
+        )
+    if (
+        desired != current
+        and desired != "exhausted"
+        and desired not in TRANSITIONS[current]
+    ):
+        fail(
+            f"illegal watch transition {current} -> {desired}",
+            "illegal-transition",
+        )
+    if desired == "exhausted" and not budget_reason:
+        fail(
+            f"illegal watch transition {current} -> {desired}",
+            "illegal-transition",
+        )
+    if desired in {"blocked", "exhausted", "terminal"}:
+        reason = safe_reason(
+            reason or desired,
+            required=desired == "terminal",
+        )
+
+    updates = {
+        "state": desired,
+        "generation": str(next_generation),
+        "head_sha": observed_head,
+        "last_snapshot_at": observed_at,
+        "next_snapshot_at": next_snapshot_at,
+        "active_since": active_since,
+        "backstop_at": backstop_at,
+    }
+    if head_changed or desired in {
+        "merge-ready",
+        "blocked",
+        "exhausted",
+        "terminal",
+    }:
+        updates.update(
+            {
+                "action_kind": "",
+                "action_fingerprint": "",
+                "claim_status": (
+                    "blocked"
+                    if desired == "blocked"
+                    else "exhausted"
+                    if desired == "exhausted"
+                    else "none"
+                ),
+                "expected_old_head": "",
+                "expected_new_head": "",
+                "expected_old_sha": "",
+                "expected_new_sha": "",
+                "pushed_sha": "",
+                "validation_status": "",
+            }
+        )
+    else:
+        updates["claim_status"] = "none"
+    updates["terminal_reason"] = (
+        reason
+        if desired in {"blocked", "exhausted", "terminal"}
+        else ""
+    )
+
+    changed = any(metadata.get(key) != value for key, value in updates.items())
+    if not changed:
+        return metadata_response(
+            "checkpoint",
+            watch_id,
+            metadata,
+            changed=False,
+            head_reconciled=False,
+        )
+
+    if current == "repairing" and (head_changed or desired == "terminal"):
+        invalidate_action_claim(
+            watch_id,
+            metadata,
+            "head-changed" if head_changed else "terminal",
+        )
+    if desired == "terminal":
+        metadata_updates(watch_id, updates, status="open", assignee="")
+        close_issue(watch_id, reason)
+    else:
+        metadata_updates(
+            watch_id,
+            updates,
+            status=(
+                "blocked"
+                if desired in {"blocked", "exhausted"}
+                else "open"
+            ),
+            assignee=(
+                ""
+                if desired in {"blocked", "exhausted"}
+                else None
+            ),
+        )
+    _, metadata = show_issue(watch_id)
+    return metadata_response(
+        "checkpoint",
+        watch_id,
+        metadata,
+        changed=True,
+        head_reconciled=head_changed,
+        exhausted=desired == "exhausted",
+        terminal_reason=(
+            metadata.get("terminal_reason", "")
+            if desired in {"blocked", "exhausted", "terminal"}
+            else ""
+        ),
+    )
+
+
 def list_due(payload: dict[str, Any]) -> dict[str, Any]:
     rig = payload_value(payload, "rig")
     if rig is not None:
@@ -2311,7 +2620,15 @@ def list_due(payload: dict[str, Any]) -> dict[str, Any]:
         if rig not in RIGS:
             fail("unknown rig")
     now = parse_time(payload_value(payload, "now"), "now", default_now=True)
-    args = ["list", "--all", "--limit", "0", "--json"]
+    limit_raw = payload_value(payload, "limit", "max_watches")
+    limit = (
+        DEFAULT_DUE_LIMIT
+        if limit_raw is None
+        else integer_value(limit_raw, "limit")
+    )
+    if limit > MAX_DUE_LIMIT:
+        fail(f"limit must not exceed {MAX_DUE_LIMIT}")
+    args = ["list", "--all", "--limit", str(limit), "--sort", "id", "--json"]
     args.extend(["--metadata-field", "record_kind=watch"])
     if rig:
         args.extend(["--metadata-field", f"rig={rig}"])
@@ -2331,28 +2648,49 @@ def list_due(payload: dict[str, Any]) -> dict[str, Any]:
             try:
                 raw_metadata = json.loads(raw_metadata)
             except json.JSONDecodeError:
-                continue
-        if (
-            not isinstance(raw_metadata, dict)
-            or raw_metadata.get("record_kind") != "watch"
-        ):
+                fail("Beads list returned malformed metadata", "corrupt-state")
+        if not isinstance(raw_metadata, dict):
+            fail("Beads list returned malformed metadata", "corrupt-state")
+        if raw_metadata.get("record_kind") != "watch":
             continue
         metadata = metadata_from_issue(record)
-        state_from_metadata(metadata)
+        state = state_from_metadata(metadata)
+        generation_from_metadata(metadata)
+        attempts_from_metadata(metadata)
         validate_watch_id(record["id"])
-        if rig and metadata.get("rig") != rig:
-            continue
-        if metadata.get("state") in TERMINAL_STATES:
-            continue
+        if not SHA_RE.fullmatch(metadata.get("head_sha", "")):
+            fail("watch metadata has an invalid head SHA", "corrupt-state")
+        if not metadata.get("last_snapshot_at", ""):
+            fail("watch metadata is missing last_snapshot_at", "corrupt-state")
+        parse_time(metadata["last_snapshot_at"], "last_snapshot_at")
+        if not metadata.get("active_since", ""):
+            fail("watch metadata is missing active_since", "corrupt-state")
+        active_since = parse_time(metadata["active_since"], "active_since")
+        backstop_at = metadata.get("backstop_at", "")
+        if not backstop_at:
+            fail("watch metadata is missing backstop_at", "corrupt-state")
+        if parse_time(backstop_at, "backstop_at") < active_since:
+            fail("backstop_at must not precede active_since", "corrupt-state")
         next_at = metadata.get("next_snapshot_at", "")
         if not next_at:
+            fail("watch metadata is missing next_snapshot_at", "corrupt-state")
+        next_time = parse_time(next_at, "next_snapshot_at")
+        if rig and metadata.get("rig") != rig:
             continue
-        if parse_time(next_at, "next_snapshot_at") <= now:
+        if state not in CHECKPOINT_STATES:
+            continue
+        if (
+            metadata.get("claim_status", "none") != "none"
+            or metadata.get("action_kind", "")
+            or metadata.get("action_fingerprint", "")
+        ):
+            continue
+        if next_time <= now:
             due.append(
                 {
                     "watch_id": record["id"],
                     "metadata": dict(sorted(metadata.items())),
-                    "_due_at": parse_time(next_at, "next_snapshot_at"),
+                    "_due_at": next_time,
                 }
             )
     due.sort(
@@ -2361,6 +2699,7 @@ def list_due(payload: dict[str, Any]) -> dict[str, Any]:
             item["watch_id"],
         )
     )
+    due = due[:limit]
     for item in due:
         item.pop("_due_at", None)
     return {"ok": True, "action": "list-due", "watches": due}
@@ -2479,6 +2818,33 @@ def parse_cli_request(argv: list[str]) -> dict[str, Any]:
             ),
             "confirm-action": ("watch_id", "action_id", "current_sha",),
             "confirm": ("watch_id", "action_id", "current_sha",),
+            "checkpoint": (
+                "watch_id",
+                "expected_generation",
+                "expected_head_sha",
+                "observed_head_sha",
+                "observed_at",
+                "next_snapshot_at",
+                "to",
+            ),
+            "checkpoint-state": (
+                "watch_id",
+                "expected_generation",
+                "expected_head_sha",
+                "observed_head_sha",
+                "observed_at",
+                "next_snapshot_at",
+                "to",
+            ),
+            "record-checkpoint": (
+                "watch_id",
+                "expected_generation",
+                "expected_head_sha",
+                "observed_head_sha",
+                "observed_at",
+                "next_snapshot_at",
+                "to",
+            ),
             "publication-handoff": (
                 "rig",
                 "publication_bead_id",
@@ -2538,6 +2904,8 @@ def dispatch(payload: dict[str, Any]) -> dict[str, Any]:
         return record_repair_result(payload)
     if action in {"confirm-action", "confirm"}:
         return confirm_action(payload)
+    if action in {"checkpoint", "checkpoint-state", "record-checkpoint"}:
+        return checkpoint(payload)
     if action in {"list-due", "due"}:
         return list_due(payload)
     fail("unsupported action")

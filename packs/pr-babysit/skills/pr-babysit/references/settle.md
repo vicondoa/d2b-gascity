@@ -16,6 +16,11 @@ snapshot:
 This is an honest handoff, not permission for the human's final integration
 decision.  A later review or check can change the result.
 
+The current checkpoint must still be within the `active_since` eight-hour
+active budget and before the three-day RFC3339 backstop.  If either budget
+expires while the watch is `watching` or `waiting`, persist `exhausted`
+instead of reporting `merge-ready`.
+
 ## Other stops
 
 - `MERGED` or `CLOSED` is terminal.
@@ -23,6 +28,8 @@ decision.  A later review or check can change the result.
 - An exhausted repair or time budget is exhausted.
 - A human decision remains a standing blocker until its exact evidence changes
   or the caller records an answer.
+- `BEHIND`, dirty, conflicting, or unknown branch-currency evidence is a human
+  blocker; do not update the branch from a checkpoint.
 
 An in-progress review signal delays the readiness report but never delays
 handling feedback already posted.  If a signal disappears without a completion

@@ -63,14 +63,14 @@ verify_projection() {
   marker_value="$(cat "$marker")" || blocker "cannot read $marker"
   [ "$marker_value" = "$commit" ] || blocker "wrong commit in $marker"
 
-  verify_file 'fde53dc5901fa1ea4ca23461f7be2c37712dd5f0f292b62f037ecb2a4c9a2899' 'SKILL.md'
+  verify_file 'a0fddb052149889f45612fc1613f87fbcbaf4295e067573e1a55de6814affcd8' 'SKILL.md'
   verify_file '00dcfef1658b30a316c6a9eacddfe8914b07661c6a5278b92e7755da995b2d33' 'references/branch-currency.md'
-  verify_file 'd8dcdf3ffc421b7123dd8be40bcd2bf37a536d5aa80c059c34f8ecf9297bbe34' 'references/envelope.md'
+  verify_file '84cf2fbd360899569bf8d56f36626e9796ff61e9cb9e8039a5693df68b51404d' 'references/envelope.md'
   verify_file 'aebd3a9955d7fb53e94512e4bdc998dfe7e1ca725fbfde6f902fde8382903034' 'references/pipeline.md'
   verify_file '1162855a51b818ca5c8e76cf74f80b92aa134209838aeb9065fc9212f2dec0e5' 'references/report.md'
-  verify_file '5f91c6bcf034999f81b3dd7f60a3f8d99d83afde38bfca572791acdf76d25352' 'references/settle.md'
+  verify_file '6d9b01a8871bc0cfdcca66e16a9b6d338d4bbb74e0913234fad120fdffcef03c' 'references/settle.md'
   verify_file '5bd59192d3e0e96dc5c7d55c87305830ad90348b2d07ff71a0044d68ec1dce6c' 'references/setup.md'
-  verify_file 'ab5e4292473658d81d3c20737822f4ac622d2b1da78fed421eb91f42bf4b69f4' 'references/tick.md'
+  verify_file '07f838234aa32cff2b76a62ccefff154aa19ec39cc85b5b13fded341fd45fa44' 'references/tick.md'
   verify_file '217ab266d693f76f4b67e6881b53cb43bb643514051e6b0793b823b0bebf9294' 'references/watch-loop.md'
   verify_file '1deb1ef2564d45ae23dcdbce35d98327ad1c1765721d9d4f8e411985235c92d1' 'scripts/pr-snapshot'
 }
@@ -85,6 +85,13 @@ done
 
 If the check prints a blocker or exits non-zero, report the blocker and stop.
 Do not invoke `gh`, push, amend, merge, rebase, or mutate either checkout.
+
+After the gate, keep each turn to one fresh snapshot and one checkpoint:
+terminal state, reconcile head, review feedback, current-head CI, exact branch
+currency, then settle or wait.  `BEHIND`, dirty, conflicting, and unknown
+branch-currency evidence are human blockers; do not update the branch.  A
+repairing watch with an open or unconfirmed child waits for native dependency
+closure, and a confirmed push resumes from a fresh snapshot.
 
 After the projection gate succeeds, require the owning rig and source root:
 

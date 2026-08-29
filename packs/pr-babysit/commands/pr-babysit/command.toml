@@ -1,1 +1,1 @@
-description = "Manage durable target-only pull-request babysitting state in Beads."
+description = "Manage durable target-only pull-request handoffs, checkpoints, and state in Beads."

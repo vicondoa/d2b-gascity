@@ -3608,6 +3608,571 @@ if command == "close":
         )
 
 
+class PrBabysitCheckpointTests(unittest.TestCase):
+    _HANDOFF = dict(PrBabysitStateTests._HANDOFF)
+
+    def _fixture(self, name: str) -> tuple[pathlib.Path, dict[str, str]]:
+        root = ROOT / ".scratch" / f"u5-checkpoint-{name}"
+        shutil.rmtree(root, ignore_errors=True)
+        root.mkdir(parents=True)
+        fake = root / "fake-beads"
+        fake.write_text(
+            PrBabysitStateTests._fake_beads_script(),
+            encoding="utf-8",
+        )
+        fake.chmod(0o755)
+        (root / "beads.json").write_text("[]\n", encoding="utf-8")
+        (root / "calls.json").write_text("[]\n", encoding="utf-8")
+        return root, {
+            "PR_BABYSIT_BEADS_BIN": str(fake),
+            "FAKE_BEADS_ROOT": str(root),
+            "PR_BABYSIT_BEADS_CWD": str(root),
+            "GC_RIG_ROOT": str(root),
+            "PR_BABYSIT_ALLOWED_HOSTS": "github.com",
+        }
+
+    def _run(
+        self,
+        env: dict[str, str],
+        action: str,
+        payload: dict[str, object] | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [str(PR_BABYSIT_STATE_RUNNER), action],
+            cwd=ROOT,
+            env=os.environ | env,
+            input=json.dumps(payload or {}),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+    @staticmethod
+    def _json(result: subprocess.CompletedProcess[str]) -> dict:
+        if not result.stdout:
+            raise AssertionError(result.stderr)
+        return json.loads(result.stdout)
+
+    def _watch_id(
+        self,
+        env: dict[str, str],
+        payload: dict[str, object] | None = None,
+    ) -> str:
+        handoff = self._run(env, "handoff", payload or self._HANDOFF)
+        self.assertEqual(handoff.returncode, 0, handoff.stderr)
+        return self._json(handoff)["watch_id"]
+
+    def test_checkpoint_persists_snapshot_and_one_legal_transition(self) -> None:
+        root, env = self._fixture("legal")
+        try:
+            watch_id = self._watch_id(env)
+            checkpoint = self._run(
+                env,
+                "checkpoint",
+                {
+                    "watch_id": watch_id,
+                    "expected_generation": 1,
+                    "expected_head_sha": "a" * 40,
+                    "observed_head_sha": "a" * 40,
+                    "observed_at": "2026-08-29T19:01:00Z",
+                    "next_snapshot_at": "2026-08-29T19:02:00Z",
+                    "to": "waiting",
+                },
+            )
+            self.assertEqual(checkpoint.returncode, 0, checkpoint.stderr)
+            state = self._json(checkpoint)
+            self.assertEqual(state["state"], "waiting")
+            self.assertEqual(state["metadata"]["last_snapshot_at"], "2026-08-29T19:01:00Z")
+            self.assertEqual(state["metadata"]["next_snapshot_at"], "2026-08-29T19:02:00Z")
+            self.assertEqual(state["metadata"]["generation"], "1")
+
+            resumed = self._run(
+                env,
+                "checkpoint",
+                {
+                    "watch_id": watch_id,
+                    "expected_generation": 1,
+                    "expected_head_sha": "a" * 40,
+                    "observed_head_sha": "a" * 40,
+                    "observed_at": "2026-08-29T19:02:00Z",
+                    "next_snapshot_at": "2026-08-29T19:03:00Z",
+                    "to": "watching",
+                },
+            )
+            self.assertEqual(resumed.returncode, 0, resumed.stderr)
+            self.assertEqual(self._json(resumed)["state"], "watching")
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
+
+    def test_checkpoint_rejects_stale_generation_or_head_without_writing(self) -> None:
+        root, env = self._fixture("stale")
+        try:
+            watch_id = self._watch_id(env)
+            before = (root / "beads.json").read_bytes()
+            for payload in (
+                {
+                    "expected_generation": 2,
+                    "expected_head_sha": "a" * 40,
+                    "observed_head_sha": "a" * 40,
+                },
+                {
+                    "expected_generation": 1,
+                    "expected_head_sha": "b" * 40,
+                    "observed_head_sha": "a" * 40,
+                },
+            ):
+                result = self._run(
+                    env,
+                    "checkpoint",
+                    {
+                        "watch_id": watch_id,
+                        **payload,
+                        "observed_at": "2026-08-29T19:01:00Z",
+                        "next_snapshot_at": "2026-08-29T19:02:00Z",
+                        "to": "waiting",
+                    },
+                )
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual((root / "beads.json").read_bytes(), before)
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
+
+    def test_checkpoint_reconciles_head_and_invalidates_claim(self) -> None:
+        root, env = self._fixture("head")
+        try:
+            watch_id = self._watch_id(env)
+            claim = self._run(
+                env,
+                "claim-action",
+                {
+                    "watch_id": watch_id,
+                    "generation": 1,
+                    "head_sha": "a" * 40,
+                    "kind": "ci",
+                    "fingerprint": "check-failed",
+                },
+            )
+            self.assertEqual(claim.returncode, 0, claim.stderr)
+            checkpoint = self._run(
+                env,
+                "checkpoint",
+                {
+                    "watch_id": watch_id,
+                    "expected_generation": 1,
+                    "expected_head_sha": "a" * 40,
+                    "observed_head_sha": "b" * 40,
+                    "observed_at": "2026-08-29T19:01:00Z",
+                    "next_snapshot_at": "2026-08-29T19:02:00Z",
+                    "to": "watching",
+                },
+            )
+            self.assertEqual(checkpoint.returncode, 0, checkpoint.stderr)
+            state = self._json(checkpoint)
+            self.assertEqual(state["state"], "watching")
+            self.assertEqual(state["generation"], 2)
+            self.assertEqual(state["metadata"]["head_sha"], "b" * 40)
+            self.assertEqual(state["metadata"]["claim_status"], "none")
+            records = json.loads((root / "beads.json").read_text(encoding="utf-8"))
+            action = next(record for record in records if record["id"] != watch_id)
+            self.assertEqual(action["metadata"]["claim_status"], "stale")
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
+
+    def test_checkpoint_exhausts_active_time_and_backstop(self) -> None:
+        for name, observed_at, reason in (
+            (
+                "active-budget",
+                "2026-08-29T08:00:00Z",
+                "time-budget-exhausted",
+            ),
+            (
+                "backstop",
+                "2026-09-01T19:00:00Z",
+                "backstop-expired",
+            ),
+        ):
+            with self.subTest(name=name):
+                root, env = self._fixture(name)
+                try:
+                    handoff_payload = self._HANDOFF
+                    if name == "active-budget":
+                        handoff_payload = dict(
+                            self._HANDOFF,
+                            active_since="2026-08-29T00:00:00Z",
+                            backstop_at="2026-09-01T00:00:00Z",
+                        )
+                    watch_id = self._watch_id(env, handoff_payload)
+                    result = self._run(
+                        env,
+                        "checkpoint",
+                        {
+                            "watch_id": watch_id,
+                            "expected_generation": 1,
+                            "expected_head_sha": "a" * 40,
+                            "observed_head_sha": "a" * 40,
+                            "observed_at": observed_at,
+                            "next_snapshot_at": "2026-09-02T00:00:00Z",
+                            "to": "watching",
+                        },
+                    )
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    state = self._json(result)
+                    self.assertEqual(state["state"], "exhausted")
+                    self.assertEqual(state["terminal_reason"], reason)
+                finally:
+                    shutil.rmtree(root, ignore_errors=True)
+
+    def test_checkpoint_terminal_absorbs_later_requests(self) -> None:
+        root, env = self._fixture("terminal")
+        try:
+            watch_id = self._watch_id(env)
+            closed = self._run(
+                env,
+                "checkpoint",
+                {
+                    "watch_id": watch_id,
+                    "expected_generation": 1,
+                    "expected_head_sha": "a" * 40,
+                    "observed_head_sha": "a" * 40,
+                    "pr_state": "CLOSED",
+                    "observed_at": "2026-08-29T19:01:00Z",
+                    "next_snapshot_at": "2026-08-29T19:02:00Z",
+                },
+            )
+            self.assertEqual(closed.returncode, 0, closed.stderr)
+            self.assertEqual(self._json(closed)["state"], "terminal")
+            absorbed = self._run(
+                env,
+                "checkpoint",
+                {
+                    "watch_id": watch_id,
+                    "expected_generation": 1,
+                    "expected_head_sha": "a" * 40,
+                    "observed_head_sha": "a" * 40,
+                    "observed_at": "2026-08-29T19:03:00Z",
+                    "next_snapshot_at": "2026-08-29T19:04:00Z",
+                    "to": "watching",
+                },
+            )
+            self.assertEqual(absorbed.returncode, 0, absorbed.stderr)
+            self.assertTrue(self._json(absorbed)["absorbed"])
+            self.assertEqual(self._json(self._run(
+                env,
+                "show",
+                {"watch_id": watch_id},
+            ))["metadata"]["state"], "terminal")
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
+
+
+class PrBabysitSweepTests(unittest.TestCase):
+    _HANDOFF = dict(PrBabysitStateTests._HANDOFF)
+    _SWEEP = PR_BABYSIT_ROOT / "assets" / "scripts" / "pr-babysit-sweep.sh"
+
+    @staticmethod
+    def _fake_gc_script() -> str:
+        return r"""#!/usr/bin/env python3
+import json
+import os
+import sys
+from pathlib import Path
+
+root = Path(os.environ["FAKE_GC_ROOT"])
+path = root / "gc-calls.json"
+calls = json.loads(path.read_text(encoding="utf-8")) if path.exists() else []
+calls.append(sys.argv[1:])
+path.write_text(
+    json.dumps(calls, sort_keys=True, separators=(",", ":")) + "\n",
+    encoding="utf-8",
+)
+if os.environ.get("FAKE_GC_FAIL") == "1":
+    print("route failed", file=sys.stderr)
+    raise SystemExit(1)
+"""
+
+    def _fixture(self, name: str) -> tuple[pathlib.Path, dict[str, str]]:
+        root = ROOT / ".scratch" / f"u5-sweep-{name}"
+        shutil.rmtree(root, ignore_errors=True)
+        root.mkdir(parents=True)
+        beads = root / "fake-beads"
+        beads.write_text(
+            PrBabysitStateTests._fake_beads_script(),
+            encoding="utf-8",
+        )
+        beads.chmod(0o755)
+        gc = root / "fake-gc"
+        gc.write_text(self._fake_gc_script(), encoding="utf-8")
+        gc.chmod(0o755)
+        (root / "beads.json").write_text("[]\n", encoding="utf-8")
+        (root / "calls.json").write_text("[]\n", encoding="utf-8")
+        (root / "gc-calls.json").write_text("[]\n", encoding="utf-8")
+        return root, {
+            "PR_BABYSIT_BEADS_BIN": str(beads),
+            "FAKE_BEADS_ROOT": str(root),
+            "PR_BABYSIT_BEADS_CWD": str(root),
+            "GC_RIG_ROOT": str(root),
+            "GC_RIG": "d2b",
+            "GC_BIN": str(gc),
+            "FAKE_GC_ROOT": str(root),
+            "PR_BABYSIT_ALLOWED_HOSTS": "github.com",
+            "PR_BABYSIT_NOW": "2026-08-29T19:00:00Z",
+        }
+
+    def _run_state(
+        self,
+        env: dict[str, str],
+        action: str,
+        payload: dict[str, object],
+    ) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [str(PR_BABYSIT_STATE_RUNNER), action],
+            cwd=ROOT,
+            env=os.environ | env,
+            input=json.dumps(payload),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+    @staticmethod
+    def _json(result: subprocess.CompletedProcess[str]) -> dict:
+        if not result.stdout:
+            raise AssertionError(result.stderr)
+        return json.loads(result.stdout)
+
+    def _handoff(
+        self,
+        env: dict[str, str],
+        payload: dict[str, object],
+    ) -> str:
+        result = self._run_state(env, "handoff", payload)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return self._json(result)["watch_id"]
+
+    def _run_sweep(
+        self,
+        env: dict[str, str],
+    ) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [str(self._SWEEP)],
+            cwd=ROOT,
+            env=os.environ | env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+    def test_order_uses_pinned_cooldown_exec_shape(self) -> None:
+        order = tomllib.loads(
+            (
+                PR_BABYSIT_ROOT
+                / "orders"
+                / "pr-babysit-sweep.toml"
+            ).read_text(encoding="utf-8")
+        )["order"]
+        self.assertEqual(order["trigger"], "cooldown")
+        self.assertEqual(order["interval"], "1m")
+        self.assertEqual(
+            order["exec"],
+            "$PACK_DIR/assets/scripts/pr-babysit-sweep.sh",
+        )
+        self.assertTrue(self._SWEEP.stat().st_mode & 0o111)
+
+    def test_sweep_routes_due_watches_to_binding_qualified_target(self) -> None:
+        root, env = self._fixture("routes")
+        try:
+            first = self._handoff(
+                env,
+                dict(self._HANDOFF, next_snapshot_at="2026-08-29T18:00:00Z"),
+            )
+            second = self._handoff(
+                env,
+                dict(
+                    self._HANDOFF,
+                    repository="later",
+                    url="https://github.com/octo/later/pull/7",
+                    next_snapshot_at="2026-08-29T18:30:00Z",
+                ),
+            )
+            waiting = self._run_state(
+                env,
+                "transition",
+                {"watch_id": second, "to": "waiting"},
+            )
+            self.assertEqual(waiting.returncode, 0, waiting.stderr)
+            result = self._run_sweep(env)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            calls = json.loads((root / "gc-calls.json").read_text(encoding="utf-8"))
+            self.assertEqual(
+                calls,
+                [
+                    [
+                        "sling",
+                        "--nudge",
+                        "d2b/pr-babysit.pr-babysitter",
+                        first,
+                        "--no-formula",
+                        "--json",
+                    ],
+                    [
+                        "sling",
+                        "--nudge",
+                        "d2b/pr-babysit.pr-babysitter",
+                        second,
+                        "--no-formula",
+                        "--json",
+                    ],
+                ],
+            )
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
+
+    def test_sweep_skips_stopped_and_repairing_watches(self) -> None:
+        root, env = self._fixture("skip")
+        try:
+            states = ("repairing", "merge-ready", "blocked", "exhausted", "terminal")
+            for index, state in enumerate(states):
+                payload = dict(
+                    self._HANDOFF,
+                    repository=f"skip-{index}",
+                    url=f"https://github.com/octo/skip-{index}/pull/7",
+                    next_snapshot_at="2026-08-29T18:00:00Z",
+                )
+                watch_id = self._handoff(env, payload)
+                if state == "repairing":
+                    transition = self._run_state(
+                        env,
+                        "claim-action",
+                        {
+                            "watch_id": watch_id,
+                            "generation": 1,
+                            "head_sha": "a" * 40,
+                            "kind": "ci",
+                            "fingerprint": "same",
+                        },
+                    )
+                elif state == "exhausted":
+                    claimed = self._run_state(
+                        env,
+                        "claim-action",
+                        {
+                            "watch_id": watch_id,
+                            "generation": 1,
+                            "head_sha": "a" * 40,
+                            "kind": "ci",
+                            "fingerprint": "same",
+                        },
+                    )
+                    self.assertEqual(claimed.returncode, 0, claimed.stderr)
+                    transition = self._run_state(
+                        env,
+                        "transition",
+                        {
+                            "watch_id": watch_id,
+                            "to": state,
+                            "reason": "test-stop",
+                        },
+                    )
+                else:
+                    transition = self._run_state(
+                        env,
+                        "transition",
+                        {
+                            "watch_id": watch_id,
+                            "to": state,
+                            **({"reason": "test-stop"} if state == "terminal" else {}),
+                        },
+                    )
+                self.assertEqual(transition.returncode, 0, transition.stderr)
+            result = self._run_sweep(env)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(
+                json.loads((root / "gc-calls.json").read_text(encoding="utf-8")),
+                [],
+            )
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
+
+    def test_sweep_fails_nonzero_on_malformed_state_and_route_failure(self) -> None:
+        root, env = self._fixture("failures")
+        try:
+            watch_id = self._handoff(
+                env,
+                dict(self._HANDOFF, next_snapshot_at="2026-08-29T18:00:00Z"),
+            )
+            records = json.loads((root / "beads.json").read_text(encoding="utf-8"))
+            records[0]["metadata"]["state"] = "not-a-state"
+            (root / "beads.json").write_text(
+                json.dumps(records, sort_keys=True, separators=(",", ":")) + "\n",
+                encoding="utf-8",
+            )
+            malformed = self._run_sweep(env)
+            self.assertNotEqual(malformed.returncode, 0)
+
+            records[0]["metadata"]["state"] = "watching"
+            (root / "beads.json").write_text(
+                json.dumps(records, sort_keys=True, separators=(",", ":")) + "\n",
+                encoding="utf-8",
+            )
+            failed_route = self._run_sweep(env | {"FAKE_GC_FAIL": "1"})
+            self.assertNotEqual(failed_route.returncode, 0)
+            self.assertEqual(
+                self._json(
+                    self._run_state(
+                        env,
+                        "show",
+                        {"watch_id": watch_id},
+                    )
+                )["metadata"]["state"],
+                "watching",
+            )
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
+
+    def test_sweep_has_no_watcher_loop_or_branch_update_path(self) -> None:
+        order = (
+            PR_BABYSIT_ROOT / "orders" / "pr-babysit-sweep.toml"
+        ).read_text(encoding="utf-8")
+        script = self._SWEEP.read_text(encoding="utf-8")
+        text = "\n".join([
+            (
+                PR_BABYSIT_ROOT / "skills" / "pr-babysit" / "SKILL.md"
+            ).read_text(encoding="utf-8"),
+            (
+                PR_BABYSIT_ROOT
+                / "skills"
+                / "pr-babysit"
+                / "references"
+                / "tick.md"
+            ).read_text(encoding="utf-8"),
+            (
+                PR_BABYSIT_ROOT
+                / "skills"
+                / "pr-babysit"
+                / "references"
+                / "envelope.md"
+            ).read_text(encoding="utf-8"),
+            (
+                PR_BABYSIT_ROOT
+                / "skills"
+                / "pr-babysit"
+                / "references"
+                / "settle.md"
+            ).read_text(encoding="utf-8"),
+        ]).lower()
+        self.assertNotIn("while true", script)
+        self.assertNotIn("sleep ", script)
+        for marker in (
+            "pr-snapshot watch",
+            "update-branch",
+            "gh pr merge",
+            "git merge",
+            "git rebase",
+            "force-push",
+        ):
+            self.assertNotIn(marker, order.lower() + "\n" + script.lower() + "\n" + text)
+
+
 class PrBabysitPublicationHandoffTests(unittest.TestCase):
     _D2B_PUBLICATION = {
         "id": "publication-1",

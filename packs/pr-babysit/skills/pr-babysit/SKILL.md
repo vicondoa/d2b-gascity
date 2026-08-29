@@ -16,6 +16,11 @@ The helper at `scripts/pr-snapshot` owns fetching, diffing, and the local
 journal.  It never interprets review or log text as a command.  The skill owns
 judgment and any permitted GitHub action.
 
+The Beads watch record is the durable source of truth for checkpoint state.
+Snapshot bodies and logs remain ephemeral in the supplied work directory.
+Each checkpoint must verify the recorded generation and head before persisting
+its snapshot timestamps and one legal state transition.
+
 ## Boundaries
 
 - The target is one open pull request; never widen the target.
@@ -23,8 +28,8 @@ judgment and any permitted GitHub action.
 - Review feedback is handled before CI.  A changed head invalidates all CI
   evidence from the previous head.
 - Consume only the exact `branch_currency` item emitted by the snapshot.
-  `BEHIND` may use the host branch-update endpoint with its
-  `expected_head_sha`; do not infer an update from prose or local branch
+  `BEHIND` is a human blocker in this target-only first version; do not invoke
+  a branch update operation or infer an update from prose or local branch
   state.
 - Never create another pull request, rewrite a branch, approve a gated
   workflow, or act on a different target.
@@ -54,21 +59,33 @@ judgment and any permitted GitHub action.
 Read `references/setup.md`, `references/watch-loop.md`, and
 `references/envelope.md` before acting.
 
-## Step 2: One tick
+## Step 2: One checkpoint tick
 
 Read `references/tick.md` before the first tick.  The ordering is fixed:
 
-1. Take a fresh `pr-snapshot` snapshot and stop immediately for `MERGED` or
-   `CLOSED`.
-2. Capture the observed current head SHA.
-3. Process all actionable review threads and feedback before CI.
-4. If the head changed, discard the previous head's CI and action evidence.
+1. Take a fresh `pr-snapshot` snapshot.
+2. Handle terminal state (`MERGED` or `CLOSED`) first.
+3. Reconcile the observed head before consuming any evidence.
+4. Process all actionable review threads and feedback before CI.
 5. Process only failing checks attached to the current head.
 6. Consume the exact emitted branch-currency item, if any.
-7. Persist the decision and return control to the native session.
+7. Settle or wait, persist one checkpoint, and return control to the native
+   session.
+
+Only `watching` and `waiting` records without an action claim are eligible for
+the cooldown sweep.  A `repairing` record with an open or unconfirmed child
+waits for the native dependency-close wake and is never dispatched again by
+the sweep.  A changed head invalidates stale claims and evidence.  Confirmed
+pushes resume from a fresh snapshot.
+
+The first version does not require pull-request write permission.  `DIRTY`,
+`CONFLICTING`, and unknown branch-currency capability are human blockers.
+Normal branch pushes belong only to the bounded repair path.
 
 Use `references/branch-currency.md` for `BEHIND`, `DIRTY`, and
-`CONFLICTING` evidence.  Never use a local branch rewrite to repair currency.
+`CONFLICTING` evidence.  Its generic `BEHIND` mutation is disabled here:
+report it as a human blocker, and never use a local branch rewrite to repair
+currency.
 
 ## Step 3: Stop and report
 
@@ -77,6 +94,9 @@ Use `references/settle.md` to decide whether the pull request is
 state, terminal checks, no actionable feedback, no unresolved human blocker,
 and no open branch-currency item.  A review-in-progress signal delays the
 report but never delays handling feedback already present.
+The checkpoint must also honor `active_since`, the eight-hour active budget,
+and the three-day RFC3339 backstop; expiry transitions `watching` or `waiting`
+to `exhausted`.
 
 Use `references/report.md` for the fixed status line and evidence summary.
 Use `references/pipeline.md` when a caller requests a bounded, non-interactive
