@@ -198,6 +198,7 @@ class RootPortableCityTests(unittest.TestCase):
             "city.toml",
             "pack.toml",
             "packs.lock",
+            "model-tiers.toml",
             "agents/mayor/agent.toml",
             "agents/mayor/prompt.template.md",
             "formulas/mol-d2b-discord-fix-issue.toml",
