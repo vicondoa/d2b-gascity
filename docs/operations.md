@@ -1,214 +1,382 @@
 # Operations
 
 This repository is the portable city source. Native Gas City owns the
-supervisor, city, imported service, retry, stop, and per-user state lifecycle.
-There is no repository-specific wrapper.
+supervisor, city, imported services, retry, stop, and per-user state
+lifecycle. The imported packs are source-only; there is no repository-specific
+wrapper, relay, or second supervisor.
 
-## Install the runtime
+## Install and initialize
 
-Install the pinned `gc`, `codex`, `cloudflared`, and `gh` runtimes, plus the
-Slack adapter binaries, through the separate private
-`vicondoa/gascity.nix` repository or another compatible host source. This
-repository contains no Nix packaging. Follow the sibling repository's
-documentation for host configuration and tunnel setup. The city uses Gas
-City's stock Codex provider; the host's Codex Router selects the active
-Copilot model.
+Install the pinned `gc`, `copilot`, and `gh` runtimes, plus optional `codex`
+and ingress tooling, through the separate private `vicondoa/gascity.nix`
+repository or another compatible host source. The city defaults to Gas
+City's stock builtin Copilot CLI provider and keeps stock Codex available.
+Planning and primary review use Grok `grok-4.6` with `high` effort and
+`long_context`. Coding uses Luna with `max` effort.
 
 The core distribution is inert: installation does not start a supervisor,
-city, tunnel, or custom service.
-
-## Free Cloudflare ingress
-
-The host may run `cloudflared` as a separate outbound-only ingress service.
-The Cloudflare Tunnel token, Access policy, and public hostnames are
-host-local and must not be placed in this repository or the Nix store.
-
-Use one published application for the dashboard hostname and protect it with
-the free Cloudflare Access identity policy for the operator. Use a separate
-published application for the Slack hostname without Access login because
-Slack cannot complete an Access authentication flow. The Slack adapter still
-requires its signing-secret, timestamp, and workspace checks.
-
-The intended local origins are:
-
-- Dashboard: the native Gas City API on the host's loopback supervisor port.
-- Slack: `http://127.0.0.1:8765`, with the adapter bound to loopback.
-
-Keep all home-router inbound ports closed. The dashboard and API are served
-directly by the native Gas City supervisor through the Cloudflare Tunnel.
-Cloudflare Access protects the dashboard hostname; Slack uses its own signed
-Events route without Access login. Configure the Slack hostname's published
-application to match only `/slack/events`, followed by a catch-all
-`http_status:404` rule. Do not publish the adapter's `/healthz`, OAuth, or
-other paths in the steady-state route.
-
-## Initialize and start
-
-From a checkout of this repository, initialize in place so authored root
-files are preserved:
+city, tunnel, or custom service. From a checkout of this repository:
 
 ```text
 gc init --file city.toml --preserve-existing --no-start .
 ```
 
-The host supplies a rendered supervisor configuration. Before the first
-start, source the operator-owned Slack environment file in the same shell
-that starts Gas City:
-
-```text
-SLACK_ENV="${XDG_CONFIG_HOME:-$HOME/.config}/gc-slack-adapter/env"
-test -f "$SLACK_ENV"
-chmod 600 "$SLACK_ENV"
-. "$SLACK_ENV"
-```
-
-The file is host-local and must contain only the Slack adapter variables plus
-the host values `GC_CITY_NAME=d2b-gascity`, `GC_CITY_PATH`, and the existing
-supervisor value for `GC_API_BASE_URL`. Do not use the Slack pack's alternate
-API default. Set `LISTEN_PUBLIC=127.0.0.1:8765` so the adapter remains
-loopback-only. Keep Codex Router, Copilot Requests, and d2b pull-request
-credentials out of this file.
-
-Create the user-owned supervisor link at the native `GC_HOME` location. Use
-the path supplied by the host; do not copy the rendered file into this
-repository:
+The host supplies the user-owned supervisor configuration. Link it at the
+native `GC_HOME` location without copying it into this repository:
 
 ```text
 GC_HOME="${GC_HOME:-$HOME/.gc}"
-ln -s /path/from-host/supervisor.toml "$GC_HOME/supervisor.toml"
+ln -s <host-supervisor-config> "$GC_HOME/supervisor.toml"
 ```
 
-If `pack.toml` imports Slack Full, do not run `gc start` until the imported
-pack is materialized and its source-only binaries are built. Set `GC_PACK_DIR`
-to the materialized `slack-full` directory shown by the host's pack
-materialization output, verify `manifest/app.json` exists, and build the
-adapter and CLI there as described below. Then run:
+Host-rendered service environments may provide `GC_CITY_NAME=d2b-gascity`,
+`GC_CITY_PATH`, and the existing supervisor value for `GC_API_BASE_URL`.
+Keep those values host-local. Then start the native city:
 
 ```text
 gc start
 ```
 
-The first manual `gc start` may install and enable Gas City's native user
-supervisor and linger. That persistence is native behavior. Subsequent login
-or reboot recovery of a still-registered city is supported upstream; it is
-not a second host-wide lifecycle.
+The first manual start may install and enable the native user supervisor and
+linger. That persistence and reboot recovery are native behavior, not a
+second host-wide lifecycle.
+
+## Gas City pack composition
+
+`pack.toml` imports the official core, Beads, Gas City pack, and Discord
+packs. The Gas City pack is imported at city scope as `gc`. The `d2b` rig
+imports `https://github.com/gastownhall/gascity-packs/tree/main/gascity/roles`
+so the rig receives `run-operator`, `implementation-worker`, `publisher`,
+`requirements-planner`, and the other official build roles. The city-scope
+pack supplies formulas, the `claim` command, and the `gc.mayor` coordinator
+skill.
+
+The Gas City pack source is
+`https://github.com/gastownhall/gascity-packs/tree/main/gascity` at
+`sha:9f98ea4e1974cb49d18cd0c453eb81b2370cca84`. The Discord source is
+`https://github.com/gastownhall/gascity-packs/tree/main/discord` at the same
+pin. Core and Beads remain pinned to the Gas City `v1.4.1` commit recorded in
+`packs.lock`.
+
+The principal formulas include:
+
+- `build-basic`, `implement`, `review`, and `publish`;
+- `github-issue-fix` and `github-pr-review`;
+- `mol-d2b-discord-fix-issue` for Discord first-run `origin/v3` workspace
+  setup.
+
+The d2b rig formula defaults set both `base_branch = "v3"` and
+`target_branch = "v3"`. Publication must persist `metadata.target=v3` and
+`metadata.merge_strategy=pr` and refuse direct merges. Never merge or
+force-push. Host branch protection for `v3` is defense-in-depth and must
+require pull requests and apply to administrators; this repository does not
+claim the current host is already configured that way. Merge decisions remain
+human-owned.
+
+Inspect the composed workflow with native commands such as:
+
+```text
+gc status
+gc formula show build-basic
+gc service list
+gc service doctor
+```
+
+The city uses the official global `command-glossary`, `operational-awareness`,
+and `discord-v0` fragments plus the local `d2b-governance` fragment.
+`discord-v0` gives every session that receives a Discord event the
+explicit reply contract. The daemon uses
+`patrol_interval=30s`, `max_restarts=5`, `restart_window=1h`,
+`shutdown_timeout=5s`, and `formula_v2=true`.
 
 ## Bind the d2b rig
 
 The root `city.toml` declares exactly one pathless rig named `d2b`, with
-prefix `d2b` and default branch `v3`. Bind a checkout with native Gas City:
+prefix `d2b` and default branch `v3`. Bind a checkout through native Gas
+City:
 
 ```text
-gc rig add /path/to/d2b --name d2b --city .
+gc rig add <d2b-checkout> --name d2b --city .
 gc status
 ```
 
-The product checkout path is written to live `.gc/site.toml` only. Native
-rig setup may add supported bookkeeping to the d2b checkout, but it does not
-add a city, provider, pack, or service configuration there.
+The checkout path is written to live `.gc/site.toml` only. Do not add a site mapping, provider patch, named worker, or service definition
+to this source repository. The one city patch for the imported
+`implementation-worker` agent selects the Luna coding lane; it does not copy
+an inherited formula body.
 
-Use native service diagnosis and restart:
+## Discord services and ingress
+
+The official Discord pack supplies three native services under
+`.gc/services/discord`:
+
+| Service | Publication | Responsibility |
+| --- | --- | --- |
+| `discord-interactions` | public | signed Discord Interactions at `/v0/discord/interactions` |
+| `discord-admin` | tenant/access-policy protected | app setup and status without token values |
+| `discord-gateway` | private | inbound DMs and guild or thread messages |
+
+Only `discord-interactions` is public. `discord-admin` must remain
+tenant/access-policy protected and must never be exposed publicly.
+`discord-gateway` remains private. The official Discord pack owns all three
+native services; this city authors none.
+
+Use native diagnosis and restart:
 
 ```text
 gc service list
 gc service doctor
-gc service restart <service-name>
+gc service restart discord-gateway
 ```
 
-The city owns no dashboard authentication proxy or replacement wrapper.
+The host may publish the signed Interactions endpoint through an outbound-only
+connector. Keep the dashboard behind the host's access policy and keep home
+router inbound ports closed. Do not author a Discord service, relay, wrapper,
+binary, or publication system here.
 
-## Codex Router and credential boundaries
+## Import Discord apps
 
-Gas City launches the native `codex` command. Codex Router is a separate
-operator-owned process that supplies the active Copilot model through Codex's
-normal configuration path. Keep its Copilot Requests credential in the
-router's protected provider state and choose the model from the live account
-catalog. Do not put router URLs, model IDs, Copilot token variables, or
+Create the app in the Discord Developer Portal with the least-privilege
+settings used by the official Discord pack:
+
+- Under OAuth2's install scopes, select `bot` and
+  `applications.commands`. Discord includes `applications.commands` with the
+  `bot` scope, but selecting both makes the intended install surface clear.
+- Under Bot Permissions, grant these permissions:
+  - `View Channels`
+  - `Send Messages`
+  - `Read Message History`
+  - `Create Public Threads`
+  - `Send Messages in Threads`
+- Verify those permissions exist for the bot in every allowed channel and
+  thread, including channel-specific permission overwrites.
+- Under Bot > Privileged Gateway Intents, enable `Message Content Intent` for
+  ambient reads and launcher rooms.
+
+The pack does not require `Administrator`, `Manage Guild`, `Manage Roles`,
+`Manage Channels`, `Manage Messages`, or `Manage Webhooks`. It also does not
+need `Attach Files`, `Add Reactions`, `Embed Links`, or `Presence Intent`.
+Keep those broader permissions and intents disabled; this pack posts plain
+message bodies and does not use webhooks, attachments, reactions, embeds, or
+presence controls.
+
+Import the app's metadata and token without writing a secret to this
+repository:
+
+```text
+<host-secret-command> |
+  gc discord import-app \
+    --application-id <application-id> \
+    --public-key <public-key> \
+    --bot-token-file /dev/stdin \
+    --guild-allowlist <guild-id> \
+    --channel-allowlist <channel-id> \
+    --role-allowlist <role-id>
+```
+
+The default app owns Interactions, `/gc` commands, workflow mappings, and
+launcher rooms. Allowlists are enforced for guilds, channels, and roles.
+Token material stays host-owned with mode `0600`; never commit an app token,
+credential path, real identifier, or live payload.
+
+Named multi-app identities are chat-only for now. Add one with a stable
+lowercase name:
+
+```text
+<host-secret-command> |
+  gc discord import-app \
+    --app <chat-app> \
+    --application-id <application-id> \
+    --public-key <public-key> \
+    --bot-token-file /dev/stdin \
+    --guild-allowlist <chat-guild-id> \
+    --channel-allowlist <chat-channel-id> \
+    --role-allowlist <chat-role-id>
+```
+
+Each named app has an independent, isolated token, Discord connection, policy,
+binding, receipt, and health counters. Keep each named app's guild, channel,
+and role allowlists independent from the default app. Restart the gateway
+after adding, removing, or rotating an app. Named apps remain chat-only;
+Interactions, workflow maps, and launchers continue to use the default app.
+
+## `/gc fix` and workflow mapping
+
+Register the guild-scoped command after installing the default app:
+
+```text
+gc discord sync-commands <guild-id>
+```
+
+The supported `/gc fix` command opens a modal for a summary and context. If
+the modal path cannot be completed, the pack falls back to a prompt. Map a
+channel or rig to the `rig/implementation-worker` target and the local
+`mol-d2b-discord-fix-issue` formula:
+
+```text
+gc discord map-channel <guild-id> <channel-id> <rig>/implementation-worker \
+  --fix-formula mol-d2b-discord-fix-issue
+gc discord map-rig <guild-id> <rig> <rig>/implementation-worker \
+  --fix-formula mol-d2b-discord-fix-issue
+```
+
+`mol-d2b-discord-fix-issue` is a narrow local extension of the official
+`mol-discord-fix-issue` formula. It changes only workspace setup to create
+first-run work from `origin/v3`; it fetches all origin heads, requires a clean
+worktree, preserves recorded branches, recreates a missing recorded worktree
+only from that branch, validates `base_ref=origin/v3` and the `fork_sha` commit
+ancestry, rebases with `--rebase-merges --reapply-cherry-picks --empty=stop`,
+and stops on conflicts or missing refs with recovery instructions. All other
+official Discord workflow behavior is retained.
+
+d2b publication is PR-only: persist and verify `target=v3` plus
+`merge_strategy=pr`, refuse direct merges, and keep merge decisions
+human-owned.
+
+Mappings and command sync are native pack state. The city does not copy or
+hard-code them.
+
+## Chat bindings, ambient reads, and launchers
+
+Room/thread bindings and exact DM bindings route messages to named sessions:
+
+```text
+gc discord bind-dm <dm-channel-id> <session>
+gc discord bind-room --guild-id <guild-id> <channel-id> <session> [<session>...]
+gc discord bind-dm --app <chat-app> <dm-channel-id> <session>
+gc discord bind-room --app <chat-app> --guild-id <guild-id> \
+  <channel-id> <session> [<session>...]
+gc discord bind-room --guild-id <guild-id> \
+  --enable-ambient-read <channel-id> <session> [<session>...]
+gc discord bind-room --guild-id <guild-id> \
+  --enable-ambient-read --allow-untargeted-ambient-delivery \
+  <channel-id> <session>
+# Targeted peer fanout is the canonical safe example.
+gc discord bind-room --guild-id <guild-id> \
+  --enable-peer-fanout \
+  --max-peer-triggered-publishes-per-root <n> \
+  --max-peer-triggered-publishes-per-session-per-minute <n> \
+  --max-total-peer-deliveries-per-root <n> \
+  <channel-id> <session> [<session>...]
+```
+
+Each `bind-room` command takes one or more session names after the channel id.
+Direct `bind-room` routing and `enable-room-launch` are mutually
+exclusive alternatives for the same room; choose one, not both.
+
+Ambient-read rooms are targeted by exact `@session_name` values. A
+single-agent binding may opt into untargeted ambient delivery; multi-session
+ambient delivery remains targeted-only. Thread bindings inherit the parent
+room when appropriate.
+
+Peer fanout should remain targeted, which is the default-safe setting. Add
+`--allow-untargeted-peer-fanout` only in the separate opt-in case when
+untargeted delivery is intentional:
+
+```text
+gc discord bind-room --guild-id <guild-id> \
+  --enable-peer-fanout \
+  --allow-untargeted-peer-fanout \
+  --max-peer-triggered-publishes-per-root <n> \
+  --max-peer-triggered-publishes-per-session-per-minute <n> \
+  --max-total-peer-deliveries-per-root <n> \
+  <channel-id> <session> [<session>...]
+```
+
+Keep the per-root, per-session-per-minute, and total-delivery budgets bounded.
+
+Launcher rooms provide the room-first flow:
+
+```text
+gc discord enable-room-launch --guild-id <guild-id> <channel-id>
+gc discord enable-room-launch --guild-id <guild-id> \
+  --response-mode respond_all --default-handle <rig>/<agent> <channel-id>
+```
+
+Direct `bind-room` and `enable-room-launch` are mutually exclusive alternatives
+for the same room. Launcher rooms use `@@handle` and `--default-handle`; direct
+bindings use one or more session names only.
+
+`@@handle` creates a managed thread session. `mention_only` requires a
+qualified `@@handle`; `respond_all` can use its configured default while
+top-level retargeting still requires `@@handle`. Follow-ups in managed
+threads continue to the addressed session. Launcher and ambient room reads
+require Discord's Message Content Intent.
+
+Guild and thread messages otherwise require a bot mention. Bot-authored
+messages are ignored. Untargeted ordinary room messages can fan out only to
+the explicitly bound participants. Direct room peer fanout is disabled by
+default; when enabled it is budgeted and retryable. Launcher-managed threads
+use the official managed-thread fanout defaults and can disable or constrain
+peer targets with the pack's fanout flags.
+
+## Reply and workflow control
+
+Agent output remains private until it is explicitly published:
+
+```text
+# Preferred same-app reply to the current Discord turn
+gc discord reply-current --body-file <reply-file>
+
+# Explicit publication through a saved binding
+gc discord publish --binding room:<channel-id> --body-file <reply-file>
+
+# Explicit publication through a named chat app
+gc discord publish --app <chat-app> --binding room:<channel-id> \
+  --body-file <reply-file>
+
+# Direct channel/thread status projection
+gc discord post-message --channel-id <channel-id> --thread-id <thread-id> \
+  --body "Started work"
+
+# Thread-aware explicit publication
+gc discord publish --binding room:<channel-id> \
+  --conversation-id <conversation-id> --trigger <trigger> \
+  --body-file <reply-file>
+
+# Status projection and repair
+gc discord post-message --request-id <request-id> --body "Started work"
+gc discord retry-peer-fanout <publish-id>
+gc discord release-workflow --request-id <request-id>
+```
+
+`reply-current` preserves the app and binding that received the turn.
+Explicit publication can carry source event metadata and may trigger the
+opt-in peer fanout budget. `release-workflow` is the recovery path for a
+stalled workflow. Inspect safe status, including JSON:
+
+```text
+gc discord status
+gc discord status --json
+```
+
+The pack posts plain message bodies. It supports the `/gc fix` slash command
+and its modal submission, not general buttons, select menus, context menus,
+arbitrary slash commands, attachment ingestion or publication, embeds,
+reactions, or presence controls.
+
+The `Message Content Intent` setting is required for ambient and launcher
+reads.
+
+## Copilot CLI, Codex, and credential boundaries
+
+Gas City defaults to the stock `copilot` command through `builtin:copilot`.
+The workspace default is `copilot-planning-grok`. The d2b
+`implementation-worker` uses `copilot-code-luna`. Stock `providers.codex`
+remains available as `builtin:codex` for explicit agent patches. See
+[the provider design](designs/2026-08-27-001-copilot-cli-provider.md).
+
+The host supplies the Copilot CLI binary and may export `COPILOT_GITHUB_TOKEN`
+in the operator environment. Optional `codex` and Codex Router are host
+support for the Codex provider, not required to start the city. Do not put
+Copilot token variables, token paths, router URLs, or
 `GH_TOKEN=$COPILOT_GITHUB_TOKEN` in `city.toml`.
 
-Use the operator's existing GitHub and git authorization for d2b branch and
-pull-request publication. It is separate from the Copilot Requests
-credential, and neither credential belongs in the Slack environment file or
-the portable city. This credential separation is deliberate and must remain
-visible in host setup reviews.
-
-## Slack Full import
-
-The root Pack v2 imports the pinned stock Slack Full Pack:
-
-```text
-source = "https://github.com/gastownhall/gascity-packs/tree/main/slack-full"
-version = "sha:5d2a9d023edbb9ba24fdcff554e89fc3d7da72fe"
-```
-
-The imported pack owns its `slack` `proxy_process` service. In this city the
-materialized import exposes its operator commands as `gc slack-full`; use that
-binding rather than adding a city-owned Slack service, a second supervisor, or
-a custom relay.
-
-Slack Full carries source-only Go binaries. After the pack is materialized,
-set `GC_PACK_DIR` to its materialized `slack-full` directory, verify
-`manifest/app.json` exists, and build them using the upstream instructions:
-
-```text
-test -f "$GC_PACK_DIR/manifest/app.json"
-(cd "$GC_PACK_DIR/adapter" && go build -o gc-slack-adapter)
-(cd "$GC_PACK_DIR/cli" && go build -o gc-slack-cli .)
-```
-
-These binaries and any pack runtime state remain materialized or ignored.
-Do not copy them into this repository or commit them.
-
-After the city and Slack service are running, create the coordinator session
-through the native session path, verify the operator's one-to-one DM, and
-bind it with `gc slack-full bind-dm`. Attach the imported
-`template-fragments/slack-v0.template.md` fragment to that coordinator.
-Use the turn-bound `gc slack-full reply-current` path for replies. Do not use
-room, launcher, mapping, file-transfer, or direct-adapter flows for the
-clarification proof.
-
-For workspace-bound request verification, prefer the stock Slack OAuth install
-flow from the imported pack. It records the signing secret with the
-workspace/app key in `.gc/slack/apps.json`; after the install, source the
-generated `.gc/slack/install.env`, unset `SLACK_CLIENT_ID`,
-`SLACK_CLIENT_SECRET`, `SLACK_REDIRECT_URI`, and `SLACK_APP_ID`, and restart
-the adapter. The stock adapter uses `SLACK_APP_ID` to select its global
-signing-secret branch, so leave it unset when using the workspace-bound
-registry. Keep `SLACK_SIGNING_SECRET` out of the long-lived supervisor
-environment when the registry contains the stamped secret. The OAuth callback
-and its temporary public route are onboarding-only; disable them before the
-steady-state Slack route is restricted to `/slack/events` with a catch-all
-`http_status:404` rule. Do not publish `/slack/interactions`, the adapter's
-`/healthz`, or other paths in the steady state.
-
-The bootstrap also invites the six identity bots to each private room. Verify
-`gc slack-full peers` reports no membership or binding warnings before a room
-mention or company-room proof.
-
-## Compound Engineering
-
-The city uses native Codex through the host router, the official Compound
-Engineering and roles assets, and official publication. The two local
-workflow assets select `origin/v3` for worktrees and `v3` for pull requests.
-A bounded native launch uses `d2b/roles.run-operator` and the official
-`compound-build` formula:
-
-```text
-gc sling d2b/roles.run-operator <bead-id> --on compound-build \
-  --var artifact_root=<site-local-artifact-root> \
-  --var interaction_mode=autonomous \
-  --var review_mode=agent \
-  --var drain_policy=separate \
-  --var push=true \
-  --var open_pr=true
-```
-
-Use a small non-sensitive work item and a site-local artifact root. The
-credential must be scoped to `vicondoa/d2b` content and pull-request writes
-only. Stop without changing the remote default or adding a replacement
-worker if the worktree or pull request is not for `vicondoa/d2b` and `v3`.
-Never merge automatically. Do not store prompts, model responses, pull
-request payloads, or live evidence in the repository.
+Keep Copilot Requests, Codex credentials, d2b publication, and Discord app
+credentials separate. Discord app tokens belong to the host-managed app
+state and are never used as GitHub, Copilot, or Codex credentials. Do not
+store prompts, model responses, private pull-request payloads, or live
+evidence in this repository.
 
 ## Stop
 

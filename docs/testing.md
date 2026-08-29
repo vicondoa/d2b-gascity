@@ -1,25 +1,29 @@
 # Testing
 
-The repository has one focused, credential-free check:
+The repository has one focused, credential-free gate:
 
 ```text
 python3 tests/test_city.py
 make check
 ```
 
-`make check` runs the same standard-library test module. It validates the
-root Pack v2 layout, the d2b `v3` rig declaration, the stock Codex provider,
-canonical import pins including Slack Full, the two `v3` workflow overrides,
-the absence of city-owned dashboard proxy services, source privacy, credential
-separation, and the native init and rig-binding path when `GC_BIN` is
-available.
+The standard-library test module validates:
 
-The focused checks also assert that Slack remains an imported source-only
-pack: no Slack service or built adapter binary is authored by the city. They
-cover host environment inheritance (`GC_CITY_NAME`, `GC_CITY_PATH`, and the
-host-supplied `GC_API_BASE_URL`), the stock `slack-v0` fragment and
-`gc slack-full reply-current` path, and the removal of the old
-`GH_TOKEN=$COPILOT_GITHUB_TOKEN` coupling.
+- the authored city files and the absence of copied city, service, relay,
+  binary, site, or runtime state;
+- the d2b `v3` rig declaration, default Copilot CLI lanes, and stock Codex;
+- exact core, Beads, Gas City pack, and Discord import sources and pins;
+- the Gas City pack city and rig import, global fragments, v3 formula
+  defaults, and full daemon settings;
+- the local d2b Discord formula extension and governance fragment policy;
+- Discord's native-service boundary and the absence of authored private
+  mappings or credentials;
+- source privacy, credential separation, and the no-token-coupling rule;
+- native init and rig binding when `GC_BIN` is supplied.
+
+The checks do not start imported services or perform authenticated network
+requests. They also assert that the retired local fragment and workflow
+overrides are absent.
 
 ## Optional native smoke
 
@@ -29,53 +33,95 @@ Set `GC_BIN` to the pinned or host-supplied native executable:
 GC_BIN=/path/to/gc python3 tests/test_city.py
 ```
 
-The smoke uses temporary generic homes and repositories and a dummy `codex`
-executable. It runs `gc init --file city.toml --preserve-existing --no-start
-.`, checks the authored files, performs native import/config validation, binds
-a fixture rig, and confirms that the rig path stays in ignored
-`.gc/site.toml` state.
+The smoke uses temporary generic homes and repositories and dummy `copilot`
+and `codex` executables. It runs
+`gc init --file city.toml --preserve-existing --no-start .`, checks the
+authored files, performs native import/config validation, checks the resolved
+d2b Discord resume formula and the Gas City pack `build-basic` and
+`implement` formulas, checks the d2b `implementation-worker` Luna patch,
+checks the documented Discord command contracts with native
+`gc discord ... --help`, binds a fixture rig, and confirms that the rig path
+stays in ignored `.gc/site.toml` state. The smoke does not start services or
+use credentials.
 
 ## CI inputs
 
 CI downloads exact pinned Linux archives for Gas City `v1.4.1`, Beads `v1.2.2`,
 and Dolt `2.1.7`, verifies their SHA-256 values, and runs the focused test.
 The workflow is [`.github/workflows/check.yml`](../.github/workflows/check.yml).
-It does not require credentials, network access to a private repository, or
-live model or GitHub activity.
+It does not require credentials, private network access, or live model or
+GitHub activity.
 
 ## Manual live smokes
 
-Authenticated ingress, routed Codex, Slack clarification, and credentialed
-Compound Engineering to a pull request are live, redacted acceptance smokes.
-They require site-local optional binaries, credentials, and network access and
-are not committed test code, fixtures, reports, prompts, responses, or
-pull-request payloads. The focused suite never starts Slack, Codex Router, or
-an external pull-request flow.
+Authenticated ingress, Copilot CLI, optional Codex, Discord app setup, and
+credentialed publication are live, redacted acceptance smokes. They require
+host-local optional binaries, credentials, and network access and are not
+committed test code, fixtures, reports, prompts, responses, or pull-request
+payloads. The focused suite never starts Discord, Copilot, Codex, or an
+external publication flow.
 
-- Cloudflare dashboard: with the `cloudflared` connector running, verify an
-  unauthenticated request to the dashboard hostname is rejected by Cloudflare
-  Access before reaching the host. Verify the allowlisted operator can load
-  the dashboard, perform an API mutation, receive SSE updates, and use any
-  required WebSocket upgrade.
-- Cloudflare Slack route: verify the separate Slack hostname reaches only
-  `/slack/events`, does not require Cloudflare Access login, and preserves
-  Slack signing-secret and workspace validation. Configure the Cloudflare
-  Tunnel hostname rule with path `/slack/events` and a catch-all
-  `http_status:404` rule before exposing it. Keep the adapter on
-  `127.0.0.1:8765` and do not open a home inbound port.
-- Ingress: with the host-owned Cloudflare connector running, verify the
-  dashboard is authenticated by Access, direct native SPA/API/SSE access
-  works, and no home inbound port is open.
-- Slack: source the mode-`0600`
-  `${XDG_CONFIG_HOME:-$HOME/.config}/gc-slack-adapter/env` file in the same
-  shell as `gc start`; verify the host-supplied `GC_CITY_NAME`,
-  `GC_CITY_PATH`, and `GC_API_BASE_URL` values are inherited by the imported
-  `proxy_process`. Bind only the operator-verified one-to-one DM, attach the
-  stock `slack-v0` fragment, and verify one question and one
-  `gc slack-full reply-current` answer. Do not use Slack mocks or add delivery
-  verification.
-- Compound Engineering: run the bounded `gc sling d2b/roles.run-operator` example
-  from [operations.md](operations.md), verify the worktree starts at
-  `origin/v3`, and verify the official pull request targets `v3` in
-  `vicondoa/d2b`. Stop on any mismatch and retain only redacted pass/fail
-  notes outside the repository.
+### Gas City pack
+
+- Confirm native `gc status` shows the `gc.mayor` skill path and d2b rig
+  roles including `run-operator`, `implementation-worker`, `publisher`, and
+  `requirements-planner`.
+- Inspect `build-basic`, `implement`, `review`, `publish`,
+  `github-issue-fix`, and `github-pr-review` through native Gas City
+  commands.
+- Verify daemon patrol, restart-window, shutdown, and `formula_v2` settings
+  from the rendered native configuration.
+- Confirm the documented host branch-protection policy requires pull requests
+  and applies to administrators. Treat it as defense-in-depth; this
+  repository does not claim that the current host is already configured.
+  Human-owned merge decisions remain the final boundary.
+
+### Discord ingress and app policy
+
+- Verify only `discord-interactions` is public, `discord-admin` remains
+  tenant/access-policy protected, and `discord-gateway` remains private under
+  `.gc/services/discord`. The official Discord pack owns all three services.
+- Configure the Discord Interactions Endpoint URL as
+  `https://<discord-interactions-public-url>/v0/discord/interactions` and
+  verify signed requests are accepted only on that route.
+- Import the default app with host-owned token input through `/dev/stdin`;
+  verify guild, channel, and role allowlists, and keep token material mode
+  `0600`.
+- Enable Message Content Intent, then verify launcher and ambient-read traffic.
+- Import a named chat app and verify its token, connection, bindings, and
+  counters are isolated. Confirm named apps do not handle Interactions,
+  workflow maps, or launcher rooms.
+- Run command sync, verify the guild-scoped `/gc fix` command, submit its
+  summary/context modal, and verify the fallback prompt path.
+- Verify channel and rig mappings target `rig/implementation-worker` through
+  `mol-d2b-discord-fix-issue`, which starts first-run work from `origin/v3`,
+  resumes recorded branches safely, and retains the official Discord workflow.
+
+### Discord chat and workflow
+
+- Verify exact `bind-dm` and `bind-room` routing, managed thread inheritance,
+  `mention_only`, `respond_all`, and `@@handle` launcher sessions.
+- Verify ambient-read remains exact-targeted by default and that
+  `--allow-untargeted-ambient-delivery` works only for one bound session.
+- Verify direct-room peer fanout is opt-in, budget-limited, and retryable
+  through `gc discord retry-peer-fanout`; verify launcher-managed fanout
+  honors its configured limits and bot-authored messages are ignored.
+- Verify `gc discord reply-current` replies with the same app and binding,
+  while `gc discord publish` is the explicit human-visible path.
+- Verify `gc discord post-message` projects workflow status and
+  `gc discord release-workflow` clears a stuck workflow lock.
+- Verify `gc discord status` and `gc discord status --json` omit token values,
+  and restart `discord-gateway` after app rotation.
+- Confirm agent output stays private until explicit publish and that replies
+  are plain message bodies. Do not treat buttons, select menus, context
+  menus, attachments, embeds, reactions, presence controls, or arbitrary
+  slash commands as supported capabilities.
+
+### PR-only publication
+
+- Verify d2b work persists and re-reads `metadata.target=v3` and
+  `metadata.merge_strategy=pr`.
+- Verify publication refuses direct merges and never merges or force-pushes.
+
+Keep only redacted pass/fail notes outside this repository. Never save live
+payloads, prompts, responses, credentials, identifiers, or service state.

@@ -1,56 +1,56 @@
 [workspace]
-provider = "codex"
+provider = "copilot-planning-grok"
+global_fragments = [
+  "command-glossary",
+  "operational-awareness",
+  "discord-v0",
+  "d2b-governance",
+]
 
 [providers]
+[providers.copilot-planning-grok]
+base = "builtin:copilot"
+args = ["--yolo", "--model", "grok-4.6", "--context", "long_context", "--effort", "high"]
+
+[providers.copilot-code-luna]
+base = "builtin:copilot"
+args = ["--yolo", "--model", "gpt-5.6-luna", "--context", "default", "--effort", "max"]
+
 [providers.codex]
 base = "builtin:codex"
 ready_delay_ms = 0
 [providers.codex.option_defaults]
 model = ""
 
+[daemon]
+patrol_interval = "30s"
+max_restarts = 5
+restart_window = "1h"
+shutdown_timeout = "5s"
+formula_v2 = true
+
 [[named_session]]
-template = "codex"
-scope = "rig"
+template = "mayor"
+scope = "city"
 mode = "always"
 
 [[rigs]]
 name = "d2b"
 prefix = "d2b"
 default_branch = "v3"
-[rigs.imports]
+
 [rigs.imports.gc]
 source = "https://github.com/gastownhall/gascity-packs/tree/main/gascity/roles"
-version = "sha:5d2a9d023edbb9ba24fdcff554e89fc3d7da72fe"
+version = "sha:9f98ea4e1974cb49d18cd0c453eb81b2370cca84"
 
-[patches]
-
-[[patches.agent]]
-dir = "d2b"
-name = "ce-pr-comment-resolver"
-provider = "codex"
-
-[[patches.agent]]
-dir = "d2b"
-name = "codex"
-append_fragments = ["slack-v0", "slack-progress"]
-
-[[patches.agent]]
-dir = "d2b"
-name = "ce-work"
-provider = "codex"
+[rigs.formula_vars]
+base_branch = "v3"
+target_branch = "v3"
+open_pr = "true"
+push = "true"
+drain_policy = "separate"
 
 [[patches.agent]]
 dir = "d2b"
 name = "implementation-worker"
-provider = "codex"
-
-[[patches.agent]]
-dir = "d2b"
-name = "publisher"
-provider = "codex"
-
-[[patches.rigs]]
-name = "d2b"
-[patches.rigs.formula_vars]
-base_branch = "v3"
-base_ref = "origin/v3"
+provider = "copilot-code-luna"

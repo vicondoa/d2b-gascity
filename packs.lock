@@ -1,24 +1,19 @@
 schema = 1
 
-[packs."https://github.com/gastownhall/gascity-packs/tree/main/compound-engineering"]
-version = "sha:5d2a9d023edbb9ba24fdcff554e89fc3d7da72fe"
-commit = "5d2a9d023edbb9ba24fdcff554e89fc3d7da72fe"
-fetched = "2026-08-14T22:39:05Z"
+[packs."https://github.com/gastownhall/gascity-packs/tree/main/discord"]
+version = "sha:9f98ea4e1974cb49d18cd0c453eb81b2370cca84"
+commit = "9f98ea4e1974cb49d18cd0c453eb81b2370cca84"
+fetched = "2026-08-27T02:06:15Z"
 
 [packs."https://github.com/gastownhall/gascity-packs/tree/main/gascity"]
-version = "sha:5d2a9d023edbb9ba24fdcff554e89fc3d7da72fe"
-commit = "5d2a9d023edbb9ba24fdcff554e89fc3d7da72fe"
-fetched = "2026-08-21T23:58:55Z"
+version = "sha:9f98ea4e1974cb49d18cd0c453eb81b2370cca84"
+commit = "9f98ea4e1974cb49d18cd0c453eb81b2370cca84"
+fetched = "2026-08-27T02:06:15Z"
 
 [packs."https://github.com/gastownhall/gascity-packs/tree/main/gascity/roles"]
-version = "sha:5d2a9d023edbb9ba24fdcff554e89fc3d7da72fe"
-commit = "5d2a9d023edbb9ba24fdcff554e89fc3d7da72fe"
-fetched = "2026-08-14T22:39:05Z"
-
-[packs."https://github.com/gastownhall/gascity-packs/tree/main/slack-full"]
-version = "sha:5d2a9d023edbb9ba24fdcff554e89fc3d7da72fe"
-commit = "5d2a9d023edbb9ba24fdcff554e89fc3d7da72fe"
-fetched = "2026-08-19T11:00:43Z"
+version = "sha:9f98ea4e1974cb49d18cd0c453eb81b2370cca84"
+commit = "9f98ea4e1974cb49d18cd0c453eb81b2370cca84"
+fetched = "2026-08-27T02:06:15Z"
 
 [packs."https://github.com/gastownhall/gascity.git//examples/bd"]
 version = "sha:f895c0ff47d6ee9334ed282a416387eb5b084d24"

@@ -1,0 +1,234 @@
+formula = "mol-d2b-discord-fix-issue"
+extends = ["mol-discord-fix-issue"]
+
+[[steps]]
+id = "workspace-setup"
+title = "Set up worktree and fix branch"
+needs = ["load-context"]
+description = """
+Create or resume the Discord fix worktree without guessing at prior branch
+state. This local extension changes only workspace setup; every other step
+and all Discord behavior remain inherited from the official formula.
+Every fail-closed path leaves prior work intact and prints recovery
+instructions instead of guessing.
+
+**1. Fetch every origin head and require the d2b base:**
+```bash
+if ! git fetch --prune origin '+refs/heads/*:refs/remotes/origin/*'; then
+  echo "ERROR: fetching origin refs failed." >&2
+  echo "Recovery: repair the origin remote, preserve the existing branch, and rerun workspace-setup." >&2
+  exit 1
+fi
+if ! git show-ref --verify --quiet "refs/remotes/origin/v3"; then
+  echo "ERROR: required base ref origin/v3 is unavailable." >&2
+  echo "Recovery: repair the origin remote or fetch origin/v3, then rerun workspace-setup." >&2
+  exit 1
+fi
+```
+
+**2. Read all recorded resume metadata before changing the worktree:**
+
+Read the issue bead's `metadata.work_dir`, `metadata.branch`,
+`metadata.base_ref`, and `metadata.fork_sha` values. Do not infer any of
+these values from the current checkout or from the origin default branch.
+
+```bash
+ISSUE_JSON=$(gc bd show {{issue}} --json)
+METADATA=$(printf '%s' "$ISSUE_JSON" | jq -e '
+  if type == "array" then
+    if length == 1 then .[0].metadata // {} else error("expected exactly one issue bead") end
+  elif type == "object" then
+    .metadata // {}
+  else
+    error("unexpected bead response")
+  end
+')
+RECORDED_WORKTREE=$(printf '%s' "$METADATA" | jq -r '.work_dir // empty')
+RECORDED_BRANCH=$(printf '%s' "$METADATA" | jq -r '.branch // empty')
+BASE_REF=$(printf '%s' "$METADATA" | jq -r '.base_ref // empty')
+FORK_SHA=$(printf '%s' "$METADATA" | jq -r '.fork_sha // empty')
+BRANCH="$RECORDED_BRANCH"
+if [ -n "$RECORDED_BRANCH" ]; then
+  if [ "$BASE_REF" != "origin/v3" ] || [ -z "$FORK_SHA" ]; then
+    echo "ERROR: recorded branch $RECORDED_BRANCH has legacy or missing extension metadata." >&2
+    echo "Required proof is base_ref=origin/v3 plus a non-empty fork_sha." >&2
+    echo "Recovery: inspect the existing branch and bead, establish the verified fork commit, record both metadata values, then rerun." >&2
+    echo "Do not recreate the recorded branch from origin/v3 or guess its history." >&2
+    echo "Prior work remains intact." >&2
+    exit 1
+  fi
+  if ! git check-ref-format --branch "$RECORDED_BRANCH" >/dev/null 2>&1; then
+    echo "ERROR: recorded branch name is not a valid local branch: $RECORDED_BRANCH" >&2
+    echo "Recovery: correct the bead metadata after inspecting the existing branch; do not guess a replacement." >&2
+    exit 1
+  fi
+  if ! git show-ref --verify --quiet "refs/heads/$RECORDED_BRANCH" &&
+     ! git show-ref --verify --quiet "refs/remotes/origin/$RECORDED_BRANCH"; then
+    echo "ERROR: no local or origin branch exists for recorded branch $RECORDED_BRANCH." >&2
+    echo "Recovery: restore or inspect the recorded branch before rerunning; this extension will not recreate it from origin/v3." >&2
+    echo "Prior work remains intact." >&2
+    exit 1
+  fi
+else
+  BRANCH="fix-discord-{{issue}}"
+  if ! git check-ref-format --branch "$BRANCH" >/dev/null 2>&1; then
+    echo "ERROR: deterministic branch name is invalid: $BRANCH" >&2
+    exit 1
+  fi
+  if git show-ref --verify --quiet "refs/heads/$BRANCH" ||
+     git show-ref --verify --quiet "refs/remotes/origin/$BRANCH"; then
+    echo "ERROR: refusing deterministic branch-name collision for $BRANCH." >&2
+    echo "Recovery: inspect the existing local or origin ref and choose a new issue bead; do not overwrite it." >&2
+    exit 1
+  fi
+fi
+```
+
+**3. Choose or recreate the bead-scoped worktree:**
+```bash
+WORKTREE_RECREATED=0
+if [ -n "$RECORDED_WORKTREE" ] && [ -d "$RECORDED_WORKTREE" ]; then
+  WORKTREE="$RECORDED_WORKTREE"
+else
+  WORKTREE_ROOT="$(pwd)/.gc/worktrees"
+  mkdir -p "$WORKTREE_ROOT"
+  WORKTREE_PATH="$WORKTREE_ROOT/{{issue}}"
+  if [ -e "$WORKTREE_PATH" ] || [ -L "$WORKTREE_PATH" ]; then
+    echo "ERROR: refusing worktree-path collision: $WORKTREE_PATH" >&2
+    echo "Recovery: inspect the existing path before rerunning." >&2
+    echo "Prior work remains intact." >&2
+    exit 1
+  fi
+  if [ -n "$RECORDED_BRANCH" ]; then
+    if git show-ref --verify --quiet "refs/heads/$BRANCH"; then
+      git worktree add "$WORKTREE_PATH" "$BRANCH" || exit 1
+    elif git show-ref --verify --quiet "refs/remotes/origin/$BRANCH"; then
+      git worktree add --track -b "$BRANCH" "$WORKTREE_PATH" "origin/$BRANCH" || exit 1
+    else
+      echo "ERROR: recorded branch $BRANCH disappeared before worktree recreation." >&2
+      echo "Recovery: restore or inspect the recorded branch; do not recreate it from origin/v3." >&2
+      echo "Prior work remains intact." >&2
+      exit 1
+    fi
+  else
+    git worktree add "$WORKTREE_PATH" --detach origin/v3 || exit 1
+  fi
+  WORKTREE="$WORKTREE_PATH"
+  WORKTREE_RECREATED=1
+  if ! gc bd update {{issue}} --set-metadata work_dir="$WORKTREE"; then
+    echo "ERROR: recreated worktree path could not be recorded: $WORKTREE" >&2
+    echo "Recovery: preserve the recreated worktree and record its path before rerunning." >&2
+    echo "Prior work remains intact." >&2
+    exit 1
+  fi
+fi
+cd "$WORKTREE" || exit 1
+if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  echo "ERROR: recorded worktree is not a Git worktree: $WORKTREE" >&2
+  echo "Recovery: inspect the recorded path without deleting prior work, then rerun." >&2
+  exit 1
+fi
+```
+
+**4. Require a clean worktree before checkout or rebase:**
+```bash
+if [ -n "$(git status --porcelain)" ]; then
+  echo "ERROR: worktree is not clean; refusing checkout or rebase." >&2
+  echo "Recovery: preserve and review the changes, then rerun only after the worktree is clean." >&2
+  exit 1
+fi
+if [ -n "$RECORDED_BRANCH" ]; then
+  CURRENT_BRANCH=$(git branch --show-current)
+  if [ "$WORKTREE_RECREATED" = "1" ]; then
+    if [ "$CURRENT_BRANCH" != "$BRANCH" ]; then
+      echo "ERROR: recreated worktree is on $CURRENT_BRANCH, not recorded branch $BRANCH." >&2
+      echo "Recovery: inspect the recreated worktree and recorded branch; refusing checkout or rebase." >&2
+      echo "Prior work remains intact." >&2
+      exit 1
+    fi
+  elif [ "$CURRENT_BRANCH" != "$BRANCH" ]; then
+    if git show-ref --verify --quiet "refs/heads/$BRANCH"; then
+      git checkout "$BRANCH" || exit 1
+    elif git show-ref --verify --quiet "refs/remotes/origin/$BRANCH"; then
+      git checkout --track -b "$BRANCH" "origin/$BRANCH" || exit 1
+    else
+      echo "ERROR: recorded branch $BRANCH disappeared before checkout." >&2
+      echo "Recovery: restore or inspect the recorded branch; do not recreate it from origin/v3." >&2
+      echo "Prior work remains intact." >&2
+      exit 1
+    fi
+  fi
+else
+  FORK_SHA=$(git rev-parse origin/v3) || exit 1
+  git checkout -b "$BRANCH" origin/v3 || exit 1
+  if ! gc bd update {{issue}} --set-metadata branch="$BRANCH" --set-metadata base_ref=origin/v3 --set-metadata fork_sha="$FORK_SHA"; then
+    echo "ERROR: new branch provenance could not be recorded: $BRANCH." >&2
+    echo "Recovery: preserve the new branch and record its base_ref and fork_sha before rerunning." >&2
+    echo "Prior work remains intact." >&2
+    exit 1
+  fi
+fi
+if [ -n "$(git status --porcelain)" ]; then
+  echo "ERROR: worktree became dirty during branch checkout; refusing rebase." >&2
+  echo "Recovery: preserve and review the changes, then rerun only after the worktree is clean." >&2
+  exit 1
+fi
+```
+
+**5. Validate recorded branch provenance before rebasing onto the current base:**
+```bash
+if [ -n "$RECORDED_BRANCH" ]; then
+  if ! git cat-file -e "$FORK_SHA^{commit}" 2>/dev/null; then
+    echo "ERROR: recorded fork_sha is not a commit in this repository: $FORK_SHA." >&2
+    echo "Recovery: inspect the existing branch and bead, establish the verified fork commit, and rerun; do not guess a replacement." >&2
+    echo "Prior work remains intact." >&2
+    exit 1
+  fi
+  if ! git merge-base --is-ancestor "$FORK_SHA" HEAD; then
+    echo "ERROR: recorded fork_sha $FORK_SHA is not an ancestor of the recorded branch HEAD." >&2
+    echo "Recovery: inspect the existing branch and fork metadata before rerunning; do not rebase or recreate the branch." >&2
+    echo "Prior work remains intact." >&2
+    exit 1
+  fi
+  if ! git merge-base --is-ancestor "$FORK_SHA" origin/v3; then
+    echo "ERROR: recorded fork_sha $FORK_SHA is not an ancestor of current origin/v3." >&2
+    echo "Recovery: establish a verified prior origin/v3 base in the bead before rerunning; do not guess or overwrite the branch." >&2
+    echo "Prior work remains intact." >&2
+    exit 1
+  fi
+  if ! git rebase --rebase-merges --reapply-cherry-picks --empty=stop origin/v3; then
+    echo "ERROR: rebase stopped on a conflict; no further workspace setup will run." >&2
+    echo "Recovery: resolve the conflict and run git rebase --continue, or run git rebase --abort; rerun this step only after review." >&2
+    echo "Prior commits remain in the existing branch." >&2
+    exit 1
+  fi
+  if ! git merge-base --is-ancestor origin/v3 HEAD; then
+    echo "ERROR: origin/v3 is not an ancestor of HEAD after rebase." >&2
+    echo "Recovery: inspect the branch and rebase it manually; do not guess a base." >&2
+    exit 1
+  fi
+  FORK_SHA=$(git rev-parse origin/v3) || exit 1
+  if ! gc bd update {{issue}} --set-metadata base_ref=origin/v3 --set-metadata fork_sha="$FORK_SHA"; then
+    echo "ERROR: rebased branch provenance could not be recorded." >&2
+    echo "Recovery: preserve the rebased branch and record base_ref=origin/v3 plus its fork_sha before rerunning." >&2
+    echo "Prior work remains intact." >&2
+    exit 1
+  fi
+else
+  if ! git merge-base --is-ancestor origin/v3 HEAD; then
+    echo "ERROR: newly created branch is not based on origin/v3." >&2
+    echo "Recovery: inspect the new branch before rerunning; do not guess a base." >&2
+    exit 1
+  fi
+fi
+if [ -n "$(git status --porcelain)" ]; then
+  echo "ERROR: worktree is not clean after workspace setup." >&2
+  echo "Recovery: preserve and review the changes before rerunning." >&2
+  exit 1
+fi
+git status
+```
+
+**Exit criteria:** You are in a clean worktree on the recorded or
+deterministically created fix branch, the branch provenance metadata is
+current, and `origin/v3` is an ancestor of `HEAD`."""

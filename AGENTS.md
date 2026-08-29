@@ -19,8 +19,8 @@ verification system.
 
 Never commit or publish:
 
-- private host values, authorities, addresses, users, channels, or host
-  configuration;
+- private host values, authorities, addresses, users, channels, roles, or
+  host configuration;
 - credentials, tokens, keys, cookies, password hashes, or credential paths;
 - `.gc`, `.beads`, Dolt, databases, worktrees, sessions, sockets, logs,
   reports, or copied runtime state;
@@ -36,24 +36,36 @@ allowed. `.gitignore` is a convenience, not a security boundary.
 - Use ASCII hyphens only.
 - Preserve Apache-2.0 licensing for local content and upstream notices for
   imported content.
-- Planning and primary review use Grok `grok-4.6` with `high` effort and
-  `long_context`.
-- Coding uses Luna with `max` effort.
-- Review falls back to Luna only when Grok is explicitly unsupported or
-  unavailable.
-- Use the stock Gas City Codex provider through the host-managed Codex Router,
-  the official Compound Engineering and pinned Slack Full pack, and official
-  publication. Do not add Copilot CLI profiles, alternate
-  transport, a city-owned Slack service, a custom relay, or publication
+- Use the official Gas City core, Beads, Gas City pack, and Discord packs
+  pinned in `pack.toml` and `packs.lock`.
+- Use `mol-d2b-discord-fix-issue.toml` only as a narrow native
+  first-run `origin/v3` workspace-setup extension of the official Discord
+  formula. Its resume path must fail closed for dirty worktrees, missing
+  branches, and legacy or missing `base_ref`/`fork_sha` provenance.
+- Keep `d2b-governance` registered as a global fragment. Publication must
+  refuse direct merges and accept only the pull-request handoff; never merge
+  or force-push, and keep merge decisions human-owned.
+- Host branch protection for `v3` is defense-in-depth: it must require pull
+  requests and apply to administrators. This repository does not claim the
+  current host is already configured that way.
+- Default to Gas City's stock builtin Copilot CLI provider with the Grok
+  planning and Luna coding lanes. Keep stock `builtin:codex` available as an
+  alternate provider. Do not add a custom Copilot or Codex adapter, alternate
+  transport, a city-owned Discord service, a custom relay, or publication
   machinery.
-- Keep Copilot Requests, d2b publication, and Slack credentials separate.
-  Only Slack adapter variables may be inherited by the native Slack
-  supervisor. Do not restore the `GH_TOKEN=$COPILOT_GITHUB_TOKEN` coupling.
+- Keep Copilot Requests, d2b publication, and Discord app credentials
+  separate. Do not couple `GH_TOKEN` to a Copilot token.
+
+## Model lanes
+
+Planning and primary review use Grok `grok-4.6` with `high` effort and
+`long_context`. Coding uses Luna with `max` effort. Review falls back to Luna
+only when Grok is explicitly unsupported or unavailable.
 
 ## Validation
 
 Use the smallest check that proves the changed contract. The repository gate
 is `python3 tests/test_city.py`, also available as `make check`. An optional
 native smoke can set `GC_BIN` to a pinned or host-supplied `gc` executable.
-Live authenticated ingress and credentialed Compound Engineering publication
-are redacted manual smokes, never committed evidence.
+Live authenticated ingress and credentialed publication are redacted manual
+smokes, never committed evidence.
