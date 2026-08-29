@@ -172,6 +172,25 @@ PR_BABYSIT_EXCLUDED_SURFACES = {
     "scheduler or daemon lifecycle",
     "durable /tmp state",
 }
+PR_BABYSIT_PROJECTED_FILES = (
+    "SKILL.md",
+    "references/branch-currency.md",
+    "references/envelope.md",
+    "references/pipeline.md",
+    "references/report.md",
+    "references/settle.md",
+    "references/setup.md",
+    "references/tick.md",
+    "references/watch-loop.md",
+    "scripts/pr-snapshot",
+)
+PR_BABYSIT_PROJECTION_MARKER = ".gascity-vendored-commit"
+PR_BABYSIT_LOCAL_FILES = (
+    "pack.toml",
+    "agents/pr-babysitter/agent.toml",
+    "agents/pr-babysitter/prompt.template.md",
+    "assets/scripts/project-copilot-skill.sh",
+)
 
 
 def _git(command: list[str], *, cwd: pathlib.Path, env: dict[str, str]) -> None:
@@ -550,6 +569,7 @@ class RootPortableCityTests(unittest.TestCase):
             "implementation-worker": "solid-worker",
             "run-operator": "fast-worker",
             "publisher": "fast-worker",
+            "pr-babysitter": "fast-worker",
         }
         patches = model_tiers["patches"]["agent"]
         self.assertEqual(len(patches), len(expected_tiers) * len(rigs))
@@ -670,7 +690,7 @@ class RootPortableCityTests(unittest.TestCase):
             multiple = generate(multi_rig)
             self.assertEqual(multiple.returncode, 0, multiple.stderr)
             patches = tomllib.loads(multiple.stdout)["patches"]["agent"]
-            self.assertEqual(len(patches), 24)
+            self.assertEqual(len(patches), 26)
             self.assertEqual({patch["dir"] for patch in patches}, {"alpha", "beta"})
 
             missing_city = generate(temporary / "missing-city.toml")
@@ -1419,9 +1439,18 @@ class RootPortableCityTests(unittest.TestCase):
                     destination = source / relative
                     destination.parent.mkdir(parents=True, exist_ok=True)
                     shutil.copy2(ROOT / relative, destination)
+                shutil.copytree(
+                    PR_BABYSIT_ROOT,
+                    source / "packs" / "pr-babysit",
+                )
                 city_before = {
                     relative: (source / relative).read_bytes()
                     for relative in AUTHORED_FILES
+                }
+                pr_babysit_before = {
+                    str(path.relative_to(PR_BABYSIT_ROOT)): path.read_bytes()
+                    for path in PR_BABYSIT_ROOT.rglob("*")
+                    if path.is_file()
                 }
 
                 env = {
@@ -1530,7 +1559,87 @@ class RootPortableCityTests(unittest.TestCase):
                         (source / relative).read_bytes(),
                         contents,
                     )
-                run_gc("config", "show", "--city", str(city))
+                for relative, contents in pr_babysit_before.items():
+                    self.assertEqual(
+                        (source / "packs" / "pr-babysit" / relative).read_bytes(),
+                        contents,
+                    )
+                config_show = run_gc(
+                    "config",
+                    "show",
+                    "--city",
+                    str(city),
+                    "--json",
+                )
+                config_payload = json.loads(config_show.stdout)
+                agent_rows = config_payload["config"]["Agents"]
+                self.assertEqual(
+                    {
+                        (
+                            row["Dir"],
+                            row["Name"],
+                            row["Provider"],
+                            row["WorkDir"],
+                            row["SessionSetupScript"],
+                            row["WakeMode"],
+                            row["MaxActiveSessions"],
+                        )
+                        for row in agent_rows
+                        if row["Name"] == "pr-babysitter"
+                    },
+                    {
+                        (
+                            "d2b",
+                            "pr-babysitter",
+                            "fast-worker",
+                            "{{.RigRoot}}/.gc/agents/pr-babysitter",
+                            "assets/scripts/project-copilot-skill.sh",
+                            "fresh",
+                            1,
+                        ),
+                        (
+                            "city-source",
+                            "pr-babysitter",
+                            "fast-worker",
+                            "{{.RigRoot}}/.gc/agents/pr-babysitter",
+                            "assets/scripts/project-copilot-skill.sh",
+                            "fresh",
+                            1,
+                        ),
+                    },
+                )
+                for rig_name in ("d2b", "city-source"):
+                    config_explain = run_gc(
+                        "config",
+                        "explain",
+                        "--rig",
+                        rig_name,
+                        "--agent",
+                        "pr-babysitter",
+                    )
+                    self.assertIn(
+                        f"Agent: {rig_name}/pr-babysit.pr-babysitter",
+                        config_explain.stdout,
+                    )
+                    skill_list = run_gc(
+                        "skill",
+                        "list",
+                        "--agent",
+                        f"{rig_name}/pr-babysit.pr-babysitter",
+                        "--city",
+                        str(city),
+                        "--rig",
+                        rig_name,
+                        "--json",
+                    )
+                    skill_payload = json.loads(skill_list.stdout)
+                    self.assertIn(
+                        "pr-babysit.pr-babysit",
+                        {
+                            entry["name"]
+                            for entry in skill_payload["entries"]
+                        },
+                    )
                 run_gc("import", "check", "--city", str(city))
                 generated_tiers = run_gc(
                     "core-city",
@@ -2080,9 +2189,16 @@ class VendoredPrBabysitTests(unittest.TestCase):
         actual_files = {
             str(path.relative_to(PR_BABYSIT_ROOT))
             for path in PR_BABYSIT_ROOT.rglob("*")
-            if path.is_file() and path.name != "UPSTREAM.json"
+            if path.is_file()
+            and path.name != "UPSTREAM.json"
+            and (
+                path.is_relative_to(PR_BABYSIT_SKILL_ROOT)
+                or path == PR_BABYSIT_ROOT / "LICENSE"
+            )
         }
         self.assertEqual(actual_files, expected_files)
+        for relative in PR_BABYSIT_LOCAL_FILES:
+            self.assertTrue((PR_BABYSIT_ROOT / relative).is_file(), relative)
         for relative in sorted(expected_files):
             path = PR_BABYSIT_ROOT / relative
             text = path.read_text(encoding="utf-8")
@@ -2199,6 +2315,333 @@ class VendoredPrBabysitTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn(planted, result.stdout)
             self.assertFalse(marker.exists())
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
+
+    def test_pr_babysit_pack_is_rig_imported_and_on_demand(self) -> None:
+        pack = tomllib.loads(
+            (PR_BABYSIT_ROOT / "pack.toml").read_text(encoding="utf-8")
+        )
+        self.assertEqual(pack["pack"]["name"], "pr-babysit")
+        self.assertEqual(pack["pack"]["schema"], 2)
+        self.assertNotIn("imports", pack)
+        self.assertNotIn("named_session", pack)
+
+        agent = tomllib.loads(
+            (
+                PR_BABYSIT_ROOT
+                / "agents"
+                / "pr-babysitter"
+                / "agent.toml"
+            ).read_text(encoding="utf-8")
+        )
+        self.assertEqual(
+            {
+                key: agent[key]
+                for key in (
+                    "scope",
+                    "provider",
+                    "wake_mode",
+                    "work_dir",
+                    "max_active_sessions",
+                    "session_setup_script",
+                )
+            },
+            {
+                "scope": "rig",
+                "provider": "fast-worker",
+                "wake_mode": "fresh",
+                "work_dir": "{{.RigRoot}}/.gc/agents/pr-babysitter",
+                "max_active_sessions": 1,
+                "session_setup_script": "assets/scripts/project-copilot-skill.sh",
+            },
+        )
+        self.assertNotIn("dir", agent)
+        self.assertFalse(agent.get("suspended", False))
+
+        city = tomllib.loads(
+            (CITY_ROOT / "city.toml").read_text(encoding="utf-8")
+        )
+        root_pack = tomllib.loads(
+            (CITY_ROOT / "pack.toml").read_text(encoding="utf-8")
+        )
+        core_pack = tomllib.loads(
+            (CORE_PACK_ROOT / "pack.toml").read_text(encoding="utf-8")
+        )
+        self.assertNotIn("pr-babysit", root_pack.get("imports", {}))
+        self.assertNotIn("pr-babysit", core_pack.get("imports", {}))
+
+        rigs = {rig["name"]: rig for rig in city["rigs"]}
+        self.assertEqual(set(rigs), {"d2b", "city-source"})
+        expected_runtime_names = {
+            "d2b": "d2b/pr-babysit.pr-babysitter",
+            "city-source": "city-source/pr-babysit.pr-babysitter",
+        }
+        for rig_name, rig in rigs.items():
+            self.assertEqual(
+                rig["imports"]["pr-babysit"],
+                {"source": "../../packs/pr-babysit"},
+            )
+            # Pack v2 stamps a rig-imported agent as
+            # <rig>/<binding>.<local-agent>.
+            self.assertEqual(
+                f"{rig_name}/pr-babysit.pr-babysitter",
+                expected_runtime_names[rig_name],
+            )
+
+    def test_pr_babysit_model_tier_is_fast_luna_and_deterministic(self) -> None:
+        base = tomllib.loads(
+            (
+                CORE_PACK_ROOT / "model-tiers.base.toml"
+            ).read_text(encoding="utf-8")
+        )
+        self.assertEqual(base["tiers"]["pr-babysitter"], "fast-worker")
+
+        city = tomllib.loads(
+            (CITY_ROOT / "city.toml").read_text(encoding="utf-8")
+        )
+        generated = tomllib.loads(
+            (CITY_ROOT / "model-tiers.toml").read_text(encoding="utf-8")
+        )
+        patches = generated["patches"]["agent"]
+        for rig in city["rigs"]:
+            matches = [
+                patch
+                for patch in patches
+                if patch["dir"] == rig["name"]
+                and patch["name"] == "pr-babysitter"
+            ]
+            self.assertEqual(
+                matches,
+                [
+                    {
+                        "dir": rig["name"],
+                        "name": "pr-babysitter",
+                        "provider": "fast-worker",
+                    }
+                ],
+            )
+        self.assertNotIn(
+            "pr-babysit.pr-babysitter",
+            {patch["name"] for patch in patches},
+        )
+
+        result = subprocess.run(
+            [
+                str(
+                    CORE_PACK_ROOT
+                    / "commands"
+                    / "gen-model-tiers"
+                    / "run.sh"
+                ),
+                str(CITY_ROOT / "city.toml"),
+            ],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            result.stdout,
+            (CITY_ROOT / "model-tiers.toml").read_text(encoding="utf-8"),
+        )
+
+    def test_pr_babysit_prompt_fails_closed_before_github_actions(self) -> None:
+        prompt = (
+            PR_BABYSIT_ROOT
+            / "agents"
+            / "pr-babysitter"
+            / "prompt.template.md"
+        ).read_text(encoding="utf-8")
+        lowered = prompt.lower()
+        for marker in (
+            PR_BABYSIT_UPSTREAM_COMMIT,
+            "gc_dir",
+            ".github/skills/pr-babysit",
+            ".agents/skills/pr-babysit",
+            PR_BABYSIT_PROJECTION_MARKER,
+            "blocker",
+            "do not",
+            "v3",
+            "main",
+        ):
+            self.assertIn(marker.lower(), lowered)
+        gate = lowered.index(PR_BABYSIT_PROJECTION_MARKER)
+        for action in ("`gh`", "git push"):
+            self.assertGreater(lowered.index(action), gate, action)
+        for marker in (
+            "gh_token",
+            "copilot_github_token",
+            "credential",
+            "user-global",
+            "/tmp",
+        ):
+            self.assertNotIn(marker, lowered)
+        for relative in PR_BABYSIT_PROJECTED_FILES:
+            match = re.search(
+                rf"verify_file '([0-9a-f]{{64}})' "
+                rf"'{re.escape(relative)}'",
+                prompt,
+            )
+            self.assertIsNotNone(match, relative)
+            self.assertEqual(
+                match.group(1),
+                hashlib.sha256(
+                    (PR_BABYSIT_SKILL_ROOT / relative).read_bytes()
+                ).hexdigest(),
+            )
+
+    def test_pr_babysit_projection_is_idempotent_and_fail_closed(self) -> None:
+        script = PR_BABYSIT_ROOT / "assets" / "scripts" / "project-copilot-skill.sh"
+        root = ROOT / ".u2-pr-babysit-test"
+        shutil.rmtree(root, ignore_errors=True)
+        root.mkdir()
+
+        def tree_bytes(path: pathlib.Path) -> dict[str, bytes]:
+            return {
+                str(entry.relative_to(path)): entry.read_bytes()
+                for entry in sorted(path.rglob("*"))
+                if entry.is_file()
+            }
+
+        source_before = tree_bytes(PR_BABYSIT_ROOT)
+        try:
+            workdir = root / "workdir"
+            rig_source = root / "rig-source"
+            rig_source.mkdir()
+            workdir = rig_source / ".gc" / "agents" / "pr-babysitter"
+            workdir.mkdir(parents=True)
+            (rig_source / "keep.txt").write_text(
+                "source checkout sentinel\n",
+                encoding="utf-8",
+            )
+            for vendor_root, unrelated_name in (
+                (workdir / ".github" / "skills", "unrelated-github"),
+                (workdir / ".agents" / "skills", "unrelated-agents"),
+            ):
+                (vendor_root / unrelated_name).mkdir(parents=True)
+                (vendor_root / unrelated_name / "keep.txt").write_text(
+                    "unrelated skill\n",
+                    encoding="utf-8",
+                )
+                stale = vendor_root / "pr-babysit"
+                stale.mkdir()
+                (stale / PR_BABYSIT_PROJECTION_MARKER).write_text(
+                    "stale-commit\n",
+                    encoding="utf-8",
+                )
+                (stale / "stale.txt").write_text(
+                    "stale projection\n",
+                    encoding="utf-8",
+                )
+
+            env = os.environ.copy()
+            env.update(
+                {
+                    "GC_DIR": str(workdir),
+                    "GC_RIG_ROOT": str(rig_source),
+                }
+            )
+            result = subprocess.run(
+                [str(script)],
+                cwd=ROOT,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn(PR_BABYSIT_UPSTREAM_COMMIT, result.stdout)
+
+            for vendor_root in (
+                workdir / ".github" / "skills",
+                workdir / ".agents" / "skills",
+            ):
+                projected = vendor_root / "pr-babysit"
+                self.assertEqual(
+                    (projected / PR_BABYSIT_PROJECTION_MARKER).read_text(
+                        encoding="utf-8"
+                    ).strip(),
+                    PR_BABYSIT_UPSTREAM_COMMIT,
+                )
+                for relative in PR_BABYSIT_PROJECTED_FILES:
+                    self.assertEqual(
+                        (projected / relative).read_bytes(),
+                        (PR_BABYSIT_SKILL_ROOT / relative).read_bytes(),
+                        relative,
+                    )
+                self.assertFalse((projected / "stale.txt").exists())
+
+            self.assertEqual(
+                (workdir / ".github" / "skills" / "unrelated-github" / "keep.txt")
+                .read_text(encoding="utf-8"),
+                "unrelated skill\n",
+            )
+            self.assertEqual(
+                (workdir / ".agents" / "skills" / "unrelated-agents" / "keep.txt")
+                .read_text(encoding="utf-8"),
+                "unrelated skill\n",
+            )
+            workdir_after_first = tree_bytes(workdir)
+            result = subprocess.run(
+                [str(script)],
+                cwd=ROOT,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(tree_bytes(workdir), workdir_after_first)
+            self.assertEqual((rig_source / "keep.txt").read_text(encoding="utf-8"), "source checkout sentinel\n")
+            self.assertFalse((rig_source / ".github").exists())
+            self.assertFalse((rig_source / ".agents").exists())
+            self.assertEqual(tree_bytes(PR_BABYSIT_ROOT), source_before)
+
+            bad_pack = root / "bad-pack"
+            shutil.copytree(PR_BABYSIT_ROOT, bad_pack)
+            (bad_pack / "skills" / "pr-babysit" / "references" / "setup.md").unlink()
+            bad_rig_source = root / "bad-rig-source"
+            bad_workdir = bad_rig_source / ".gc" / "agents" / "pr-babysitter"
+            bad_target = bad_workdir / ".github" / "skills" / "pr-babysit"
+            bad_target.mkdir(parents=True)
+            (bad_target / PR_BABYSIT_PROJECTION_MARKER).write_text(
+                "previous-commit\n",
+                encoding="utf-8",
+            )
+            (bad_target / "keep.txt").write_text(
+                "previous projection\n",
+                encoding="utf-8",
+            )
+            bad_env = env | {
+                "GC_DIR": str(bad_workdir),
+                "GC_RIG_ROOT": str(bad_rig_source),
+            }
+            bad_result = subprocess.run(
+                [
+                    str(
+                        bad_pack
+                        / "assets"
+                        / "scripts"
+                        / "project-copilot-skill.sh"
+                    )
+                ],
+                cwd=ROOT,
+                env=bad_env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertNotEqual(bad_result.returncode, 0)
+            self.assertIn("BLOCKER", bad_result.stderr)
+            self.assertEqual(
+                tree_bytes(bad_workdir),
+                {
+                    ".github/skills/pr-babysit/.gascity-vendored-commit": b"previous-commit\n",
+                    ".github/skills/pr-babysit/keep.txt": b"previous projection\n",
+                },
+            )
         finally:
             shutil.rmtree(root, ignore_errors=True)
 

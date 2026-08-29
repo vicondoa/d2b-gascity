@@ -1,0 +1,7 @@
+description = "On-demand target-only pull-request babysitter."
+scope = "rig"
+provider = "fast-worker"
+wake_mode = "fresh"
+work_dir = "{{.RigRoot}}/.gc/agents/pr-babysitter"
+max_active_sessions = 1
+session_setup_script = "assets/scripts/project-copilot-skill.sh"
