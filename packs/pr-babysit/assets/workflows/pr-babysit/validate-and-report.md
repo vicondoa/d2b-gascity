@@ -58,6 +58,30 @@ esac
 [ -d "$GC_RIG_ROOT" ] || blocker 'GC_RIG_ROOT does not exist'
 WORKTREE="${PR_BABYSIT_WORKTREE:-$GC_RIG_ROOT/.gc/agents/pr-babysitter/worktrees/$ACTION_ID}"
 
+record_result() {
+    result_validation_status=$1
+    result_make_check_result=$2
+    result_pushed_sha=${3:-}
+    result_remote_head_sha=${4:-}
+    set -- \
+        gc pr-babysit pr-babysit record-repair-result \
+        --watch-id "$WATCH_ID" \
+        --action-id "$ACTION_ID" \
+        --generation "$GENERATION" \
+        --expected-old-sha "$EXPECTED_OLD_SHA"
+    if [ -n "$result_pushed_sha" ]; then
+        set -- "$@" --pushed-sha "$result_pushed_sha"
+    fi
+    if [ -n "$result_remote_head_sha" ]; then
+        set -- "$@" --remote-head-sha "$result_remote_head_sha"
+    fi
+    set -- "$@" \
+        --validation-status "$result_validation_status" \
+        --make-check-result "$result_make_check_result" \
+        --addressed-thread-ids "$ADDRESSED_THREAD_IDS"
+    "$@"
+}
+
 [ -n "$ACTION_ID" ] || blocker 'action ID is missing'
 [ -d "$WORKTREE" ] || blocker 'prepared action worktree does not exist'
 [ ! -L "$WORKTREE" ] || blocker 'prepared action worktree is a symlink'
@@ -133,14 +157,7 @@ if ! (cd "$WORKTREE" && make check); then
 fi
 
 if [ "$CHECK_STATUS" != 'passed' ]; then
-    if ! gc pr-babysit pr-babysit record-repair-result \
-        --watch-id "$WATCH_ID" \
-        --action-id "$ACTION_ID" \
-        --generation "$GENERATION" \
-        --expected-old-sha "$EXPECTED_OLD_SHA" \
-        --validation-status failed \
-        --make-check-result failed \
-        --addressed-thread-ids "$ADDRESSED_THREAD_IDS"
+    if ! record_result failed failed
     then
         blocker 'could not record failed make check'
     fi
@@ -151,78 +168,36 @@ if ! git -C "$WORKTREE" fetch --prune origin \
     "refs/heads/$HEAD_REF:refs/remotes/origin/$HEAD_REF" \
     >/dev/null 2>&1
 then
-    gc pr-babysit pr-babysit record-repair-result \
-        --watch-id "$WATCH_ID" \
-        --action-id "$ACTION_ID" \
-        --generation "$GENERATION" \
-        --expected-old-sha "$EXPECTED_OLD_SHA" \
-        --validation-status ambiguous \
-        --make-check-result passed \
-        --addressed-thread-ids "$ADDRESSED_THREAD_IDS" || true
+    record_result ambiguous passed || true
     blocker 'could not recheck remote expected-old SHA'
 fi
 if ! REMOTE_BEFORE="$(
     git -C "$WORKTREE" rev-parse \
         "refs/remotes/origin/$HEAD_REF^{commit}"
 )"; then
-    gc pr-babysit pr-babysit record-repair-result \
-        --watch-id "$WATCH_ID" \
-        --action-id "$ACTION_ID" \
-        --generation "$GENERATION" \
-        --expected-old-sha "$EXPECTED_OLD_SHA" \
-        --validation-status ambiguous \
-        --make-check-result passed \
-        --addressed-thread-ids "$ADDRESSED_THREAD_IDS" || true
+    record_result ambiguous passed || true
     blocker 'remote expected-old SHA is unavailable'
 fi
 if [ "$REMOTE_BEFORE" != "$EXPECTED_OLD_SHA" ]; then
-    gc pr-babysit pr-babysit record-repair-result \
-        --watch-id "$WATCH_ID" \
-        --action-id "$ACTION_ID" \
-        --generation "$GENERATION" \
-        --expected-old-sha "$EXPECTED_OLD_SHA" \
-        --validation-status ambiguous \
-        --make-check-result passed \
-        --addressed-thread-ids "$ADDRESSED_THREAD_IDS" || true
+    record_result ambiguous passed || true
     blocker 'remote head is stale; no branch update was attempted'
 fi
 
 if ! git -C "$WORKTREE" push origin \
     "HEAD:refs/heads/$HEAD_REF" >/dev/null 2>&1
 then
-    gc pr-babysit pr-babysit record-repair-result \
-        --watch-id "$WATCH_ID" \
-        --action-id "$ACTION_ID" \
-        --generation "$GENERATION" \
-        --expected-old-sha "$EXPECTED_OLD_SHA" \
-        --validation-status ambiguous \
-        --make-check-result passed \
-        --addressed-thread-ids "$ADDRESSED_THREAD_IDS" || true
+    record_result ambiguous passed || true
     blocker 'push outcome is ambiguous; it will not be retried'
 fi
 
 if ! PUSHED_SHA="$(
     git -C "$WORKTREE" rev-parse 'HEAD^{commit}'
 )"; then
-    gc pr-babysit pr-babysit record-repair-result \
-        --watch-id "$WATCH_ID" \
-        --action-id "$ACTION_ID" \
-        --generation "$GENERATION" \
-        --expected-old-sha "$EXPECTED_OLD_SHA" \
-        --validation-status ambiguous \
-        --make-check-result passed \
-        --addressed-thread-ids "$ADDRESSED_THREAD_IDS" || true
+    record_result ambiguous passed || true
     blocker 'cannot resolve pushed SHA'
 fi
 [ "$PUSHED_SHA" != "$EXPECTED_OLD_SHA" ] || {
-    gc pr-babysit pr-babysit record-repair-result \
-        --watch-id "$WATCH_ID" \
-        --action-id "$ACTION_ID" \
-        --generation "$GENERATION" \
-        --expected-old-sha "$EXPECTED_OLD_SHA" \
-        --validation-status ambiguous \
-        --make-check-result passed \
-        --addressed-thread-ids "$ADDRESSED_THREAD_IDS" || true
+    record_result ambiguous passed || true
     blocker 'repair did not create a new head commit'
 }
 REMOTE_AFTER="$(
@@ -231,42 +206,16 @@ REMOTE_AFTER="$(
 )"
 case "$REMOTE_AFTER" in
     ''|*[!0-9a-fA-F]*) 
-        gc pr-babysit pr-babysit record-repair-result \
-            --watch-id "$WATCH_ID" \
-            --action-id "$ACTION_ID" \
-            --generation "$GENERATION" \
-            --expected-old-sha "$EXPECTED_OLD_SHA" \
-            --pushed-sha "$PUSHED_SHA" \
-            --validation-status ambiguous \
-            --make-check-result passed \
-            --addressed-thread-ids "$ADDRESSED_THREAD_IDS" || true
+        record_result ambiguous passed "$PUSHED_SHA" || true
         blocker 'remote pushed SHA is unavailable'
         ;;
 esac
 [ "$REMOTE_AFTER" = "$PUSHED_SHA" ] || {
-    gc pr-babysit pr-babysit record-repair-result \
-        --watch-id "$WATCH_ID" \
-        --action-id "$ACTION_ID" \
-        --generation "$GENERATION" \
-        --expected-old-sha "$EXPECTED_OLD_SHA" \
-        --pushed-sha "$PUSHED_SHA" \
-        --remote-head-sha "$REMOTE_AFTER" \
-        --validation-status passed \
-        --make-check-result passed \
-        --addressed-thread-ids "$ADDRESSED_THREAD_IDS" || true
+    record_result ambiguous passed "$PUSHED_SHA" "$REMOTE_AFTER" || true
     blocker 'remote SHA differs from the pushed SHA'
 }
 
-if ! gc pr-babysit pr-babysit record-repair-result \
-    --watch-id "$WATCH_ID" \
-    --action-id "$ACTION_ID" \
-    --generation "$GENERATION" \
-    --expected-old-sha "$EXPECTED_OLD_SHA" \
-    --pushed-sha "$PUSHED_SHA" \
-    --remote-head-sha "$PUSHED_SHA" \
-    --validation-status passed \
-    --make-check-result passed \
-    --addressed-thread-ids "$ADDRESSED_THREAD_IDS"
+if ! record_result passed passed "$PUSHED_SHA" "$PUSHED_SHA"
 then
     blocker 'could not record the validated push result'
 fi

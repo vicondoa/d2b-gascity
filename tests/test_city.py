@@ -2799,7 +2799,42 @@ if command == "show":
 
 
 if command == "list":
-    print(json.dumps(records, sort_keys=True))
+    listed = records
+    if "--all" not in args:
+        statuses = {value("--status")} if "--status" in args else {
+            "open",
+            "in_progress",
+            "blocked",
+            "deferred",
+        }
+        listed = [
+            record
+            for record in listed
+            if record.get("status") in statuses
+        ]
+    metadata_fields = [
+        args[index + 1]
+        for index, item in enumerate(args)
+        if item == "--metadata-field" and index + 1 < len(args)
+    ]
+    for field in metadata_fields:
+        key, separator, expected = field.partition("=")
+        if separator:
+            listed = [
+                record
+                for record in listed
+                if (record.get("metadata") or {}).get(key) == expected
+            ]
+    sort_field = value("--sort")
+    if sort_field:
+        listed = sorted(
+            listed,
+            key=lambda record: record.get(sort_field, ""),
+        )
+    list_limit = value("--limit")
+    if list_limit:
+        listed = listed[: int(list_limit)]
+    print(json.dumps(listed, sort_keys=True))
     raise SystemExit(0)
 
 
@@ -2949,6 +2984,52 @@ if command == "close":
                 (lock_dir / f"{watch_id}.lock").read_bytes(),
                 b"",
             )
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
+
+    def test_cli_rejects_undeployed_action_aliases(self) -> None:
+        root, env = self._fixture("action-aliases")
+        try:
+            aliases = (
+                "credential-check",
+                "check-capability",
+                "check_credentials",
+                "publish-handoff",
+                "handoff-publication",
+                "publication_handoff",
+                "verify-publication-handoff",
+                "verify_handoff",
+                "state",
+                "state-show",
+                "claim",
+                "claim_action",
+                "dispatch",
+                "dispatch_repair",
+                "repair",
+                "record",
+                "repair-result",
+                "record_repair_result",
+                "confirm",
+                "confirm_action",
+                "checkpoint-state",
+                "record-checkpoint",
+                "due",
+                "list_due",
+            )
+            for alias in aliases:
+                result = self._run(env, alias)
+                self.assertNotEqual(result.returncode, 0, alias)
+                error = self._json(result)["error"]
+                self.assertEqual(
+                    error["code"],
+                    "invalid-request",
+                    alias,
+                )
+                self.assertEqual(
+                    error["message"],
+                    "unsupported action",
+                    alias,
+                )
         finally:
             shutil.rmtree(root, ignore_errors=True)
 
@@ -3347,6 +3428,37 @@ if command == "close":
         finally:
             shutil.rmtree(root, ignore_errors=True)
 
+    def test_claim_requires_generation_before_head_sha(self) -> None:
+        root, env = self._fixture("claim-positionals")
+        try:
+            handoff = self._run(env, "handoff", self._HANDOFF)
+            self.assertEqual(handoff.returncode, 0, handoff.stderr)
+            watch_id = self._json(handoff)["watch_id"]
+            result = subprocess.run(
+                [
+                    str(PR_BABYSIT_STATE_RUNNER),
+                    "claim-action",
+                    watch_id,
+                    "ci",
+                    "check-failed",
+                    "a" * 40,
+                    "1",
+                ],
+                cwd=ROOT,
+                env=os.environ | env,
+                input="{}\n",
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(
+                self._json(result)["error"]["code"],
+                "invalid-request",
+            )
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
+
     def test_head_change_invalidates_claim_and_increments_generation(self) -> None:
         root, env = self._fixture("head-change")
         try:
@@ -3626,6 +3738,70 @@ if command == "close":
             self.assertEqual(
                 due["watches"][0]["metadata"]["next_snapshot_at"],
                 "2026-08-29T18:00:00Z",
+            )
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
+
+    def test_list_due_filters_open_records_before_slicing(self) -> None:
+        root, env = self._fixture("due-pagination")
+        try:
+            first = dict(
+                self._HANDOFF,
+                next_snapshot_at="2026-08-29T18:00:00Z",
+            )
+            second = dict(
+                self._HANDOFF,
+                repository="later",
+                url="https://github.com/octo/later/pull/7",
+                next_snapshot_at="2026-08-29T18:30:00Z",
+            )
+            self.assertEqual(self._run(env, "handoff", first).returncode, 0)
+            second_result = self._run(env, "handoff", second)
+            self.assertEqual(second_result.returncode, 0, second_result.stderr)
+            second_watch_id = self._json(second_result)["watch_id"]
+            records = json.loads((root / "beads.json").read_text())
+            first_record = next(
+                record
+                for record in records
+                if record["metadata"]["repository"] == "example"
+            )
+            first_record["id"] = "a-closed"
+            first_record["status"] = "closed"
+            first_record["metadata"]["state"] = "terminal"
+            (root / "beads.json").write_text(
+                json.dumps(records, sort_keys=True, separators=(",", ":"))
+                + "\n",
+                encoding="utf-8",
+            )
+            result = self._run(
+                env,
+                "list-due",
+                {
+                    "rig": "d2b",
+                    "now": "2026-08-29T19:00:00Z",
+                    "limit": 1,
+                },
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            due = self._json(result)
+            self.assertEqual(
+                [item["watch_id"] for item in due["watches"]],
+                [second_watch_id],
+            )
+            calls = json.loads((root / "calls.json").read_text())
+            list_call = next(
+                call["argv"]
+                for call in calls
+                if call["argv"] and call["argv"][0] == "list"
+            )
+            self.assertNotIn("--all", list_call)
+            self.assertEqual(
+                list_call[list_call.index("--status") + 1],
+                "open",
+            )
+            self.assertEqual(
+                list_call[list_call.index("--limit") + 1],
+                "100",
             )
         finally:
             shutil.rmtree(root, ignore_errors=True)
@@ -5043,6 +5219,17 @@ print(json.dumps({"ok": True, "root_id": "repair-root"}))
         self.assertNotIn("owning source checkout is dirty", prepare.lower())
         self.assertNotIn(".pr-babysit-state.json", validate)
         self.assertIn('(cd "$WORKTREE" && make check)', validate)
+        self.assertEqual(validate.count("record_result()"), 1)
+        self.assertEqual(
+            validate.count("gc pr-babysit pr-babysit record-repair-result"),
+            1,
+        )
+        for call in (
+            "record_result failed failed",
+            "record_result ambiguous passed",
+            "record_result passed passed",
+        ):
+            self.assertIn(call, validate)
         for forbidden in (
             "git merge",
             "git rebase",

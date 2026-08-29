@@ -2197,13 +2197,6 @@ def _claim_action_locked(
         "expected_old_sha",
         "expected_old_head",
     )
-    if (
-        isinstance(generation_raw, str)
-        and SHA_RE.fullmatch(generation_raw)
-        and head_raw is not None
-        and not SHA_RE.fullmatch(str(head_raw))
-    ):
-        generation_raw, head_raw = head_raw, generation_raw
     expected_generation = integer_value(generation_raw, "generation")
     head_sha = sha_value(head_raw, "head_sha")
     _, metadata = show_issue(watch_id)
@@ -3266,13 +3259,21 @@ def list_due(payload: dict[str, Any]) -> dict[str, Any]:
     )
     if limit > MAX_DUE_LIMIT:
         fail(f"limit must not exceed {MAX_DUE_LIMIT}")
-    args = ["list", "--all", "--limit", str(limit), "--sort", "id", "--json"]
+    args = [
+        "list",
+        "--status",
+        "open",
+        "--limit",
+        str(MAX_DUE_LIMIT),
+        "--sort",
+        "id",
+        "--json",
+    ]
     args.extend(["--metadata-field", "record_kind=watch"])
     if rig:
         args.extend(["--metadata-field", f"rig={rig}"])
     result = run_beads(args)
-    payload_value_result = require_beads(result, "list")
-    records = payload_value_result
+    records = require_beads(result, "list")
     if isinstance(records, dict) and isinstance(records.get("issues"), list):
         records = records["issues"]
     if not isinstance(records, list):
@@ -3406,12 +3407,10 @@ def parse_cli_request(argv: list[str]) -> dict[str, Any]:
     data.update(option_values)
     if positionals:
         data.setdefault("_args", positionals)
-    request_action = action or data.pop("action", None) or data.pop("operation", None)
+    request_action = action or data.pop("action", None)
     if request_action is None:
         fail("an action is required")
-    request_action = str(request_action).strip().lower().replace("_", "-")
-    if request_action == "state" and positionals and positionals[0] == "show":
-        positionals = positionals[1:]
+    request_action = str(request_action).strip().lower()
     if (
         request_action == "transition"
         and len(positionals) >= 3
@@ -3423,8 +3422,6 @@ def parse_cli_request(argv: list[str]) -> dict[str, Any]:
     if positionals:
         positional_fields = {
             "show": ("watch_id",),
-            "state": ("watch_id",),
-            "state-show": ("watch_id",),
             "transition": ("watch_id", "to", "reason"),
             "claim-action": (
                 "watch_id",
@@ -3433,30 +3430,7 @@ def parse_cli_request(argv: list[str]) -> dict[str, Any]:
                 "generation",
                 "head_sha",
             ),
-            "claim": (
-                "watch_id",
-                "action_kind",
-                "fingerprint",
-                "generation",
-                "head_sha",
-            ),
             "dispatch-repair": (
-                "watch_id",
-                "action_kind",
-                "fingerprint",
-                "generation",
-                "head_sha",
-                "addressed_thread_ids",
-            ),
-            "dispatch": (
-                "watch_id",
-                "action_kind",
-                "fingerprint",
-                "generation",
-                "head_sha",
-                "addressed_thread_ids",
-            ),
-            "repair": (
                 "watch_id",
                 "action_kind",
                 "fingerprint",
@@ -3473,45 +3447,8 @@ def parse_cli_request(argv: list[str]) -> dict[str, Any]:
                 "make_check_result",
                 "addressed_thread_ids",
             ),
-            "record": (
-                "watch_id",
-                "action_id",
-                "expected_old_sha",
-                "pushed_sha",
-                "validation_status",
-                "make_check_result",
-                "addressed_thread_ids",
-            ),
-            "repair-result": (
-                "watch_id",
-                "action_id",
-                "expected_old_sha",
-                "pushed_sha",
-                "validation_status",
-                "make_check_result",
-                "addressed_thread_ids",
-            ),
             "confirm-action": ("watch_id", "action_id", "current_sha",),
-            "confirm": ("watch_id", "action_id", "current_sha",),
             "checkpoint": (
-                "watch_id",
-                "expected_generation",
-                "expected_head_sha",
-                "observed_head_sha",
-                "observed_at",
-                "next_snapshot_at",
-                "to",
-            ),
-            "checkpoint-state": (
-                "watch_id",
-                "expected_generation",
-                "expected_head_sha",
-                "observed_head_sha",
-                "observed_at",
-                "next_snapshot_at",
-                "to",
-            ),
-            "record-checkpoint": (
                 "watch_id",
                 "expected_generation",
                 "expected_head_sha",
@@ -3526,25 +3463,7 @@ def parse_cli_request(argv: list[str]) -> dict[str, Any]:
                 "url",
                 "pr_number",
             ),
-            "publish-handoff": (
-                "rig",
-                "publication_bead_id",
-                "url",
-                "pr_number",
-            ),
-            "handoff-publication": (
-                "rig",
-                "publication_bead_id",
-                "url",
-                "pr_number",
-            ),
             "verify-handoff": (
-                "rig",
-                "publication_bead_id",
-                "url",
-                "pr_number",
-            ),
-            "verify-publication-handoff": (
                 "rig",
                 "publication_bead_id",
                 "url",
@@ -3559,33 +3478,29 @@ def parse_cli_request(argv: list[str]) -> dict[str, Any]:
 
 def dispatch(payload: dict[str, Any]) -> dict[str, Any]:
     action = payload.get("action")
-    if action in {"check-credentials", "credential-check", "check-capability"}:
+    if action == "check-credentials":
         return check_repair_credentials()
     if action == "handoff":
         return handoff(payload)
-    if action in {
-        "publication-handoff",
-        "publish-handoff",
-        "handoff-publication",
-    }:
+    if action == "publication-handoff":
         return publication_handoff(payload)
-    if action in {"verify-handoff", "verify-publication-handoff"}:
+    if action == "verify-handoff":
         return verify_handoff(payload)
-    if action in {"show", "state", "state-show"}:
+    if action == "show":
         return show_state(payload)
     if action == "transition":
         return transition(payload)
-    if action in {"claim-action", "claim"}:
+    if action == "claim-action":
         return claim_action(payload)
-    if action in {"dispatch-repair", "dispatch", "repair"}:
+    if action == "dispatch-repair":
         return dispatch_repair(payload)
-    if action in {"record-repair-result", "record", "repair-result"}:
+    if action == "record-repair-result":
         return record_repair_result(payload)
-    if action in {"confirm-action", "confirm"}:
+    if action == "confirm-action":
         return confirm_action(payload)
-    if action in {"checkpoint", "checkpoint-state", "record-checkpoint"}:
+    if action == "checkpoint":
         return checkpoint(payload)
-    if action in {"list-due", "due"}:
+    if action == "list-due":
         return list_due(payload)
     fail("unsupported action")
 
