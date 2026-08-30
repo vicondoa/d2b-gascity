@@ -177,6 +177,9 @@ PR_BABYSIT_FILES = {
             "fd8a0b403703714a1257530e7053461e437b662b0ef381f780"
             "b8850439d980e7"
         ),
+        "local_sha256": (
+            "98fd2ae7a7215968fe1c85f821338f8b568e3afb8b2b234cdf1ae97635d419dc"
+        ),
     },
 }
 PR_BABYSIT_EXCLUDED_SURFACES = {
@@ -2604,7 +2607,7 @@ class VendoredPrBabysitTests(unittest.TestCase):
         for entry in entries:
             expected = PR_BABYSIT_FILES[entry["local"]]
             expected_keys = {"local", "source", "sha256"}
-            if entry["local"] == "skills/pr-babysit/references/report.md":
+            if "local_sha256" in expected:
                 expected_keys.add("local_sha256")
             self.assertEqual(set(entry), expected_keys)
             self.assertEqual(entry["source"], expected["source"])
@@ -2953,74 +2956,46 @@ class VendoredPrBabysitTests(unittest.TestCase):
                 finally:
                     shutil.rmtree(root, ignore_errors=True)
 
-    def test_pr_snapshot_wake_payload_is_the_stable_watch_id(self):
-        root = _temporary_root("snapshot-wake-")
-        try:
-            result, gc_dir = self._snapshot_fixture(
-                root,
-                base={
-                    "ref": "main",
-                    "oid": "b" * 40,
-                    "current_oid": "b" * 40,
-                },
-                extra={
-                    "checks": [
-                        {
-                            "key": "ci",
-                            "status": "COMPLETED",
-                            "conclusion": "SUCCESS",
-                        }
-                    ]
-                },
-            )
-            self.assertEqual(result.returncode, 0, result.stderr)
-            fixture = root / "snapshot.json"
-            source_root = root / "source"
-            source_root.mkdir()
-            sentinel = source_root / "sentinel"
-            sentinel.write_text("untouched\n", encoding="utf-8")
-            wake = subprocess.run(
-                [
-                    str(PR_BABYSIT_SKILL_ROOT / "scripts" / "pr-snapshot"),
-                    "watch",
-                    "--pr",
-                    "7",
-                    "--repo",
-                    "octo/example",
-                    "--expected-base",
-                    "main",
-                    "--expected-head-ref",
-                    "feature/x",
-                    "--expected-head-sha",
-                    "a" * 40,
-                    "--watch-id",
-                    "d2b-pr-wake",
-                    "--state-dir",
-                    str(gc_dir / "state" / "d2b-pr-wake"),
-                    "--fetch-file",
-                    str(fixture),
-                    "--start-invocation",
-                ],
+    def test_pr_snapshot_rejects_removed_commands_and_flag_aliases(self):
+        script = PR_BABYSIT_SKILL_ROOT / "scripts" / "pr-snapshot"
+        for command in ("watch", "mark"):
+            result = subprocess.run(
+                [str(script), command],
                 cwd=ROOT,
-                env=os.environ
-                | {
-                    "GC_DIR": str(gc_dir),
-                    "GC_RIG_ROOT": str(source_root),
-                },
                 capture_output=True,
                 text=True,
                 check=False,
             )
-            self.assertEqual(wake.returncode, 0, wake.stderr)
-            self.assertTrue(wake.stdout.startswith("BABYSIT_WAKE "))
-            payload = json.loads(wake.stdout.split(" ", 1)[1])
-            self.assertEqual(payload["watch_id"], "d2b-pr-wake")
-            self.assertEqual(
-                sentinel.read_text(encoding="utf-8"),
-                "untouched\n",
-            )
-        finally:
-            shutil.rmtree(root, ignore_errors=True)
+            self.assertNotEqual(result.returncode, 0, command)
+        aliases = (
+            "--expected-base-ref",
+            "--expected-base-name",
+            "--base-ref",
+            "--head-ref",
+            "--expected-head",
+            "--head-sha",
+        )
+        for alias in aliases:
+            with self.subTest(alias=alias):
+                result = subprocess.run(
+                    [
+                        str(script),
+                        "snapshot",
+                        "--pr",
+                        "7",
+                        alias,
+                        "main",
+                    ],
+                    cwd=ROOT,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                self.assertNotEqual(result.returncode, 0, alias)
+                self.assertRegex(
+                    result.stderr,
+                    r"(unrecognized arguments|ambiguous option)",
+                )
 
     @staticmethod
     def _fake_github_script() -> str:
@@ -5949,6 +5924,39 @@ if os.environ.get("FAKE_GC_FAIL") == "1":
             check=False,
         )
 
+    def test_state_sweep_validates_rig_and_limit(self) -> None:
+        root, env = self._fixture("validation")
+        try:
+            for payload in (
+                {"rig": "unknown", "limit": 32},
+                {"rig": "d2b", "limit": 0},
+                {"rig": "d2b", "limit": 101},
+            ):
+                with self.subTest(payload=payload):
+                    result = self._run_state(env, "sweep", payload)
+                    self.assertNotEqual(result.returncode, 0)
+            result = self._run_state(
+                env,
+                "sweep",
+                {"rig": "d2b", "limit": 32},
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(
+                self._json(result),
+                {
+                    "action": "sweep",
+                    "ok": True,
+                    "rig": "d2b",
+                    "routed": 0,
+                },
+            )
+            self.assertEqual(
+                json.loads((root / "gc-calls.json").read_text(encoding="utf-8")),
+                [],
+            )
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
+
     def test_order_uses_pinned_cooldown_exec_shape(self) -> None:
         order = tomllib.loads(
             (
@@ -5990,6 +5998,16 @@ if os.environ.get("FAKE_GC_FAIL") == "1":
             self.assertEqual(waiting.returncode, 0, waiting.stderr)
             result = self._run_sweep(env)
             self.assertEqual(result.returncode, 0, result.stderr)
+            summary = self._json(result)
+            self.assertEqual(
+                summary,
+                {
+                    "action": "sweep",
+                    "ok": True,
+                    "rig": "d2b",
+                    "routed": 2,
+                },
+            )
             calls = json.loads((root / "gc-calls.json").read_text(encoding="utf-8"))
             self.assertEqual(
                 calls,
@@ -6149,6 +6167,8 @@ if os.environ.get("FAKE_GC_FAIL") == "1":
                 / "settle.md"
             ).read_text(encoding="utf-8"),
         ]).lower()
+        self.assertIn("exec \"$state_runner\" sweep", script)
+        self.assertNotIn("list-due", script)
         self.assertNotIn("while true", script)
         self.assertNotIn("sleep ", script)
         for marker in (

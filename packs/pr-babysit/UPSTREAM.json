@@ -60,7 +60,8 @@
     {
       "local": "skills/pr-babysit/scripts/pr-snapshot",
       "source": "skills/ce-babysit-pr/scripts/pr-snapshot",
-      "sha256": "fd8a0b403703714a1257530e7053461e437b662b0ef381f780b8850439d980e7"
+      "sha256": "fd8a0b403703714a1257530e7053461e437b662b0ef381f780b8850439d980e7",
+      "local_sha256": "98fd2ae7a7215968fe1c85f821338f8b568e3afb8b2b234cdf1ae97635d419dc"
     }
   ],
   "excluded_surfaces": [
@@ -79,6 +80,7 @@
     "Use only the caller-supplied state directory and one checkpoint per turn.",
     "Add native bounded repair dispatch, least-privilege credential fencing, and safe SHA/thread result handling.",
     "Treat every branch-currency item as a human decision, never an automatic claim.",
-    "Adapt report status examples from Unicode symbols and em dashes to ASCII text and hyphen punctuation while retaining the upstream source hash."
+    "Adapt report status examples from Unicode symbols and em dashes to ASCII text and hyphen punctuation while retaining the upstream source hash.",
+    "Retain only the deployed snapshot command and canonical identity flags while preserving all normalization helpers."
   ]
 }

@@ -202,9 +202,15 @@ The durable Beads watch states are `watching`, `waiting`, `repairing`,
 `claim -> act -> confirm`; an action child is linked with
 `bd dep <action-id> --blocks <watch-id>`, so native dependency-close wake
 resumes the watch only after confirmation. The `pr-babysit-sweep` cooldown
-order runs every `1m`, calls `list-due`, and routes
-`<rig>/pr-babysit.pr-babysitter` with `gc sling --nudge`; it is one short
-checkpoint, not a daemon or in-session watcher.
+order runs every `1m` through the canonical state-helper action:
+
+```text
+gc pr-babysit pr-babysit sweep --rig d2b --limit 32 --json
+```
+
+It lists due records, rechecks their routability, and routes
+`<rig>/pr-babysit.pr-babysitter`; it is one short checkpoint, not a daemon or
+in-session watcher.
 Watch `claim_status` values written by state code are `none`, `claimed`,
 `result-recorded`, `blocked`, and `exhausted`. Action records may also use
 `ambiguous` and `stale`. `closed` is the Beads issue status written when a

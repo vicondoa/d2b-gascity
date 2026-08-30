@@ -8,5 +8,7 @@ verified. Repair dispatch requires operator-attested least-privilege GitHub
 capability and rejects coupled Copilot credentials. `check-credentials` only
 checks the operator capability and credential-isolated validator attestations
 plus token separation; it never introspects fine-grained permissions.
+`sweep` validates the owning rig and bounded limit, lists due watches, and
+routes only eligible records to the binding-qualified babysitter.
 """
 run = "run.sh"

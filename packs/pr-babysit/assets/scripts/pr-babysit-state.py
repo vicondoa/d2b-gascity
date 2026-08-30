@@ -1489,23 +1489,12 @@ def block_claim_setup_failure(
             and existing[0].get("status") != "closed"
             and existing[1].get("watch_id") == watch_id
         ):
-            try:
-                metadata_updates(
-                    action_id,
-                    action_updates,
-                    status="blocked",
-                    assignee="",
-                )
-            except StateError:
-                try:
-                    metadata_updates(
-                        action_id,
-                        action_updates,
-                        status="blocked",
-                        assignee="",
-                    )
-                except StateError:
-                    pass
+            metadata_updates(
+                action_id,
+                action_updates,
+                status="blocked",
+                assignee="",
+            )
     except StateError:
         pass
 
@@ -1550,15 +1539,7 @@ def block_claim_setup_failure(
             assignee="",
         )
     except StateError:
-        try:
-            metadata_updates(
-                watch_id,
-                watch_updates,
-                status="blocked",
-                assignee="",
-            )
-        except StateError:
-            pass
+        pass
 
 
 def handoff(payload: dict[str, Any]) -> dict[str, Any]:
@@ -2233,22 +2214,11 @@ def publication_handoff(payload: dict[str, Any]) -> dict[str, Any]:
     target = handoff_target(context["rig"])
     receipt = receipt_updates(publication_bead_id, watch_id, target)
     existing_receipt_matches(publication_metadata, receipt)
-    existing_watch = show_issue_if_present(watch_id)
-    route_failed_rearm = False
-    if existing_watch is not None:
-        _, existing_watch_metadata = existing_watch
-        immutable_matches(existing_watch_metadata, identity)
-        existing_receipt_matches(existing_watch_metadata, receipt)
-        route_failed_rearm = (
-            state_from_metadata(existing_watch_metadata) == "blocked"
-            and existing_watch_metadata.get("terminal_reason") == "route-failed"
-            and not has_complete_receipt(existing_watch_metadata, receipt)
-        )
 
     handoff_payload = {
         **identity,
         "verified": True,
-        "rearm": rearm or route_failed_rearm,
+        "rearm": rearm,
         "observed_at": payload_value(payload, "observed_at") or iso_now(),
         "next_snapshot_at": payload_value(payload, "next_snapshot_at")
         or payload_value(payload, "observed_at")
@@ -2262,7 +2232,27 @@ def publication_handoff(payload: dict[str, Any]) -> dict[str, Any]:
             payload,
             "backstop_at",
         )
-    handoff_result = handoff(handoff_payload)
+    initial = initial_watch_metadata(identity, handoff_payload)
+    route_failed_rearm = False
+    with watch_lock(watch_id):
+        existing_watch = show_issue_if_present(watch_id)
+        if existing_watch is not None:
+            _, existing_watch_metadata = existing_watch
+            immutable_matches(existing_watch_metadata, identity)
+            existing_receipt_matches(existing_watch_metadata, receipt)
+            route_failed_rearm = (
+                state_from_metadata(existing_watch_metadata) == "blocked"
+                and existing_watch_metadata.get("terminal_reason") == "route-failed"
+                and not has_complete_receipt(existing_watch_metadata, receipt)
+            )
+        handoff_payload["rearm"] = rearm or route_failed_rearm
+        handoff_result = _handoff_locked(
+            handoff_payload,
+            identity,
+            rearm or route_failed_rearm,
+            watch_id,
+            initial,
+        )
     try:
         route_watch(target, watch_id)
     except StateError as error:
@@ -2878,14 +2868,19 @@ def dispatch_repair(payload: dict[str, Any]) -> dict[str, Any]:
     with watch_lock(watch_id):
         claim_result = _claim_action_locked(payload, watch_id)
         action_id = validate_watch_id(claim_result["action_id"])
-        _, watch_metadata = show_issue(watch_id)
-        _, action_metadata_value = show_issue(action_id)
-        action_context(
+        (
+            _,
+            action_id,
+            watch_metadata,
+            action_metadata_value,
+            generation,
+            action_kind,
+        ) = action_context(
             {
                 **payload,
                 "watch_id": watch_id,
                 "action_id": action_id,
-                "generation": generation_from_metadata(watch_metadata),
+                "generation": claim_result["generation"],
             }
         )
         recorded_thread_ids = action_metadata_value.get(
@@ -2909,10 +2904,6 @@ def dispatch_repair(payload: dict[str, Any]) -> dict[str, Any]:
                 "action": "dispatch-repair",
                 "formula_attached": True,
             }
-        generation = generation_from_metadata(watch_metadata)
-        action_kind = normalize_action_kind(
-            payload_value(payload, "action_kind", "kind"),
-        )
         try:
             formula_root = attach_repair_formula(
                 watch_metadata,
@@ -3730,6 +3721,63 @@ def list_due(payload: dict[str, Any]) -> dict[str, Any]:
     return {"ok": True, "action": "list-due", "watches": due}
 
 
+def sweep(payload: dict[str, Any]) -> dict[str, Any]:
+    rig = text_value(payload_value(payload, "rig"), "rig")
+    if rig not in RIGS:
+        fail("unknown rig")
+    limit_raw = payload_value(payload, "limit", "max_watches")
+    limit = (
+        DEFAULT_DUE_LIMIT
+        if limit_raw is None
+        else integer_value(limit_raw, "limit")
+    )
+    if limit > MAX_DUE_LIMIT:
+        fail(f"limit must not exceed {MAX_DUE_LIMIT}")
+
+    due_result = list_due(
+        {
+            **payload,
+            "rig": rig,
+            "limit": limit,
+        }
+    )
+    watches = due_result.get("watches")
+    if not isinstance(watches, list):
+        fail("list-due returned an invalid watch list", "beads-invalid-response")
+    if len(watches) > limit:
+        fail("list-due exceeded the sweep limit", "beads-invalid-response")
+
+    target = handoff_target(rig)
+    routed = 0
+    for watch in watches:
+        if not isinstance(watch, dict):
+            fail("list-due returned an invalid watch", "beads-invalid-response")
+        watch_id = watch.get("watch_id")
+        metadata = watch.get("metadata")
+        if (
+            not isinstance(watch_id, str)
+            or not WATCH_ID_RE.fullmatch(watch_id)
+            or not isinstance(metadata, dict)
+        ):
+            fail("list-due returned an unsafe watch", "beads-invalid-response")
+        if (
+            metadata.get("state") not in CHECKPOINT_STATES
+            or metadata.get("claim_status", "none") != "none"
+            or metadata.get("action_kind", "")
+            or metadata.get("action_fingerprint", "")
+        ):
+            fail("list-due returned a non-routable watch", "beads-invalid-response")
+        route_watch(target, watch_id)
+        routed += 1
+
+    return {
+        "ok": True,
+        "action": "sweep",
+        "rig": rig,
+        "routed": routed,
+    }
+
+
 def parse_cli_request(argv: list[str]) -> dict[str, Any]:
     action: str | None = None
     option_values: dict[str, Any] = {}
@@ -3855,6 +3903,7 @@ def parse_cli_request(argv: list[str]) -> dict[str, Any]:
                 "url",
                 "pr_number",
             ),
+            "sweep": ("rig", "limit"),
         }.get(request_action, ())
         for key, value in zip(positional_fields, positionals):
             data.setdefault(key, value)
@@ -3888,6 +3937,8 @@ def dispatch(payload: dict[str, Any]) -> dict[str, Any]:
         return checkpoint(payload)
     if action == "list-due":
         return list_due(payload)
+    if action == "sweep":
+        return sweep(payload)
     fail("unsupported action")
 
 

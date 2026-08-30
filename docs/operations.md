@@ -364,12 +364,13 @@ pushed SHA may be confirmed and closed; failed or ambiguous actions remain
 human blockers.
 
 The `pr-babysit-sweep` cooldown order in the rig-imported pack runs every
-`1m`, calls `list-due`, and routes only due `watching` or `waiting` records
-with no claim:
+`1m` through the canonical bounded `sweep` state action. It validates the
+rig and limit, lists due records, rechecks that each is still a routable
+`watching` or `waiting` record with no claim, and routes the binding-qualified
+target:
 
 ```text
-gc pr-babysit pr-babysit list-due --rig d2b --limit 32 --json
-gc sling --nudge d2b/pr-babysit.pr-babysitter <watch-id> --no-formula --json
+gc pr-babysit pr-babysit sweep --rig d2b --limit 32 --json
 ```
 
 One checkpoint is one fresh snapshot, one ordered decision pass, and one

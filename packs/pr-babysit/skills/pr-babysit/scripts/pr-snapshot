@@ -7,8 +7,7 @@ only; it is never interpreted as a command.
 
 The state directory is supplied by the caller and is the only durable
 location used by this script.  ``snapshot`` is one fetch/diff/write operation.
-``watch`` is a single checkpoint tick that emits a wake line when the next
-skill turn should inspect the result.  Neither command owns a lifecycle.
+This helper does not own a lifecycle.
 """
 
 from __future__ import annotations
@@ -41,10 +40,6 @@ FAILING = {
     "TIMED_OUT",
 }
 OPEN = "open"
-DISPATCHED = "dispatched"
-NEEDS_HUMAN = "needs-human"
-CLAIMED = "claimed"
-CONFIRMED = "confirmed"
 ISO_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
 GITHUB_TIMEOUT_SECONDS = 30
 MAX_GRAPHQL_PAGES = 20
@@ -1348,101 +1343,6 @@ def cmd_snapshot(args: argparse.Namespace) -> None:
     _print_json(_run_snapshot(args))
 
 
-def _verify_mark_invocation(
-    state: dict[str, Any], args: argparse.Namespace
-) -> None:
-    if (
-        state.get("invocation_id") != args.invocation_id
-        or state.get("started_at") != args.session_started_at
-        or float(state.get("invocation_budget_seconds", 0))
-        != float(args.invocation_budget_seconds)
-    ):
-        _error("invocation values do not match persisted state")
-    if args.head_sha and args.head_sha != state.get("head_sha"):
-        _error("mark rejected: snapshot head SHA is stale")
-
-
-def cmd_mark(args: argparse.Namespace) -> None:
-    with _locked_state(Path(args.state_dir), args.pr, args.repo) as state:
-        _verify_mark_invocation(state, args)
-        disposition = args.disposition
-        if args.thread:
-            record = state.setdefault("threads", {}).get(args.thread)
-            if record is None:
-                _error(f"unknown thread: {args.thread}")
-            record["disposition"] = disposition
-        if args.comment:
-            record = state.setdefault("feedback", {}).get(args.comment)
-            if record is None:
-                _error(f"unknown comment: {args.comment}")
-            record["disposition"] = disposition
-        if args.check:
-            head = state.get("head_sha") or ""
-            checks = state.setdefault("ci_dispatched", {}).setdefault(head, [])
-            if disposition == DISPATCHED:
-                if args.check not in checks:
-                    checks.append(args.check)
-            else:
-                state["ci_dispatched"][head] = [
-                    key for key in checks if key != args.check
-                ]
-        if args.currency_key:
-            items = (
-                state.setdefault("branch_currency_state", {})
-                .setdefault("items", {})
-            )
-            item = items.get(args.currency_key)
-            if item is None:
-                _error(f"unknown currency item: {args.currency_key}")
-            item["disposition"] = args.currency_disposition or disposition
-            item["attention"] = None
-        if args.residual_file:
-            try:
-                residual = json.loads(
-                    Path(args.residual_file).read_text(encoding="utf-8")
-                )
-            except (OSError, json.JSONDecodeError) as exc:
-                _error(f"cannot read residual: {exc}")
-            if not isinstance(residual, dict):
-                _error("residual must contain a JSON object")
-            state.setdefault("needs_human_residuals", []).append(residual)
-        state["last_action"] = "mark"
-        _print_json({"ok": True, "head_sha": state.get("head_sha")})
-
-
-def cmd_watch(args: argparse.Namespace) -> None:
-    if not args.watch_id:
-        _error("watch requires --watch-id from the wake payload")
-    result = _run_snapshot(args)
-    reasons: list[str] = []
-    if result.get("pr_state") in {"MERGED", "CLOSED"}:
-        reasons.append("terminal")
-    if result["counts"]["threads"] or result["counts"]["comments"]:
-        reasons.append("feedback")
-    if result["counts"]["ci"]:
-        reasons.append("ci")
-    if result.get("branch_currency"):
-        reasons.append("branch-currency")
-    if result.get("base_ref_blocker") or result.get("identity_blocker"):
-        reasons.append("needs-human")
-    if result.get("needs_human_residuals"):
-        reasons.append("needs-human")
-    if not reasons and result.get("all_checks_ok"):
-        reasons.append("merge-ready")
-    if reasons:
-        payload = {
-            "reason": reasons[0],
-            "reasons": reasons,
-            "watch_id": args.watch_id,
-            "head_sha": result.get("head_sha"),
-            "url": result.get("url"),
-            "tick": result.get("tick"),
-        }
-        print(f"BABYSIT_WAKE {json.dumps(payload, sort_keys=True)}")
-    else:
-        _print_json(result)
-
-
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="pr-snapshot")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -1452,16 +1352,15 @@ def _parser() -> argparse.ArgumentParser:
         command.add_argument("--repo")
         command.add_argument(
             "--expected-base",
-            "--expected-base-ref",
-            "--expected-base-name",
-            "--base-ref",
             dest="expected_base",
         )
-        command.add_argument("--expected-head-ref", "--head-ref")
+        command.add_argument(
+            "--expected-head-ref",
+            dest="expected_head_ref",
+        )
         command.add_argument(
             "--expected-head-sha",
-            "--expected-head",
-            "--head-sha",
+            dest="expected_head_sha",
         )
         command.add_argument("--watch-id")
         command.add_argument("--state-dir")
@@ -1474,34 +1373,6 @@ def _parser() -> argparse.ArgumentParser:
     snapshot = sub.add_parser("snapshot")
     add_snapshot_options(snapshot)
     snapshot.set_defaults(handler=cmd_snapshot)
-
-    mark = sub.add_parser("mark")
-    mark.add_argument("--pr", type=int, default=0)
-    mark.add_argument("--repo")
-    mark.add_argument("--state-dir", required=True)
-    mark.add_argument("--invocation-id", required=True)
-    mark.add_argument("--session-started-at", required=True)
-    mark.add_argument("--invocation-budget-seconds", type=float, required=True)
-    mark.add_argument("--head-sha")
-    mark.add_argument("--thread")
-    mark.add_argument("--comment")
-    mark.add_argument("--check")
-    mark.add_argument(
-        "--disposition",
-        choices=[OPEN, DISPATCHED, NEEDS_HUMAN],
-        default=DISPATCHED,
-    )
-    mark.add_argument("--currency-key")
-    mark.add_argument(
-        "--currency-disposition",
-        choices=[OPEN, CLAIMED, CONFIRMED],
-    )
-    mark.add_argument("--residual-file")
-    mark.set_defaults(handler=cmd_mark)
-
-    watch = sub.add_parser("watch")
-    add_snapshot_options(watch)
-    watch.set_defaults(handler=cmd_watch)
     return parser
 
 

@@ -126,6 +126,13 @@ bead must show `merge_strategy=pr`; its `metadata.target=v3` or
 `metadata.target=main` is publication metadata, not the handoff routing
 target.
 
+The cooldown smoke invokes the canonical bounded state action and verifies
+that it lists, rechecks, and routes due watches in deterministic order:
+
+```text
+gc pr-babysit pr-babysit sweep --rig d2b --limit 32 --json
+```
+
 Credential-free tests use fake GitHub, Beads, and Gas City commands to cover
 both d2b/`v3` and city-source/`main`: duplicate handoff, one-writer action
 claims, fresh checkpoint ordering, feedback-before-CI, current-head repair,
