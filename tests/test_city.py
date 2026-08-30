@@ -685,22 +685,41 @@ class RootPortableCityTests(unittest.TestCase):
                 self.assertNotIn(key, provider)
         self.assertEqual(
             {
-                name: provider["base"]
+                name: {
+                    "base": provider["base"],
+                    "env": provider["env"],
+                }
                 for name, provider in config["providers"].items()
                 if name != "codex"
             },
             {
-                "deep-thinker": "copilot-deep-sol",
-                "reviewer": "copilot-review-grok",
-                "solid-worker": "copilot-solid-luna",
-                "fast-worker": "copilot-fast-luna",
+                "deep-thinker": {
+                    "base": "copilot-deep-sol",
+                    "env": {"GH_TOKEN": "", "GITHUB_TOKEN": ""},
+                },
+                "reviewer": {
+                    "base": "copilot-review-grok",
+                    "env": {"GH_TOKEN": "", "GITHUB_TOKEN": ""},
+                },
+                "solid-worker": {
+                    "base": "copilot-solid-luna",
+                    "env": {"GH_TOKEN": "", "GITHUB_TOKEN": ""},
+                },
+                "fast-worker": {
+                    "base": "copilot-fast-luna",
+                    "env": {"GH_TOKEN": "", "GITHUB_TOKEN": ""},
+                },
             },
         )
         codex = config["providers"]["codex"]
         self.assertEqual(codex["base"], "builtin:codex")
         self.assertEqual(codex["ready_delay_ms"], 0)
         self.assertEqual(codex["option_defaults"], {"model": ""})
-        for key in ("args", "command", "env"):
+        self.assertEqual(
+            codex["env"],
+            {"GH_TOKEN": "", "GITHUB_TOKEN": ""},
+        )
+        for key in ("args", "command"):
             self.assertNotIn(key, codex)
         self.assertNotIn("COPILOT_GITHUB_TOKEN", text)
 
@@ -10307,8 +10326,23 @@ else:
             },
         )
         by_id = {step["id"]: step for step in steps}
+        repair_description = " ".join(
+            by_id["repair"]["description"].split()
+        )
         self.assertIn("head_repository", formula["vars"])
         self.assertEqual(by_id["repair"]["needs"], ["prepare-worktree"])
+        self.assertIn(
+            "Run exactly `make check` with no arguments",
+            repair_description,
+        )
+        self.assertIn(
+            "Create the local repair commit",
+            repair_description,
+        )
+        self.assertIn(
+            "validation step independently revalidates",
+            repair_description,
+        )
         self.assertEqual(by_id["review"]["needs"], ["repair"])
         self.assertEqual(
             by_id["validate-and-report"]["needs"],

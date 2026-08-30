@@ -16,21 +16,36 @@ GITHUB_TOKEN = ""
 [providers]
 [providers.deep-thinker]
 base = "copilot-deep-sol"
+[providers.deep-thinker.env]
+GH_TOKEN = ""
+GITHUB_TOKEN = ""
 
 [providers.reviewer]
 base = "copilot-review-grok"
+[providers.reviewer.env]
+GH_TOKEN = ""
+GITHUB_TOKEN = ""
 
 [providers.solid-worker]
 base = "copilot-solid-luna"
+[providers.solid-worker.env]
+GH_TOKEN = ""
+GITHUB_TOKEN = ""
 
 [providers.fast-worker]
 base = "copilot-fast-luna"
+[providers.fast-worker.env]
+GH_TOKEN = ""
+GITHUB_TOKEN = ""
 
 [providers.codex]
 base = "builtin:codex"
 ready_delay_ms = 0
 [providers.codex.option_defaults]
 model = ""
+[providers.codex.env]
+GH_TOKEN = ""
+GITHUB_TOKEN = ""
 
 [[patches.agent]]
 dir = "d2b"
