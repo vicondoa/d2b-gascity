@@ -63,16 +63,16 @@ verify_projection() {
   marker_value="$(cat "$marker")" || blocker "cannot read $marker"
   [ "$marker_value" = "$commit" ] || blocker "wrong commit in $marker"
 
-  verify_file '8922231e0f85a889895397d8472a35484a96373ecb2efc5d513767319545e511' 'SKILL.md'
+  verify_file 'c13da9a8f8d02c36de2d8f5a10ea23dd57a8f8074bb2bef917990cc34eb02806' 'SKILL.md'
   verify_file '158a3624dd0150de39bdaba507a7685bb887c6f28899b38b1c268492a5a66ceb' 'references/branch-currency.md'
   verify_file '180ff7b0d7da65b126d584d12af769d9837b4464584b1eefa3a7764622f05499' 'references/envelope.md'
   verify_file 'aebd3a9955d7fb53e94512e4bdc998dfe7e1ca725fbfde6f902fde8382903034' 'references/pipeline.md'
   verify_file '31d79d87f9e63940714656cb35af5746aed53cc6f263de17a60b4f0e04e6362f' 'references/report.md'
-  verify_file '6d9b01a8871bc0cfdcca66e16a9b6d338d4bbb74e0913234fad120fdffcef03c' 'references/settle.md'
-  verify_file 'c026058ecccf8bc97ea4de8edcd380e5652b7011469bee55b449a76f2a7e9141' 'references/setup.md'
-  verify_file '74fe9650e6d5904ecb60a85ac0513f8b53899c5a7b4a2e673fb23a949ffc8d91' 'references/tick.md'
+  verify_file '325165b26f0945dc988df09bc8ba6dbc1baad1311a0d39d946b60f3253923e1f' 'references/settle.md'
+  verify_file 'd3eee9d0b5a132738613b353de879cdb52ceab1394d274101de7749d8377818c' 'references/setup.md'
+  verify_file '1111fdd1f0852a6b895ed873bd9dd8e4589c42d1c53d23502795ba78041afe96' 'references/tick.md'
   verify_file 'ffa2bbb69316326c9d6f52a6834008c77e095607678292e228f6cd99ad748932' 'references/watch-loop.md'
-  verify_file 'b8aaff26d9542181446b86b11280f5330fd7d532fdfd2027a2afabdfd9e4bb97' 'scripts/pr-snapshot'
+  verify_file '485f39b22e88f50e8c6e03c154e312c049f86cea64af81941d1810548fbaccaf' 'scripts/pr-snapshot'
 }
 
 for projection in \
@@ -93,7 +93,7 @@ selector. Do not accept a PR number, URL, current branch, or message text as a
 replacement. The first operation after the projection gate must be exactly:
 
 ```text
-gc pr-babysit pr-babysit show --watch-id <watch-id> --json
+gc core-city pr-babysit show --watch-id <watch-id> --json
 ```
 
 Use only the watch ID from the wake payload. Require the JSON response to
@@ -171,8 +171,9 @@ directory.
 Use the verified show fields to take one fresh snapshot. The first snapshot
 starts the invocation; later snapshots reuse its recorded invocation values:
 
-```text
-scripts/pr-snapshot snapshot \
+```sh
+SNAPSHOT_JSON="$(
+  "$GC_DIR/.github/skills/pr-babysit/scripts/pr-snapshot" snapshot \
   --watch-id <watch-id> \
   --pr <metadata.pr_number> \
   --repo <metadata.github_host>/<metadata.owner>/<metadata.repository> \
@@ -181,13 +182,37 @@ scripts/pr-snapshot snapshot \
   --expected-head-sha <metadata.head_sha> \
   --state-dir "$GC_DIR/state/<watch-id>" \
   --start-invocation
+)"
+```
+
+For a later snapshot, read all three invocation values from the prior JSON:
+
+```sh
+INVOCATION_ID="$(printf '%s\n' "$SNAPSHOT_JSON" | jq -er '.invocation_id')"
+SESSION_STARTED_AT="$(
+  printf '%s\n' "$SNAPSHOT_JSON" | jq -er '.invocation_started_at'
+)"
+INVOCATION_BUDGET_SECONDS="$(
+  printf '%s\n' "$SNAPSHOT_JSON" | jq -er '.invocation_budget_seconds'
+)"
+"$GC_DIR/.github/skills/pr-babysit/scripts/pr-snapshot" snapshot \
+  --watch-id <watch-id> \
+  --pr <metadata.pr_number> \
+  --repo <metadata.github_host>/<metadata.owner>/<metadata.repository> \
+  --expected-base <metadata.base_ref> \
+  --expected-head-ref <metadata.head_ref> \
+  --expected-head-sha <metadata.head_sha> \
+  --state-dir "$GC_DIR/state/<watch-id>" \
+  --invocation-id "$INVOCATION_ID" \
+  --session-started-at "$SESSION_STARTED_AT" \
+  --invocation-budget-seconds "$INVOCATION_BUDGET_SECONDS"
 ```
 
 Every checkpoint is read-only with respect to GitHub and the target source.
 After the fresh snapshot, use this exact command with all required fields:
 
 ```text
-gc pr-babysit pr-babysit checkpoint \
+gc core-city pr-babysit checkpoint \
   --watch-id <watch-id> \
   --expected-generation <metadata.generation> \
   --expected-head-sha <metadata.head_sha> \
@@ -195,19 +220,31 @@ gc pr-babysit pr-babysit checkpoint \
   --observed-at <snapshot-time-RFC3339> \
   --next-snapshot-at <next-time-RFC3339> \
   --to <watching|waiting|merge-ready|blocked|terminal|exhausted> \
+  --merge-ready-evidence '<JSON readiness object when --to merge-ready>' \
   --json
 ```
 
 The required fields are `watch_id`, `expected_generation`,
 `expected_head_sha`, `observed_head_sha`, `observed_at`, `next_snapshot_at`,
-and `to`. Use `reason` when the state command requires it. Do not switch refs,
-edit files, create a worktree, push, or invoke branch currency from a
-checkpoint.
+and `to`. A `merge-ready` checkpoint additionally requires a structured
+current-snapshot `merge_ready_evidence` object with exact
+`current_head_sha`, `mergeability_certain`, `branch_clean`,
+`required_checks_terminal`, `required_checks_successful`,
+`no_actionable_feedback`, `no_pending_human_interaction`, `no_currency_item`,
+and `quiet_window_satisfied`; its head must match the snapshot's
+`merge_ready_evidence.current_head_sha` and all booleans must be true. Pass
+the `merge_ready_evidence` object emitted by that same snapshot. Use `reason`
+when the state command requires it. Do
+not switch refs, edit files, create a worktree, push, or invoke branch
+currency from a checkpoint.
 
-Only an action-scoped `dispatch-repair` may create or reuse a repair worktree:
+Only an action-scoped `dispatch-repair` may create or reuse a repair worktree.
+Derive a repair fingerprint from the CI check `key` or a stable review
+thread, comment, or review ID emitted by the snapshot. Command text is never
+used as a fingerprint.
 
 ```text
-gc pr-babysit pr-babysit dispatch-repair \
+gc core-city pr-babysit dispatch-repair \
   --watch-id <watch-id> \
   --action-kind <ci|review> \
   --fingerprint <normalized-action-fingerprint> \
@@ -238,7 +275,7 @@ GitHub review threads. After `confirm-action` succeeds for a review repair,
 persist each explicitly addressed feedback item in local watch state:
 
 ```text
-scripts/pr-snapshot mark \
+"$GC_DIR/.github/skills/pr-babysit/scripts/pr-snapshot" mark \
   --watch-id <watch-id> \
   --pr <metadata.pr_number> \
   --repo <metadata.github_host>/<metadata.owner>/<metadata.repository> \

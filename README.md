@@ -36,11 +36,11 @@ is connected only through native `gc rig add`; its path is live site state in
 |   |-- core-city/
 |   |   |-- model-tiers.base.toml
 |   |   |-- commands/gen-model-tiers/
+|   |   |-- commands/pr-babysit/
 |   |   `-- template-fragments/
 |   `-- pr-babysit/
 |       |-- pack.toml
 |       |-- agents/pr-babysitter/
-|       |-- commands/pr-babysit/
 |       |-- formulas/
 |       |-- orders/
 |       `-- skills/pr-babysit/
@@ -164,6 +164,10 @@ that way. The policy requires pull requests and must apply to administrators.
 
 The enabled target-only capability is the rig-imported `pr-babysit` Pack v2
 pack. It is imported once by each rig, not by the city or `packs/core-city`.
+The deterministic state CLI is exposed by the already city-scoped
+`core-city` pack as `gc core-city pr-babysit <action>` and delegates to the
+rig pack's sibling state helper; the rig pack has no second command
+entrypoint.
 The binding-qualified native identities are
 `d2b/pr-babysit.pr-babysitter` and
 `city-source/pr-babysit.pr-babysitter`; each is a fresh, on-demand
@@ -195,13 +199,13 @@ repeated complete receipt does not wake again. Publication must verify that
 receipt before it closes:
 
 ```text
-gc pr-babysit pr-babysit publication-handoff \
+gc core-city pr-babysit publication-handoff \
   --rig d2b --publication-bead-id <publication-bead-id> \
   --url <pull-request-url> --pr-number <number> --json
-gc pr-babysit pr-babysit verify-handoff \
+gc core-city pr-babysit verify-handoff \
   --rig d2b --publication-bead-id <publication-bead-id> \
   --url <pull-request-url> --pr-number <number> --json
-gc pr-babysit pr-babysit show --watch-id <watch-id> --json
+gc core-city pr-babysit show --watch-id <watch-id> --json
 ```
 
 The durable Beads watch states are `watching`, `waiting`, `repairing`,
@@ -212,7 +216,7 @@ resumes the watch only after confirmation. The `pr-babysit-sweep` cooldown
 order runs every `1m` through the canonical state-helper action:
 
 ```text
-gc pr-babysit pr-babysit sweep --rig d2b --limit 32 --json
+gc core-city pr-babysit sweep --rig d2b --limit 32 --json
 ```
 
 It lists due records, rechecks their routability, and routes
@@ -231,6 +235,9 @@ Each checkpoint takes one fresh snapshot, then handles terminal state, head
 reconciliation, review feedback, current-head CI, exact branch currency, and
 one state write in that order. `mol-pr-babysit-repair` is a bounded Formula v2
 with prepare, repair, review, validate-and-report, and close-action steps.
+The Formula workflow attaches to the durable watch bead, not the action
+child; the action child carries the claim and blocks the watch until
+confirmation.
 It runs `make check` before a normal push to the existing PR head and records
 an independently recorded reviewer verdict and candidate SHA before pushing.
 CI repairs get three attempts per head and fingerprint;
@@ -260,7 +267,7 @@ the babysitter records `handled` or `ignored` feedback disposition locally
 with the current snapshot content identity; changed content reopens the item.
 
 The non-network credential check is
-`gc pr-babysit pr-babysit check-credentials --json` with the operator
+`gc core-city pr-babysit check-credentials --json` with the operator
 attestation `contents-write,pull-requests-read` and the validator attestation;
 it verifies separation but does not introspect fine-grained permissions.
 

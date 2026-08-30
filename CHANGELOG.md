@@ -13,6 +13,9 @@ and this project follows semantic versioning where releases are published.
   qualified babysitter sessions, workdir-local dual Copilot projection,
   deterministic publication handoff and verification receipts, Beads watch
   and action state, the `1m` checkpoint sweep, and bounded Formula v2 repair.
+- Exposed the deterministic state CLI through the city-scoped `core-city`
+  pack as `gc core-city pr-babysit <action>` and removed the unreachable rig
+  command entrypoint.
 - Clarified that a handoff receipt targets
   `<rig>/pr-babysit.pr-babysitter`, watch metadata records
   `base_ref=v3` or `base_ref=main`, and publication metadata requires

@@ -95,6 +95,14 @@ blockers in v1. Repair also requires an absolute, non-symlink, executable
 a credential- and network-isolated environment. These local Pack v2 files are
 repository-owned Apache-2.0 content unless a file retains an upstream notice.
 
+The deterministic state CLI is exposed through the already city-scoped
+`packs/core-city` pack as `gc core-city pr-babysit <action>`. Its wrapper
+resolves only the repository-relative sibling
+`packs/pr-babysit/assets/scripts/pr-babysit-state.py` and fails closed when
+that helper is absent, not executable, or outside the expected packs root.
+The rig-imported pack does not expose a second command entrypoint and remains
+the owner of the agent, skill, order, formula, helper, and workflows.
+
 The excluded surfaces are stack and stack-landing behavior; merge,
 force-push, and raw-rebase mutations; workflow approval; delegation to host
 plugins; user-global skill installation; scheduler or daemon lifecycle; and

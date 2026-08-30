@@ -195,7 +195,7 @@ The official babysitting skill already defines a strong snapshot-first watch con
 ### Key Technical Decisions
 
 - KTD1. **Vendor the target-only subset from `compound-engineering-v3.23.4` at commit `33d9bd92689d60580e732890f94466e5793385b1`.** Retain the MIT notice and record a file allowlist with hashes. Remove stack, land, plugin-delegation, and `/tmp`-durability assumptions. Governs R1-R4, R13, R24. (session-settled: user-directed - chosen over waiting for upstream packaging: the repository will own and adapt the capability.)
-- KTD2. **Create a dedicated rig-imported `pr-babysit` pack.** Import it independently on `d2b` and `city-source`; do not add it to `packs/core-city` and do not import it at both city and rig scope. Governs R2, R5, R21, R22.
+- KTD2. **Create a dedicated rig-imported `pr-babysit` pack.** Import its agent, skill, order, formula, state helper, and workflows independently on `d2b` and `city-source`; expose only the deterministic CLI through the already city-scoped `packs/core-city` pack, without importing the rig pack city-wide or exposing both command scopes. Governs R2, R5, R21, R22.
 - KTD3. **Run one on-demand `pr-babysitter` agent per rig.** Set `max_active_sessions = 1`, use `fast-worker`, and place its work directory under the rig's ignored `.gc/agents/` state. One stable Beads watch record owns each PR. Governs R7-R10, R22, R25.
 - KTD4. **Project the skill during session setup.** An idempotent setup script replaces only the owned `pr-babysit` directories under the isolated workdir's `.github/skills` and `.agents/skills`; it never writes the rig root or a user-global directory. The agent fails closed when native Copilot discovery cannot be verified. Governs R9, R10, R24.
 - KTD5. **Use checkpoint ticks instead of an in-session watcher process.** A short cooldown order finds due watch beads and nudges the rig babysitter. Each turn takes one snapshot, persists one decision, then sleeps or exits. Native dependency-close nudges wake repair continuations. Governs R5, R8, R11, R19, R25, R26.
@@ -209,6 +209,13 @@ The official babysitting skill already defines a strong snapshot-first watch con
 ### High-Level Technical Design
 
 The local pack owns capability and orchestration content. Gas City owns its execution lifecycle.
+
+The rig-imported pack owns the babysitter agent, skill, order, formula, state
+helper, and workflow assets. Because Gas City v1.4.1 resolves rig-imported
+commands from a rig context incorrectly, the deterministic state CLI is
+exposed by `packs/core-city` as `gc core-city pr-babysit <action>`. Its wrapper
+delegates to the repository-relative sibling helper and fails closed if that
+helper is absent, not executable, or outside the expected `packs` root.
 
 ```mermaid
 flowchart TB
@@ -297,6 +304,7 @@ Do not store review bodies, check logs, credentials, prompts, model responses, h
 - **Use a GitHub webhook service:** Rejected because it adds a new service and host configuration.
 - **Extend the official `publish` formula under the same name:** Rejected because formula resolution would become circular or replace the official formula.
 - **One dynamic session per PR:** Deferred because v1.4.1 cannot mint named sessions per PR without service changes; stable watch beads preserve per-PR ownership while one rig session serializes work.
+- **A rig-imported CLI command:** Rejected because v1.4.1 reports `json_command_not_found` for the command from the production rig context; the city-scoped wrapper preserves the rig pack ownership boundary without dual-importing it.
 
 ### System-Wide Impact
 
@@ -333,7 +341,7 @@ Do not store review bodies, check logs, credentials, prompts, model responses, h
 
 ### Planning Assumptions
 
-- Pack v2 rig imports can supply the agent, order, formula, command, and skill catalog without service changes.
+- Pack v2 rig imports supply the agent, order, formula, and skill catalog without service changes; the deterministic state command is supplied by the already city-scoped core pack because v1.4.1 cannot resolve the rig-imported command from the production rig context.
 - The publication asset shadow remains the narrowest supported seam for requiring the handoff after PR creation.
 - A workdir-local Copilot skill projection is discoverable; U2 must prove this before the feature is enabled.
 - Stable explicit Beads IDs provide sufficient create-time atomicity, and one active babysitter session per rig serializes mutations.
@@ -360,6 +368,11 @@ Do not store review bodies, check logs, credentials, prompts, model responses, h
 ## Output Structure
 
 ```text
+packs/core-city/
+|-- commands/pr-babysit/
+|   |-- command.toml
+|   `-- run.sh
+
 packs/pr-babysit/
 |-- pack.toml
 |-- LICENSE
@@ -371,9 +384,6 @@ packs/pr-babysit/
 |   |-- SKILL.md
 |   |-- references/
 |   `-- scripts/pr-snapshot
-|-- commands/pr-babysit/
-|   |-- command.toml
-|   `-- run.sh
 |-- formulas/mol-pr-babysit-repair.toml
 |-- orders/pr-babysit-sweep.toml
 |-- assets/scripts/
@@ -430,7 +440,7 @@ cities/d2b-gascity/
 - **Goal:** Provide restart-safe, idempotent PR watch records and action claims.
 - **Requirements:** R6-R8, R17, R21, R23-R26; AE1, AE3, AE6, AE7.
 - **Dependencies:** U1.
-- **Files:** `packs/pr-babysit/commands/pr-babysit/command.toml`, `packs/pr-babysit/commands/pr-babysit/run.sh`, `packs/pr-babysit/assets/scripts/pr-babysit-state.py`, `tests/test_city.py`.
+- **Files:** `packs/core-city/commands/pr-babysit/command.toml`, `packs/core-city/commands/pr-babysit/run.sh`, `packs/pr-babysit/assets/scripts/pr-babysit-state.py`, `tests/test_city.py`.
 - **Approach:** Add command actions for handoff, snapshot persistence, action claim, repair result, terminal transition, and due-watch listing. Use canonical GitHub identity to derive stable watch and action bead IDs. Allowlist metadata fields. Treat head or generation changes as invalidation of stale claims.
 - **Execution note:** Implement state transitions test-first with a fake `gh` command and isolated Beads fixtures.
 - **Patterns to follow:** Explicit-ID Beads creation; metadata update patterns in `mol-d2b-discord-fix-issue.toml`; JSON-returning Pack v2 commands.

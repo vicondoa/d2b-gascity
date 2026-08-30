@@ -60,11 +60,16 @@ per rig: `d2b/pr-babysit.pr-babysitter` and
 `.github/skills/pr-babysit` and `.agents/skills/pr-babysit`. The mandatory
 projection gate runs before any GitHub or repository action.
 
-Publication calls the native pack command
-`gc pr-babysit pr-babysit publication-handoff` and must follow it with
-`gc pr-babysit pr-babysit verify-handoff` before closing. The handoff receipt
+The city-scoped `core-city` pack exposes the deterministic state command
+`gc core-city pr-babysit <action>`. It delegates only to the sibling helper
+owned by the rig-imported pack; the rig pack remains the owner of the agent,
+skill, order, formula, state helper, and workflows.
+
+Publication calls the native city-scoped command
+`gc core-city pr-babysit publication-handoff` and must follow it with
+`gc core-city pr-babysit verify-handoff` before closing. The handoff receipt
 binds the verified repository, PR number or URL, base, head, current SHA,
-watch bead, and babysitter identity. Use `gc pr-babysit pr-babysit show` to
+watch bead, and babysitter identity. Use `gc core-city pr-babysit show` to
 inspect safe watch metadata.
 
 Watch states are `watching`, `waiting`, `repairing`, `merge-ready`, `blocked`,

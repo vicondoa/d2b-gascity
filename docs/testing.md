@@ -66,7 +66,13 @@ resolved d2b Discord resume formula and the Gas City pack `build-basic` and
 documented Discord command contracts. It pre-seeds a separate city-source
 fixture in `.gc/site.toml`, provisions both fixture rigs through native
 `gc rig add`, and confirms that paths stay in ignored site state. The smoke
-does not start services or use credentials.
+does not start services or use credentials. The PR babysit check invokes
+`gc core-city pr-babysit show` from the initialized d2b rig context with
+`--city` and `--rig`; the city-scoped command delegates to the sibling helper
+while the rig-imported pack remains the owner of the other surfaces. It never
+injects a second `pr-babysit` import or changes the production city. If pinned
+Gas City `v1.4.1` cannot resolve that topology, the smoke reports an explicit
+blocker instead of changing the topology.
 
 ## CI inputs
 
@@ -93,8 +99,8 @@ rig-imported pack owns only its bounded checkpoint and repair seams.
 
 ### PR babysitting
 
-The enabled smoke exercises the rig-imported `pr-babysit` pack through the
-native surfaces, not a separate service:
+The enabled smoke exercises the rig-imported `pr-babysit` pack and its
+city-scoped command through native surfaces, not a separate service:
 
 ```text
 gc config show --json
@@ -110,10 +116,10 @@ mandatory projection gate is the first action and fails closed before `gh`,
 Git, or a push. Publication uses one deterministic receipt:
 
 ```text
-gc pr-babysit pr-babysit publication-handoff \
+gc core-city pr-babysit publication-handoff \
   --rig d2b --publication-bead-id <publication-bead-id> \
   --url <pull-request-url> --pr-number <number> --json
-gc pr-babysit pr-babysit verify-handoff \
+gc core-city pr-babysit verify-handoff \
   --rig d2b --publication-bead-id <publication-bead-id> \
   --url <pull-request-url> --pr-number <number> --json
 ```
@@ -133,7 +139,7 @@ The cooldown smoke invokes the canonical bounded state action and verifies
 that it lists, rechecks, and routes due watches in deterministic order:
 
 ```text
-gc pr-babysit pr-babysit sweep --rig d2b --limit 32 --json
+gc core-city pr-babysit sweep --rig d2b --limit 32 --json
 ```
 
 Credential-free tests use fake GitHub, Beads, and Gas City commands to cover
@@ -151,6 +157,13 @@ threads. The bounded `pr-snapshot mark` command records local
 `handled` or `ignored` feedback by stable item ID and content identity, and a
 changed content identity reopens the item.
 
+The Formula v2 repair workflow attaches to the durable watch bead, not to the
+action child; the child carries the claim and blocks the watch until
+confirmation. A `merge-ready` checkpoint must carry structured current
+snapshot evidence for the current head, certain mergeability, clean branch,
+terminal and successful required checks, no actionable feedback, no pending
+human interaction, no currency item, and a satisfied quiet window.
+
 The first version does not call `update-branch`. Repair requires an
 operator-attested identity with Contents write and Pull requests read only;
 the agent cannot introspect fine-grained permissions. Pull requests write,
@@ -163,7 +176,11 @@ executable file and set
 `make check` in a credential- and network-isolated environment. A missing
 validator blocks repair, as do an invalid or failed validator. Fork or
 cross-repository PRs are human blockers in v1.
-The credential-free `gc pr-babysit pr-babysit check-credentials --json`
+Before credentialed fetch or push, the repair workflow verifies that `origin`
+and any configured push URL map exactly to the recorded GitHub
+host/owner/repository, disables Git hooks with
+`-c core.hooksPath=/dev/null`, and pushes with `--no-verify`.
+The credential-free `gc core-city pr-babysit check-credentials --json`
 command verifies the operator capability and validator attestations plus
 token separation only; it does not replace the validator run.
 

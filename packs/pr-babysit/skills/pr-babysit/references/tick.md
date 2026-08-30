@@ -8,16 +8,21 @@ The checkpoint itself is read-only with respect to GitHub and the target
 source. Use the canonical state command only after the snapshot:
 
 ```text
-gc pr-babysit pr-babysit checkpoint --watch-id <watch-id> \
+gc core-city pr-babysit checkpoint --watch-id <watch-id> \
   --expected-generation <generation> --expected-head-sha <head-sha> \
   --observed-head-sha <observed-head-sha> --observed-at <RFC3339> \
-  --next-snapshot-at <RFC3339> --to <state> --json
+  --next-snapshot-at <RFC3339> --to <state> \
+  --merge-ready-evidence '<JSON readiness object when --to merge-ready>' \
+  --json
 ```
 
 ## Ordering invariant
 
-1. **Snapshot first.** Run `scripts/pr-snapshot snapshot` with the fixed
-   invocation values.
+1. **Snapshot first.** Run the projected
+   `$GC_DIR/.github/skills/pr-babysit/scripts/pr-snapshot snapshot` with the
+   fixed identity. The first snapshot uses `--start-invocation`; later
+   snapshots must pass `--invocation-id`, `--session-started-at`, and
+   `--invocation-budget-seconds` copied from the prior JSON result.
 2. **Terminal state.** `MERGED` and `CLOSED` transition the watch to the
    absorbing `terminal` state.
 3. **Reconcile head.** Capture the current head SHA; stale-SHA cancellation
@@ -30,8 +35,19 @@ gc pr-babysit pr-babysit checkpoint --watch-id <watch-id> \
    `DIRTY`, `CONFLICTING`, and unknown capability are human blockers; do not
    invoke a branch update operation.
 7. **Settle or wait.** Evaluate the current snapshot, then persist one
-   checkpoint with the expected generation and head, last snapshot time, next
-   snapshot time, and one legal state transition.
+   checkpoint with the expected generation and head, observed head, last
+   snapshot time, next snapshot time, one legal state transition, and (for
+   `merge-ready`) the exact current-snapshot fields
+   `current_head_sha`, `mergeability_certain`, `branch_clean`,
+   `required_checks_terminal`, `required_checks_successful`,
+   `no_actionable_feedback`, `no_pending_human_interaction`,
+   `no_currency_item`, and `quiet_window_satisfied`, all true with the head
+   matching the snapshot. Pass the `merge_ready_evidence` object emitted by
+   that same snapshot.
+
+For repair claims, map the fingerprint only to a CI check `key` or to a
+stable review thread, comment, or review ID emitted by the snapshot. Command
+text is never used as a fingerprint.
 
 ## Untrusted feedback
 

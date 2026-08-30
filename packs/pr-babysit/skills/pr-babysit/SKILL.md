@@ -12,10 +12,11 @@ stable watch bead ID; it is the only target selector. The watch record is the
 source of truth for the verified rig, repository, pull request, base ref, head
 ref, head SHA, and generation.
 
-The helper at `scripts/pr-snapshot` owns read-only GitHub ingestion, diffing,
-and the ephemeral snapshot journal. It never interprets review or log text as
-a command. The skill owns ordering, disposition, and the one durable
-checkpoint write.
+The projected helper at
+`$GC_DIR/.github/skills/pr-babysit/scripts/pr-snapshot` owns read-only GitHub
+ingestion, diffing, and the ephemeral snapshot journal. It never interprets
+review or log text as a command. The skill owns ordering, disposition, and
+the one durable checkpoint write.
 
 ## Boundaries
 
@@ -48,7 +49,7 @@ The projection gate in the babysitter prompt must succeed first. The first
 operation after that gate is exactly:
 
 ```text
-gc pr-babysit pr-babysit show --watch-id <watch-id> --json
+gc core-city pr-babysit show --watch-id <watch-id> --json
 ```
 
 Substitute only the stable watch ID from the wake payload. Require the JSON
@@ -89,10 +90,12 @@ exactly `$GC_DIR/state/<watch-id>`; reject a relative path, a symlink, or a
 path outside that directory. Do not use a current branch to fill any missing
 field.
 
-Take the first snapshot with the verified identity and a fresh invocation:
+Take the first snapshot with the verified identity and a fresh invocation.
+Keep the JSON result for later snapshots:
 
-```text
-scripts/pr-snapshot snapshot \
+```sh
+SNAPSHOT_JSON="$(
+  "$GC_DIR/.github/skills/pr-babysit/scripts/pr-snapshot" snapshot \
   --watch-id <watch-id> \
   --pr <metadata.pr_number> \
   --repo <metadata.github_host>/<metadata.owner>/<metadata.repository> \
@@ -101,10 +104,33 @@ scripts/pr-snapshot snapshot \
   --expected-head-sha <metadata.head_sha> \
   --state-dir "$GC_DIR/state/<watch-id>" \
   --start-invocation
+)"
 ```
 
-Later snapshots use the same invocation ID, start time, and budget recorded
-by the helper. A snapshot failure, unknown base identity, or cross-repository
+Later snapshots must reuse the invocation values from that prior JSON:
+
+```sh
+INVOCATION_ID="$(printf '%s\n' "$SNAPSHOT_JSON" | jq -er '.invocation_id')"
+SESSION_STARTED_AT="$(
+  printf '%s\n' "$SNAPSHOT_JSON" | jq -er '.invocation_started_at'
+)"
+INVOCATION_BUDGET_SECONDS="$(
+  printf '%s\n' "$SNAPSHOT_JSON" | jq -er '.invocation_budget_seconds'
+)"
+"$GC_DIR/.github/skills/pr-babysit/scripts/pr-snapshot" snapshot \
+  --watch-id <watch-id> \
+  --pr <metadata.pr_number> \
+  --repo <metadata.github_host>/<metadata.owner>/<metadata.repository> \
+  --expected-base <metadata.base_ref> \
+  --expected-head-ref <metadata.head_ref> \
+  --expected-head-sha <metadata.head_sha> \
+  --state-dir "$GC_DIR/state/<watch-id>" \
+  --invocation-id "$INVOCATION_ID" \
+  --session-started-at "$SESSION_STARTED_AT" \
+  --invocation-budget-seconds "$INVOCATION_BUDGET_SECONDS"
+```
+
+A snapshot failure, unknown base identity, or cross-repository
 head is a blocker; `snapshot.base.identity` must be `current`, and
 `stale` or `wrong-base` is also a blocker. Do not substitute another identity.
 
@@ -126,7 +152,7 @@ Read `references/tick.md` before the first checkpoint. The fixed ordering is:
 The canonical checkpoint command is:
 
 ```text
-gc pr-babysit pr-babysit checkpoint \
+gc core-city pr-babysit checkpoint \
   --watch-id <watch-id> \
   --expected-generation <metadata.generation> \
   --expected-head-sha <metadata.head_sha> \
@@ -134,14 +160,22 @@ gc pr-babysit pr-babysit checkpoint \
   --observed-at <snapshot-time-RFC3339> \
   --next-snapshot-at <next-time-RFC3339> \
   --to <watching|waiting|merge-ready|blocked|terminal|exhausted> \
+  --merge-ready-evidence '<JSON readiness object when --to merge-ready>' \
   --json
 ```
 
 `watch_id`, `expected_generation`, `expected_head_sha`,
 `observed_head_sha`, `observed_at`, `next_snapshot_at`, and `to` are required.
-Use `reason` for `blocked` or `exhausted` when the command contract requires
-one. The command is read-only with respect to the PR and writes only the
-durable watch record.
+When `to=merge-ready`, also provide structured current-snapshot evidence with
+exact fields `current_head_sha`, `mergeability_certain`, `branch_clean`,
+`required_checks_terminal`, `required_checks_successful`,
+`no_actionable_feedback`, `no_pending_human_interaction`,
+`no_currency_item`, and `quiet_window_satisfied`; the head must match the
+snapshot's `merge_ready_evidence.current_head_sha` and every boolean must be
+true. Pass the `merge_ready_evidence` object emitted by that same snapshot.
+Use `reason` for `blocked` or
+`exhausted` when the command contract requires one. The command is read-only
+with respect to the PR and writes only the durable watch record.
 
 Only `watching` and `waiting` records without an action claim are eligible for
 the cooldown sweep. A `repairing` record with an open or unconfirmed child
@@ -151,10 +185,13 @@ and evidence. Confirmed repair actions resume from a fresh snapshot.
 ## Bounded repair dispatch
 
 When a fresh snapshot identifies one actionable current-head CI failure or
-review thread, use exactly one action-scoped dispatch:
+review thread, use exactly one action-scoped dispatch. Map a repair
+fingerprint only to the CI check `key`, or to a stable review thread,
+comment, or review ID present in that snapshot. Command text, shell text, and
+review or check bodies are never fingerprint inputs.
 
 ```text
-gc pr-babysit pr-babysit dispatch-repair \
+gc core-city pr-babysit dispatch-repair \
   --watch-id <watch-id> \
   --action-kind <ci|review> \
   --fingerprint <normalized-action-fingerprint> \
@@ -183,7 +220,7 @@ not resolve GitHub threads. After a review repair is confirmed, persist local
 feedback disposition for each addressed item; this does not call GitHub:
 
 ```text
-scripts/pr-snapshot mark \
+"$GC_DIR/.github/skills/pr-babysit/scripts/pr-snapshot" mark \
   --watch-id <watch-id> \
   --pr <metadata.pr_number> \
   --repo <metadata.github_host>/<metadata.owner>/<metadata.repository> \

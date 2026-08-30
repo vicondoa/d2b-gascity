@@ -6,7 +6,7 @@ The babysitter receives one stable watch bead ID in its native wake payload.
 The projection gate is mandatory and the first operation after it is:
 
 ```text
-gc pr-babysit pr-babysit show --watch-id <watch-id> --json
+gc core-city pr-babysit show --watch-id <watch-id> --json
 ```
 
 The show result must be a watch record with verified `rig`, `github_host`,

@@ -48,6 +48,13 @@ VALIDATION_STATUSES = {"passed", "failed", "not-run", "ambiguous"}
 REVIEW_VERDICTS = {"passed", "failed"}
 HANDOFF_ROUTE_STATUSES = {"pending", "complete", "route-failed"}
 HANDOFF_WAKE_STATUSES = {"not-started", "ready", "delivered", "failed"}
+ACTION_CLEANUP_STATUSES = {
+    "claimed",
+    "result-recorded",
+    "blocked",
+    "ambiguous",
+    "exhausted",
+}
 AMBIGUOUS_REASON = "ambiguous-outcome"
 TIME_BUDGET_REASON = "time-budget-exhausted"
 BACKSTOP_REASON = "backstop-expired"
@@ -72,6 +79,19 @@ ACTION_KIND_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,47}$")
 SAFE_REASON_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,95}$")
 SAFE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
 SAFE_GIT_REF_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]*$")
+GITHUB_PUBLICATION_JSON_FIELDS = (
+    "number",
+    "url",
+    "state",
+    "isDraft",
+    "baseRefName",
+    "headRefName",
+    "headRefOid",
+    "isCrossRepository",
+    "headRepository",
+    "headRepositoryOwner",
+)
+GITHUB_PUBLICATION_FIELDS = ",".join(GITHUB_PUBLICATION_JSON_FIELDS)
 SAFE_METADATA_KEYS = {
     "record_kind",
     "watch_id",
@@ -1033,6 +1053,45 @@ def show_issue_if_present(
         raise
 
 
+def action_records_for_watch(watch_id: str) -> list[tuple[dict[str, Any], dict[str, str]]]:
+    """Return every durable action recorded for a watch.
+
+    The watch can clear its active action fields after a failed setup, so the
+    action ID in watch metadata is not sufficient for invalidation.  Querying
+    the allowlisted action records also makes cleanup cover crash and blocker
+    paths without trusting an opaque payload.
+    """
+    validate_watch_id(watch_id)
+    result = run_beads(
+        [
+            "list",
+            "--all",
+            "--metadata-field",
+            "record_kind=action",
+            "--metadata-field",
+            f"watch_id={watch_id}",
+            "--json",
+        ]
+    )
+    payload = require_beads(result, "action list")
+    if isinstance(payload, dict) and isinstance(payload.get("issues"), list):
+        payload = payload["issues"]
+    if not isinstance(payload, list):
+        fail("Beads action list returned an invalid result", "beads-invalid-response")
+    actions: list[tuple[dict[str, Any], dict[str, str]]] = []
+    for record in payload:
+        if not isinstance(record, dict) or not record.get("id"):
+            continue
+        action_id = validate_bead_id(record["id"], "action_id")
+        metadata = metadata_from_issue(record)
+        if metadata.get("record_kind") != "action":
+            continue
+        if metadata.get("watch_id") != watch_id:
+            continue
+        actions.append((record, metadata))
+    return actions
+
+
 def validate_watch_id(value: Any) -> str:
     result = text_value(value, "watch_id")
     if not WATCH_ID_RE.fullmatch(result):
@@ -1451,37 +1510,492 @@ def clear_claim_updates(
     return updates
 
 
+def remove_action_blocks_watch(action_id: str, watch_id: str) -> None:
+    result = run_beads(
+        [
+            "dep",
+            "remove",
+            watch_id,
+            action_id,
+            "--json",
+        ]
+    )
+    if result.ok:
+        return
+    if re.search(
+        r"not\s+found|no\s+dependency|does\s+not\s+exist|already\s+removed",
+        result.stderr + "\n" + result.stdout,
+        flags=re.IGNORECASE,
+    ):
+        return
+    raise beads_error(result, "dependency removal", atomic_conflict=False)
+
+
+def _merge_ready_evidence(
+    payload: dict[str, Any],
+    *,
+    expected_head: str,
+    observed_head: str | None = None,
+) -> dict[str, Any]:
+    raw = payload_value(
+        payload,
+        "merge_ready_evidence",
+        "readiness_evidence",
+        "snapshot_readiness",
+        "readiness",
+        "current_snapshot_evidence",
+        "merge_ready_snapshot",
+        "merge_ready",
+        "current_snapshot",
+        "snapshot",
+    )
+    if raw is None:
+        evidence_keys = {
+            "current_head_sha",
+            "current_head",
+            "head_sha",
+            "observed_head_sha",
+            "snapshot_head_sha",
+            "mergeability_certain",
+            "mergeable_certain",
+            "mergeability",
+            "mergeable",
+            "mergeability_status",
+            "branch_clean",
+            "clean_branch",
+            "branch",
+            "branch_state",
+            "merge_state_status",
+            "required_checks_terminal",
+            "checks_terminal",
+            "required_checks_successful",
+            "checks_successful",
+            "all_checks_ok",
+            "required_checks",
+            "no_actionable_feedback",
+            "actionable_feedback",
+            "actionable",
+            "counts",
+            "no_pending_human_interaction",
+            "pending_human_interaction",
+            "human_interaction",
+            "no_currency_item",
+            "currency_item",
+            "currency",
+            "branch_currency",
+            "quiet_window_satisfied",
+            "quiet_window",
+            "quiet_seconds",
+        }
+        if evidence_keys & set(payload):
+            raw = payload
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except json.JSONDecodeError:
+            fail(
+                "merge-ready evidence must be a JSON object",
+                "merge-readiness-invalid",
+            )
+    if not isinstance(raw, dict):
+        fail(
+            "merge-ready evidence is required",
+            "merge-readiness-required",
+        )
+    raw = dict(raw)
+    nested_snapshot = raw.get("snapshot") or raw.get("current_snapshot")
+    if isinstance(nested_snapshot, dict):
+        merged_snapshot = dict(nested_snapshot)
+        merged_snapshot.update(
+            {
+                key: value
+                for key, value in raw.items()
+                if key not in {"snapshot", "current_snapshot"}
+            }
+        )
+        raw = merged_snapshot
+    for name in ("current_head", "current"):
+        nested = raw.get(name)
+        if "current_head_sha" not in raw:
+            if isinstance(nested, dict):
+                nested_head = (
+                    nested.get("sha")
+                    or nested.get("head_sha")
+                    or nested.get("current_head_sha")
+                )
+                if nested_head is not None:
+                    raw["current_head_sha"] = nested_head
+            elif isinstance(nested, str):
+                raw["current_head_sha"] = nested
+    if "current_head_sha" not in raw:
+        current_head_value = (
+            raw.get("observed_head_sha") or raw.get("snapshot_head_sha")
+        )
+        if current_head_value is not None:
+            raw["current_head_sha"] = current_head_value
+    if "mergeability_certain" not in raw and "mergeable_certain" not in raw:
+        mergeability = raw.get(
+            "mergeability",
+            raw.get("mergeable", raw.get("mergeability_status")),
+        )
+        if isinstance(mergeability, dict):
+            mergeability = mergeability.get(
+                "certain",
+                mergeability.get("status"),
+            )
+        if isinstance(mergeability, bool):
+            raw["mergeability_certain"] = mergeability
+        elif isinstance(mergeability, str):
+            raw["mergeability_certain"] = mergeability.strip().upper() in {
+                "CERTAIN",
+                "MERGEABLE",
+            }
+    if "branch_clean" not in raw and "clean_branch" not in raw:
+        branch = raw.get("branch", raw.get("branch_state"))
+        if isinstance(branch, bool):
+            raw["branch_clean"] = branch
+        elif isinstance(branch, str):
+            raw["branch_clean"] = branch.strip().lower() == "clean"
+    if "branch_clean" not in raw and "clean_branch" not in raw:
+        merge_state_status = raw.get("merge_state_status")
+        if isinstance(merge_state_status, str):
+            raw["branch_clean"] = (
+                merge_state_status.strip().upper() == "CLEAN"
+            )
+    merge_state_status = raw.get("merge_state_status")
+    if (
+        isinstance(merge_state_status, str)
+        and merge_state_status.strip().upper() != "CLEAN"
+    ):
+        fail(
+            "merge-ready evidence reports a non-clean branch",
+            "merge-readiness-invalid",
+        )
+    mergeable = raw.get("mergeable")
+    if (
+        isinstance(mergeable, str)
+        and mergeable.strip().upper() != "MERGEABLE"
+    ):
+        fail(
+            "merge-ready evidence reports a non-mergeable pull request",
+            "merge-readiness-invalid",
+        )
+    base = raw.get("base")
+    if isinstance(base, dict) and base.get("identity") != "current":
+        fail(
+            "merge-ready evidence reports a stale base",
+            "merge-readiness-invalid",
+        )
+    if raw.get("identity_blocker") not in (None, ""):
+        fail(
+            "merge-ready evidence reports an identity blocker",
+            "merge-readiness-invalid",
+        )
+    if "branch_currency" in raw and raw.get("branch_currency") is not None:
+        fail(
+            "merge-ready evidence reports a currency item",
+            "merge-readiness-invalid",
+        )
+    required_checks = raw.get("required_checks")
+    if isinstance(required_checks, dict):
+        if "required_checks_terminal" not in raw:
+            raw["required_checks_terminal"] = required_checks.get(
+                "terminal",
+                required_checks.get("checks_terminal"),
+            )
+        if "required_checks_successful" not in raw:
+            raw["required_checks_successful"] = required_checks.get(
+                "successful",
+                required_checks.get("success", required_checks.get("ok")),
+            )
+    elif isinstance(required_checks, list) and required_checks:
+        statuses = [
+            item.get("status")
+            for item in required_checks
+            if isinstance(item, dict)
+        ]
+        conclusions = [
+            str(item.get("conclusion") or "").upper()
+            for item in required_checks
+            if isinstance(item, dict)
+        ]
+        raw.setdefault(
+            "required_checks_terminal",
+            all(status == "COMPLETED" for status in statuses)
+            and len(statuses) == len(required_checks),
+        )
+        raw.setdefault(
+            "required_checks_successful",
+            all(
+                conclusion in {"SUCCESS", "NEUTRAL", "SKIPPED"}
+                for conclusion in conclusions
+            )
+            and len(conclusions) == len(required_checks),
+        )
+    checks = raw.get("checks")
+    if isinstance(checks, list) and checks:
+        statuses = [
+            item.get("status")
+            for item in checks
+            if isinstance(item, dict)
+        ]
+        conclusions = [
+            str(item.get("conclusion") or "").upper()
+            for item in checks
+            if isinstance(item, dict)
+        ]
+        raw.setdefault(
+            "required_checks_terminal",
+            all(status == "COMPLETED" for status in statuses)
+            and len(statuses) == len(checks),
+        )
+        raw.setdefault(
+            "required_checks_successful",
+            all(
+                conclusion in {"SUCCESS", "NEUTRAL", "SKIPPED"}
+                for conclusion in conclusions
+            )
+            and len(conclusions) == len(checks),
+        )
+    for nested_name, nested_key, output_key in (
+        ("feedback", "actionable", "actionable_feedback"),
+        ("human_interaction", "pending", "pending_human_interaction"),
+        ("currency", "item", "currency_item"),
+    ):
+        nested = raw.get(nested_name)
+        if isinstance(nested, dict) and nested_key in nested:
+            raw[output_key] = nested[nested_key]
+    counts = raw.get("counts")
+    if isinstance(counts, dict):
+        if "actionable_feedback" not in raw:
+            raw["actionable_feedback"] = bool(
+                counts.get("threads", 0) or counts.get("comments", 0)
+            )
+        if "pending_human_interaction" not in raw:
+            raw["pending_human_interaction"] = bool(
+                counts.get("needs_human", 0)
+            )
+    if "actionable_feedback" not in raw and isinstance(
+        raw.get("actionable"),
+        dict,
+    ):
+        actionable = raw["actionable"]
+        raw["actionable_feedback"] = bool(
+            actionable.get("threads") or actionable.get("comments")
+        )
+    if (
+        "pending_human_interaction" not in raw
+        and (
+            "review_in_progress" in raw
+            or "needs_human_residuals" in raw
+        )
+    ):
+        raw["pending_human_interaction"] = bool(
+            raw.get("review_in_progress", False)
+            or raw.get("needs_human_residuals")
+        )
+    if "currency_item" not in raw and "branch_currency" in raw:
+        raw["currency_item"] = raw.get("branch_currency") is not None
+    quiet_window = raw.get("quiet_window")
+    if isinstance(quiet_window, dict):
+        raw["quiet_window"] = quiet_window.get("satisfied")
+    elif "quiet_window_satisfied" not in raw:
+        quiet_seconds = raw.get("quiet_seconds")
+        if isinstance(quiet_seconds, (int, float)) and not isinstance(
+            quiet_seconds,
+            bool,
+        ):
+            raw["quiet_window_satisfied"] = quiet_seconds >= 300
+    if (
+        isinstance(raw.get("quiet_seconds"), (int, float))
+        and not isinstance(raw.get("quiet_seconds"), bool)
+        and raw["quiet_seconds"] < 300
+    ):
+        fail(
+            "merge-ready evidence does not satisfy the quiet window",
+            "merge-readiness-invalid",
+        )
+
+    def value_for(names: tuple[str, ...], field: str) -> Any:
+        present = [raw[name] for name in names if name in raw]
+        if not present:
+            fail(
+                f"merge-ready evidence is missing {field}",
+                "merge-readiness-required",
+            )
+        if len(set(map(repr, present))) != 1:
+            fail(
+                f"merge-ready evidence disagrees for {field}",
+                "merge-readiness-invalid",
+            )
+        return present[0]
+
+    current_head = sha_value(
+        value_for(
+            ("current_head_sha", "head_sha"),
+            "current_head_sha",
+        ),
+        "merge_ready_evidence.current_head_sha",
+    )
+    required_head = observed_head or expected_head
+    if current_head != required_head:
+        fail(
+            "merge-ready evidence is not for the current head",
+            "merge-readiness-stale",
+        )
+
+    def require_true(names: tuple[str, ...], field: str) -> None:
+        value = value_for(names, field)
+        if not isinstance(value, bool) or not value:
+            fail(
+                f"merge-ready evidence requires {field}=true",
+                "merge-readiness-invalid",
+            )
+
+    def require_clear(
+        positive_names: tuple[str, ...],
+        negative_names: tuple[str, ...],
+        field: str,
+    ) -> None:
+        present = False
+        for name in positive_names:
+            if name in raw:
+                present = True
+                if raw[name] is not True:
+                    fail(
+                        f"merge-ready evidence requires {field}=true",
+                        "merge-readiness-invalid",
+                    )
+        for name in negative_names:
+            if name in raw:
+                present = True
+                if raw[name] is not False:
+                    fail(
+                        f"merge-ready evidence requires {field}=true",
+                        "merge-readiness-invalid",
+                    )
+        if not present:
+            fail(
+                f"merge-ready evidence is missing {field}",
+                "merge-readiness-required",
+            )
+
+    require_true(
+        ("mergeability_certain", "mergeable_certain"),
+        "mergeability_certain",
+    )
+    require_true(("branch_clean", "clean_branch"), "branch_clean")
+    require_true(
+        ("required_checks_terminal", "checks_terminal"),
+        "required_checks_terminal",
+    )
+    require_true(
+        ("required_checks_successful", "checks_successful", "all_checks_ok"),
+        "required_checks_successful",
+    )
+    require_clear(
+        ("no_actionable_feedback",),
+        ("actionable_feedback",),
+        "no_actionable_feedback",
+    )
+    require_clear(
+        ("no_pending_human_interaction",),
+        ("pending_human_interaction",),
+        "no_pending_human_interaction",
+    )
+    require_clear(
+        ("no_currency_item",),
+        ("currency_item",),
+        "no_currency_item",
+    )
+    require_true(
+        ("quiet_window_satisfied", "quiet_window"),
+        "quiet_window_satisfied",
+    )
+    return {
+        "current_head_sha": current_head,
+        "mergeability_certain": True,
+        "branch_clean": True,
+        "required_checks_terminal": True,
+        "required_checks_successful": True,
+        "no_actionable_feedback": True,
+        "no_pending_human_interaction": True,
+        "no_currency_item": True,
+        "quiet_window_satisfied": True,
+    }
+
+
+def invalidate_action_record(
+    watch_id: str,
+    action_id: str,
+    metadata: dict[str, str],
+    reason: str,
+) -> None:
+    if metadata.get("watch_id") != watch_id:
+        fail("stale action does not belong to watch", "identity-mismatch")
+    claim_status = metadata.get("claim_status", "")
+    if claim_status not in ACTION_CLEANUP_STATUSES:
+        return
+    issue, _ = show_bead(action_id, operation="stale action show")
+    if issue.get("status") != "closed":
+        try:
+            metadata_updates(
+                action_id,
+                {
+                    "claim_status": "stale",
+                    "terminal_reason": reason,
+                },
+                status="blocked",
+                assignee="",
+            )
+        except StateError:
+            # A concurrently completed action is already safe to detach.
+            if issue.get("status") != "closed":
+                raise
+        try:
+            close_action(action_id, "stale")
+        except StateError:
+            # Native dependency closure can refuse an action with its own
+            # open children. Removing this action's edge is sufficient before
+            # the watch is cleared or rearmed.
+            remove_action_blocks_watch(action_id, watch_id)
+    else:
+        try:
+            metadata_updates(
+                action_id,
+                {
+                    "claim_status": "stale",
+                    "terminal_reason": reason,
+                },
+            )
+        except StateError:
+            pass
+
+
 def invalidate_action_claim(
     watch_id: str,
     metadata: dict[str, str],
     reason: str,
 ) -> None:
-    action_kind = metadata.get("action_kind", "")
-    fingerprint = metadata.get("action_fingerprint", "")
-    claim_status = metadata.get("claim_status", "")
-    if (
-        not action_kind
-        or not fingerprint
-        or claim_status not in {"claimed", "result-recorded"}
-    ):
-        return
-    generation = generation_from_metadata(metadata)
-    action_id = action_id_for(watch_id, generation, action_kind, fingerprint)
-    existing = show_issue_if_present(action_id, operation="stale action show")
-    if existing is None:
-        return
-    _, action_metadata_value = existing
-    if action_metadata_value.get("watch_id") != watch_id:
-        fail("stale action does not belong to watch", "identity-mismatch")
-    metadata_updates(
-        action_id,
-        {
-            "claim_status": "stale",
-            "terminal_reason": reason,
-        },
-        status="blocked",
-        assignee="",
-    )
+    candidates: dict[str, tuple[dict[str, Any], dict[str, str]]] = {}
+    action_id = metadata.get("action_id", "")
+    if action_id:
+        action_id = validate_bead_id(action_id, "action_id")
+        existing = show_issue_if_present(action_id, operation="stale action show")
+        if existing is not None:
+            candidates[action_id] = existing
+
+    for issue, action_metadata_value in action_records_for_watch(watch_id):
+        candidate_id = validate_bead_id(issue["id"], "action_id")
+        candidates[candidate_id] = (issue, action_metadata_value)
+
+    for candidate_id, (_, action_metadata_value) in candidates.items():
+        invalidate_action_record(
+            watch_id,
+            candidate_id,
+            action_metadata_value,
+            reason,
+        )
 
 
 def block_claim_setup_failure(
@@ -1947,23 +2461,27 @@ def github_repository_owner(value: Any, field: str) -> str:
         )
 
 
-def query_github_publication(context: dict[str, Any]) -> dict[str, Any]:
+def github_publication_command(context: dict[str, Any]) -> list[str]:
     number = context.get("pr_number")
     if number is None:
         fail("a pull-request number is required", "identity-mismatch")
     repo = f'{context["owner"]}/{context["repository"]}'
-    command = gh_command() + [
+    return gh_command() + [
         "pr",
         "view",
         str(number),
         "--repo",
         repo,
         "--json",
-        (
-            "number,url,state,isDraft,baseRefName,headRefName,headRefOid,"
-            "isCrossRepository,headRepository,headRepositoryOwner"
-        ),
+        GITHUB_PUBLICATION_FIELDS,
     ]
+
+
+def query_github_publication(context: dict[str, Any]) -> dict[str, Any]:
+    number = context.get("pr_number")
+    if number is None:
+        fail("a pull-request number is required", "identity-mismatch")
+    command = github_publication_command(context)
     environment = os.environ.copy()
     environment["GH_HOST"] = context["github_host"]
     try:
@@ -2747,6 +3265,12 @@ def _transition_locked(
         return metadata_response("transition", watch_id, metadata, changed=False)
     if desired not in TRANSITIONS[current]:
         fail(f"illegal watch transition {current} -> {desired}", "illegal-transition")
+    merge_ready_evidence = None
+    if desired == "merge-ready":
+        merge_ready_evidence = _merge_ready_evidence(
+            payload,
+            expected_head=metadata["head_sha"],
+        )
     reason = safe_reason(payload_value(payload, "reason"), required=desired == "terminal")
     updates = {"state": desired}
     if desired in {"blocked", "exhausted"}:
@@ -2777,7 +3301,13 @@ def _transition_locked(
             assignee="" if desired in {"blocked", "exhausted"} else None,
         )
     _, metadata = show_issue(watch_id)
-    return metadata_response("transition", watch_id, metadata, changed=True)
+    return metadata_response(
+        "transition",
+        watch_id,
+        metadata,
+        changed=True,
+        merge_ready_evidence=merge_ready_evidence,
+    )
 
 
 def claim_action(payload: dict[str, Any]) -> dict[str, Any]:
@@ -3961,6 +4491,14 @@ def _checkpoint_locked(
         desired = "exhausted"
         reason = budget_reason
 
+    merge_ready_evidence = None
+    if desired == "merge-ready":
+        merge_ready_evidence = _merge_ready_evidence(
+            payload,
+            expected_head=expected_head,
+            observed_head=observed_head,
+        )
+
     if desired == "repairing":
         fail(
             "checkpoint cannot create an action claim",
@@ -4081,6 +4619,7 @@ def _checkpoint_locked(
         changed=True,
         head_reconciled=head_changed,
         exhausted=desired == "exhausted",
+        merge_ready_evidence=merge_ready_evidence,
         terminal_reason=(
             metadata.get("terminal_reason", "")
             if desired in {"blocked", "exhausted", "terminal"}
@@ -4106,12 +4645,7 @@ def list_due(payload: dict[str, Any]) -> dict[str, Any]:
         fail(f"limit must not exceed {MAX_DUE_LIMIT}")
     args = [
         "list",
-        "--status",
-        "open",
-        "--limit",
-        str(MAX_DUE_LIMIT),
-        "--sort",
-        "id",
+        "--all",
         "--json",
     ]
     args.extend(["--metadata-field", "record_kind=watch"])
@@ -4126,6 +4660,8 @@ def list_due(payload: dict[str, Any]) -> dict[str, Any]:
     due: list[dict[str, Any]] = []
     for record in records:
         if not isinstance(record, dict) or not record.get("id"):
+            continue
+        if record.get("status") != "open":
             continue
         raw_metadata = record.get("metadata", {})
         if isinstance(raw_metadata, str):

@@ -14,10 +14,10 @@ When `open_pr` is true:
 1. Create or update the pull request through the official publication path.
 2. Read its canonical URL and number from GitHub, not from prose in the final
    report.
-3. Run the rig-imported command with the current publication bead:
+3. Run the city-scoped command with the current publication bead:
 
    ```sh
-   gc pr-babysit pr-babysit publication-handoff \
+   gc core-city pr-babysit publication-handoff \
      --rig "$GC_RIG" \
      --publication-bead-id "{{issue}}" \
      --url "$PR_URL" \
@@ -35,7 +35,7 @@ When `open_pr` is true:
    receipt:
 
    ```sh
-   gc pr-babysit pr-babysit verify-handoff \
+   gc core-city pr-babysit verify-handoff \
      --rig "$GC_RIG" \
      --publication-bead-id "{{issue}}" \
      --url "$PR_URL" \

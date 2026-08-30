@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import importlib.machinery
 import importlib.util
 import json
 import os
@@ -9,6 +10,7 @@ import re
 import signal
 import shutil
 import subprocess
+import sys
 import tempfile
 import time
 import tomllib
@@ -17,8 +19,21 @@ from concurrent.futures import ThreadPoolExecutor
 from unittest import mock
 
 
+sys.dont_write_bytecode = True
+
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 SCRATCH_ROOT = ROOT / ".scratch"
+MERGE_READY_EVIDENCE = {
+    "current_head_sha": "a" * 40,
+    "mergeability_certain": True,
+    "branch_clean": True,
+    "required_checks_terminal": True,
+    "required_checks_successful": True,
+    "no_actionable_feedback": True,
+    "no_pending_human_interaction": True,
+    "no_currency_item": True,
+    "quiet_window_satisfied": True,
+}
 
 
 def _temporary_root(prefix: str) -> pathlib.Path:
@@ -70,6 +85,8 @@ CORE_PACK_FILES = (
     "model-tiers.base.toml",
     "commands/gen-model-tiers/command.toml",
     "commands/gen-model-tiers/run.sh",
+    "commands/pr-babysit/command.toml",
+    "commands/pr-babysit/run.sh",
     "template-fragments/command-glossary.template.md",
     "template-fragments/operational-awareness.template.md",
     "template-fragments/mayor-operating-rhythm.template.md",
@@ -112,7 +129,7 @@ PR_BABYSIT_FILES = {
             "7c26c66c4cf4bd90"
         ),
         "local_sha256": (
-            "8922231e0f85a889895397d8472a35484a96373ecb2efc5d513767319545e511"
+            "c13da9a8f8d02c36de2d8f5a10ea23dd57a8f8074bb2bef917990cc34eb02806"
         ),
     },
     "skills/pr-babysit/references/branch-currency.md": {
@@ -155,6 +172,9 @@ PR_BABYSIT_FILES = {
             "e83f49cb2511f68cf9131584737b73a91ae9a2a92435f7fd70"
             "cba40b99fc1759"
         ),
+        "local_sha256": (
+            "325165b26f0945dc988df09bc8ba6dbc1baad1311a0d39d946b60f3253923e1f"
+        ),
     },
     "skills/pr-babysit/references/setup.md": {
         "source": "skills/ce-babysit-pr/references/setup.md",
@@ -163,7 +183,7 @@ PR_BABYSIT_FILES = {
             "0f089d1809954"
         ),
         "local_sha256": (
-            "c026058ecccf8bc97ea4de8edcd380e5652b7011469bee55b449a76f2a7e9141"
+            "d3eee9d0b5a132738613b353de879cdb52ceab1394d274101de7749d8377818c"
         ),
     },
     "skills/pr-babysit/references/tick.md": {
@@ -173,7 +193,7 @@ PR_BABYSIT_FILES = {
             "9752325ede820c"
         ),
         "local_sha256": (
-            "74fe9650e6d5904ecb60a85ac0513f8b53899c5a7b4a2e673fb23a949ffc8d91"
+            "1111fdd1f0852a6b895ed873bd9dd8e4589c42d1c53d23502795ba78041afe96"
         ),
     },
     "skills/pr-babysit/references/watch-loop.md": {
@@ -190,7 +210,7 @@ PR_BABYSIT_FILES = {
             "b8850439d980e7"
         ),
         "local_sha256": (
-            "b8aaff26d9542181446b86b11280f5330fd7d532fdfd2027a2afabdfd9e4bb97"
+            "485f39b22e88f50e8c6e03c154e312c049f86cea64af81941d1810548fbaccaf"
         ),
     },
 }
@@ -228,8 +248,6 @@ PR_BABYSIT_AUTHORED_FILES = (
     "pack.toml",
     "agents/pr-babysitter/agent.toml",
     "agents/pr-babysitter/prompt.template.md",
-    "commands/pr-babysit/command.toml",
-    "commands/pr-babysit/run.sh",
     "formulas/mol-pr-babysit-repair.toml",
     "orders/pr-babysit-sweep.toml",
     "assets/scripts/pr-babysit-state.py",
@@ -249,7 +267,10 @@ PR_BABYSIT_AUTHORED_FILES = (
     "skills/pr-babysit/scripts/pr-snapshot",
 )
 PR_BABYSIT_STATE_RUNNER = (
-    PR_BABYSIT_ROOT / "commands" / "pr-babysit" / "run.sh"
+    CORE_PACK_ROOT / "commands" / "pr-babysit" / "run.sh"
+)
+PR_BABYSIT_STATE_HELPER = (
+    PR_BABYSIT_ROOT / "assets" / "scripts" / "pr-babysit-state.py"
 )
 PR_BABYSIT_REPAIR_FORMULA = (
     PR_BABYSIT_ROOT / "formulas" / "mol-pr-babysit-repair.toml"
@@ -1820,10 +1841,16 @@ class RootPortableCityTests(unittest.TestCase):
                 )
 
                 def run_gc(*args: str) -> subprocess.CompletedProcess[str]:
+                    return run_gc_from(city, *args)
+
+                def run_gc_from(
+                    cwd: pathlib.Path,
+                    *args: str,
+                ) -> subprocess.CompletedProcess[str]:
                     try:
                         result = subprocess.run(
                             [gc_bin, *args],
-                            cwd=city,
+                            cwd=cwd,
                             env=env,
                             capture_output=True,
                             text=True,
@@ -1832,7 +1859,19 @@ class RootPortableCityTests(unittest.TestCase):
                     except OSError as error:
                         self.fail(f"GC_BIN could not execute: {error}")
                     if result.returncode:
-                        detail = (result.stderr or result.stdout).strip()
+                        detail = "\n".join(
+                            part.strip()
+                            for part in (result.stderr, result.stdout)
+                            if part.strip()
+                        )
+                        if "core-city" in args and "pr-babysit" in args:
+                            self.fail(
+                                "BLOCKER: Gas City "
+                                f"{GASCITY_VERSION} could not resolve the "
+                                "city-scoped pr-babysit command from the "
+                                "initialized production topology: "
+                                f"{detail}"
+                            )
                         self.fail(
                             f"gc {' '.join(args)} failed with "
                             f"{result.returncode}: {detail}"
@@ -2083,52 +2122,40 @@ class RootPortableCityTests(unittest.TestCase):
                 )
                 run_gc("config", "show", "--city", str(city))
 
-                original_city_toml = (city / "city.toml").read_bytes()
-                city_text = original_city_toml.decode("utf-8")
-                # Gas City v1.4.1 exposes Pack CLI commands from city imports;
-                # keep the production rig imports intact while exercising the
-                # local command against the temporary rig store.
-                city_text = city_text.replace(
-                    "\n[[rigs]]",
-                    "\n\n[imports.pr-babysit]\n"
-                    'source = "../../packs/pr-babysit"\n'
-                    "transitive = false\n\n[[rigs]]",
-                    1,
-                )
-                (city / "city.toml").write_text(
-                    city_text,
-                    encoding="utf-8",
-                )
                 env["GC_RIG_ROOT"] = str(rig)
                 env["PR_BABYSIT_BEADS_BIN"] = bd_bin
-                try:
-                    native_show = run_gc(
-                        "pr-babysit",
-                        "pr-babysit",
-                        "show",
-                        "--rig",
-                        "d2b",
-                        "--watch-id",
-                        native_watch_id,
-                        "--json",
-                    )
-                    native_show_payload = json.loads(native_show.stdout)
-                    self.assertTrue(native_show_payload["ok"])
-                    self.assertEqual(native_show_payload["action"], "show")
-                    self.assertEqual(
-                        native_show_payload["watch_id"],
-                        native_watch_id,
-                    )
-                    self.assertEqual(
-                        native_show_payload["metadata"]["record_kind"],
-                        "watch",
-                    )
-                    self.assertEqual(
-                        native_show_payload["metadata"]["state"],
-                        "watching",
-                    )
-                finally:
-                    (city / "city.toml").write_bytes(original_city_toml)
+                native_show = run_gc_from(
+                    rig,
+                    "--city",
+                    str(city),
+                    "--rig",
+                    "d2b",
+                    "core-city",
+                    "pr-babysit",
+                    "show",
+                    "--watch-id",
+                    native_watch_id,
+                    "--json",
+                )
+                native_show_payload = json.loads(native_show.stdout)
+                self.assertTrue(native_show_payload["ok"])
+                self.assertEqual(native_show_payload["action"], "show")
+                self.assertEqual(
+                    native_show_payload["watch_id"],
+                    native_watch_id,
+                )
+                self.assertEqual(
+                    native_show_payload["metadata"]["record_kind"],
+                    "watch",
+                )
+                self.assertEqual(
+                    native_show_payload["metadata"]["state"],
+                    "watching",
+                )
+                self.assertEqual(
+                    (city / "city.toml").read_bytes(),
+                    city_before[str(CITY_RELATIVE / "city.toml")],
+                )
 
                 def show_formula(name: str, *extra: str) -> dict:
                     result = run_gc(
@@ -2613,6 +2640,113 @@ class RootPortableCityTests(unittest.TestCase):
 
 
 class VendoredPrBabysitTests(unittest.TestCase):
+    def test_pr_babysit_cli_is_city_scoped_and_fails_closed(self) -> None:
+        core_command_root = CORE_PACK_ROOT / "commands" / "pr-babysit"
+        wrapper = core_command_root / "run.sh"
+        command = tomllib.loads(
+            (core_command_root / "command.toml").read_text(encoding="utf-8")
+        )
+        self.assertEqual(command["run"], "run.sh")
+        self.assertFalse(
+            (PR_BABYSIT_ROOT / "commands" / "pr-babysit").exists()
+        )
+        wrapper_text = wrapper.read_text(encoding="utf-8")
+        for marker in (
+            "GC_PACK_DIR",
+            "packs_root",
+            "pr-babysit/assets/scripts/pr-babysit-state.py",
+            "readlink",
+            "not executable",
+        ):
+            self.assertIn(marker, wrapper_text)
+
+        root = _temporary_root("pr-babysit-command-fence-")
+        try:
+            command_copy = (
+                root / "packs" / "core-city" / "commands" / "pr-babysit"
+            )
+            command_copy.mkdir(parents=True)
+            wrapper_copy = command_copy / "run.sh"
+            shutil.copy2(wrapper, wrapper_copy)
+            wrapper_copy.chmod(0o755)
+
+            result = subprocess.run(
+                [str(wrapper_copy), "show"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("not found", result.stderr)
+
+            helper = (
+                root
+                / "packs"
+                / "pr-babysit"
+                / "assets"
+                / "scripts"
+                / "pr-babysit-state.py"
+            )
+            helper.parent.mkdir(parents=True)
+            helper.write_text("#!/bin/sh\n", encoding="utf-8")
+            helper.chmod(0o644)
+            result = subprocess.run(
+                [str(wrapper_copy), "show"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("not executable", result.stderr)
+
+            outside = root / "outside-helper.py"
+            outside.write_text("#!/bin/sh\n", encoding="utf-8")
+            outside.chmod(0o755)
+            helper.unlink()
+            helper.symlink_to(outside)
+            result = subprocess.run(
+                [str(wrapper_copy), "show"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("outside", result.stderr)
+
+            helper.unlink()
+            helper.write_text("#!/bin/sh\n", encoding="utf-8")
+            helper.chmod(0o755)
+            fake_python = root / "fake-python"
+            fake_python.write_text(
+                "#!/bin/sh\nprintf '%s\\n' \"$@\"\n",
+                encoding="utf-8",
+            )
+            fake_python.chmod(0o755)
+            result = subprocess.run(
+                [
+                    str(wrapper_copy),
+                    "--city",
+                    "/city",
+                    "--rig",
+                    "d2b",
+                    "show",
+                    "--watch-id",
+                    "watch-1",
+                ],
+                capture_output=True,
+                text=True,
+                env=os.environ | {"PYTHON": str(fake_python)},
+                check=False,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            forwarded = result.stdout.splitlines()
+            self.assertTrue(forwarded[0].endswith(
+                "packs/pr-babysit/assets/scripts/pr-babysit-state.py"
+            ))
+            self.assertEqual(forwarded[1:], ["show", "--watch-id", "watch-1"])
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
+
     def test_pr_babysit_authored_files_are_fully_inventoried(self) -> None:
         actual_files = {
             str(path.relative_to(PR_BABYSIT_ROOT))
@@ -2840,9 +2974,9 @@ class VendoredPrBabysitTests(unittest.TestCase):
             / "template-fragments"
             / "command-glossary.template.md"
         ).read_text(encoding="utf-8")
-        show = "gc pr-babysit pr-babysit show --watch-id <watch-id> --json"
-        checkpoint = "gc pr-babysit pr-babysit checkpoint"
-        dispatch = "gc pr-babysit pr-babysit dispatch-repair"
+        show = "gc core-city pr-babysit show --watch-id <watch-id> --json"
+        checkpoint = "gc core-city pr-babysit checkpoint"
+        dispatch = "gc core-city pr-babysit dispatch-repair"
         for text in (skill, prompt):
             self.assertIn(show, text)
             self.assertIn(checkpoint, text)
@@ -2864,7 +2998,7 @@ class VendoredPrBabysitTests(unittest.TestCase):
             self.assertIn("handoff_target", text)
             self.assertNotIn("git checkout", text.lower())
             self.assertNotIn("git push", text.lower())
-        self.assertIn("gc pr-babysit pr-babysit", glossary)
+        self.assertIn("gc core-city pr-babysit", glossary)
         gate_end = prompt.index("\ndone\n```")
         self.assertGreater(prompt.index(show), gate_end)
         self.assertIn("$GC_DIR/state/<watch-id>", prompt)
@@ -2944,6 +3078,20 @@ class VendoredPrBabysitTests(unittest.TestCase):
                     self.assertEqual(
                         snapshot["mergeability_certain"],
                         identity == "current",
+                    )
+                    self.assertEqual(
+                        set(snapshot["merge_ready_evidence"]),
+                        {
+                            "current_head_sha",
+                            "mergeability_certain",
+                            "branch_clean",
+                            "required_checks_terminal",
+                            "required_checks_successful",
+                            "no_actionable_feedback",
+                            "no_pending_human_interaction",
+                            "no_currency_item",
+                            "quiet_window_satisfied",
+                        },
                     )
                 finally:
                     shutil.rmtree(root, ignore_errors=True)
@@ -3191,6 +3339,7 @@ class VendoredPrBabysitTests(unittest.TestCase):
     @staticmethod
     def _fake_github_script() -> str:
         return r"""#!/usr/bin/env python3
+import fcntl
 import json
 import os
 import sys
@@ -3200,9 +3349,24 @@ from pathlib import Path
 args = sys.argv[1:]
 config = json.loads(Path(os.environ["FAKE_GH_CONFIG"]).read_text(encoding="utf-8"))
 calls_path = Path(os.environ["FAKE_GH_CALLS"])
-calls = json.loads(calls_path.read_text(encoding="utf-8")) if calls_path.exists() else []
-calls.append(args)
-calls_path.write_text(json.dumps(calls), encoding="utf-8")
+lock_path = calls_path.with_name(calls_path.name + ".lock")
+with lock_path.open("a+", encoding="utf-8") as lock:
+    fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+    calls = (
+        json.loads(calls_path.read_text(encoding="utf-8"))
+        if calls_path.exists()
+        else []
+    )
+    calls.append(args)
+    replacement = calls_path.with_name(
+        f".{calls_path.name}.{os.getpid()}.tmp"
+    )
+    with replacement.open("w", encoding="utf-8") as output:
+        output.write(json.dumps(calls))
+        output.flush()
+        os.fsync(output.fileno())
+    os.replace(replacement, calls_path)
+    fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
 if config.get("sleep"):
     time.sleep(float(config["sleep"]))
 if args[:2] == ["pr", "view"]:
@@ -3775,6 +3939,51 @@ else:
         finally:
             shutil.rmtree(root, ignore_errors=True)
 
+    def test_pr_snapshot_atomic_write_recovers_stale_temp_after_failure(self):
+        loader = importlib.machinery.SourceFileLoader(
+            "pr_snapshot_for_tests",
+            str(PR_BABYSIT_SKILL_ROOT / "scripts" / "pr-snapshot"),
+        )
+        spec = importlib.util.spec_from_loader(loader.name, loader)
+        if spec is None:
+            raise AssertionError("could not load snapshot helper")
+        module = importlib.util.module_from_spec(spec)
+        loader.exec_module(module)
+        root = _temporary_root("snapshot-atomic-")
+        try:
+            root.mkdir(exist_ok=True)
+            state_path = root / "state.json"
+            state_path.write_text('{"old":true}\n', encoding="utf-8")
+            stale = root / "state.json.next"
+            stale.write_text("stale\n", encoding="utf-8")
+            stale_unique = root / ".state.json.crashed.tmp"
+            stale_unique.write_text("stale\n", encoding="utf-8")
+
+            with mock.patch.object(
+                module.os,
+                "replace",
+                side_effect=OSError("injected replace failure"),
+            ):
+                with self.assertRaises(SystemExit):
+                    module._atomic_write(state_path, {"failed": True})
+            self.assertFalse(stale.exists())
+            self.assertFalse(stale_unique.exists())
+            self.assertEqual(
+                json.loads(state_path.read_text(encoding="utf-8")),
+                {"old": True},
+            )
+            module._atomic_write(state_path, {"recovered": True})
+            self.assertEqual(
+                json.loads(state_path.read_text(encoding="utf-8")),
+                {"recovered": True},
+            )
+            self.assertEqual(
+                list(root.glob(".state.json.*.tmp")),
+                [],
+            )
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
+
     def test_pr_babysit_pack_is_rig_imported_and_on_demand(self) -> None:
         pack = tomllib.loads(
             (PR_BABYSIT_ROOT / "pack.toml").read_text(encoding="utf-8")
@@ -3925,7 +4134,7 @@ else:
         ):
             self.assertIn(marker.lower(), lowered)
         gate = lowered.index(PR_BABYSIT_PROJECTION_MARKER)
-        show = "gc pr-babysit pr-babysit show --watch-id <watch-id> --json"
+        show = "gc core-city pr-babysit show --watch-id <watch-id> --json"
         self.assertGreater(lowered.index(show), gate)
         self.assertNotIn("git checkout", lowered)
         self.assertNotIn("git push", lowered)
@@ -4364,6 +4573,32 @@ if command == "list":
 
 
 if command == "dep":
+    if positional() == "remove":
+        blocked = positional(1)
+        blocker = positional(2)
+        blocked_record = record_for(blocked)
+        if blocked_record is None:
+            print("not found", file=sys.stderr)
+            raise SystemExit(1)
+        dependencies = set(blocked_record.get("blocked_by", []))
+        if blocker not in dependencies:
+            print("no dependency", file=sys.stderr)
+            raise SystemExit(1)
+        dependencies.remove(blocker)
+        blocked_record["blocked_by"] = sorted(dependencies)
+        save(state_path, records)
+        print(
+            json.dumps(
+                {
+                    "blocked_id": blocked,
+                    "blocker_id": blocker,
+                    "status": "removed",
+                    "type": "blocks",
+                },
+                sort_keys=True,
+            )
+        )
+        raise SystemExit(0)
     blocker = positional()
     blocked = value("--blocks")
     blocker_record = record_for(blocker)
@@ -5618,7 +5853,11 @@ if command == "close":
             merge_ready = self._run(
                 env,
                 "transition",
-                {"watch_id": watch_id, "to": "merge-ready"},
+                {
+                    "watch_id": watch_id,
+                    "to": "merge-ready",
+                    "merge_ready_evidence": MERGE_READY_EVIDENCE,
+                },
             )
             self.assertEqual(merge_ready.returncode, 0, merge_ready.stderr)
             self.assertEqual(self._json(merge_ready)["state"], "merge-ready")
@@ -5978,14 +6217,49 @@ if command == "close":
                 for call in calls
                 if call["argv"] and call["argv"][0] == "list"
             )
-            self.assertNotIn("--all", list_call)
-            self.assertEqual(
-                list_call[list_call.index("--status") + 1],
-                "open",
+            self.assertIn("--all", list_call)
+            self.assertNotIn("--limit", list_call)
+            self.assertIn("--metadata-field", list_call)
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
+
+    def test_list_due_does_not_starve_after_one_hundred_matching_watches(self):
+        root, env = self._fixture("due-unbounded")
+        try:
+            for index in range(100):
+                payload = dict(
+                    self._HANDOFF,
+                    repository=f"later-{index}",
+                    head_repository=f"octo/later-{index}",
+                    url=f"https://github.com/octo/later-{index}/pull/7",
+                    next_snapshot_at="2026-08-29T20:00:00Z",
+                )
+                created = self._run(env, "handoff", payload)
+                self.assertEqual(created.returncode, 0, created.stderr)
+            priority = dict(
+                self._HANDOFF,
+                repository="priority",
+                head_repository="octo/priority",
+                url="https://github.com/octo/priority/pull/7",
+                next_snapshot_at="2026-08-29T18:00:00Z",
             )
+            created = self._run(env, "handoff", priority)
+            self.assertEqual(created.returncode, 0, created.stderr)
+            priority_watch_id = self._json(created)["watch_id"]
+
+            result = self._run(
+                env,
+                "list-due",
+                {
+                    "rig": "d2b",
+                    "now": "2026-08-29T19:00:00Z",
+                    "limit": 1,
+                },
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(
-                list_call[list_call.index("--limit") + 1],
-                "100",
+                [item["watch_id"] for item in self._json(result)["watches"]],
+                [priority_watch_id],
             )
         finally:
             shutil.rmtree(root, ignore_errors=True)
@@ -6014,6 +6288,7 @@ if command == "close":
 
 class PrBabysitCheckpointTests(unittest.TestCase):
     _HANDOFF = dict(PrBabysitStateTests._HANDOFF)
+    _MERGE_READY_EVIDENCE = MERGE_READY_EVIDENCE
 
     def _fixture(self, name: str) -> tuple[pathlib.Path, dict[str, str]]:
         root = _temporary_root(f"u5-checkpoint-{name}-")
@@ -6125,6 +6400,77 @@ class PrBabysitCheckpointTests(unittest.TestCase):
             )
             self.assertEqual(resumed.returncode, 0, resumed.stderr)
             self.assertEqual(self._json(resumed)["state"], "watching")
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
+
+    def test_checkpoint_requires_current_merge_ready_evidence(self) -> None:
+        root, env = self._fixture("merge-ready-evidence")
+        try:
+            watch_id = self._watch_id(env)
+            base = {
+                "watch_id": watch_id,
+                "expected_generation": 1,
+                "expected_head_sha": "a" * 40,
+                "observed_head_sha": "a" * 40,
+                "observed_at": "2026-08-29T19:01:00Z",
+                "next_snapshot_at": "2026-08-29T19:02:00Z",
+                "to": "merge-ready",
+            }
+            before = (root / "beads.json").read_bytes()
+            missing = self._run(env, "checkpoint", base)
+            self.assertNotEqual(missing.returncode, 0)
+            self.assertEqual(
+                self._json(missing)["error"]["code"],
+                "merge-readiness-required",
+            )
+            self.assertEqual((root / "beads.json").read_bytes(), before)
+
+            false_evidence = dict(
+                self._MERGE_READY_EVIDENCE,
+                required_checks_successful=False,
+            )
+            rejected = self._run(
+                env,
+                "checkpoint",
+                {
+                    **base,
+                    "merge_ready_evidence": false_evidence,
+                },
+            )
+            self.assertNotEqual(rejected.returncode, 0)
+            self.assertEqual(
+                self._json(rejected)["error"]["code"],
+                "merge-readiness-invalid",
+            )
+            self.assertEqual((root / "beads.json").read_bytes(), before)
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
+
+    def test_checkpoint_accepts_positive_merge_ready_evidence(self) -> None:
+        root, env = self._fixture("merge-ready-positive")
+        try:
+            watch_id = self._watch_id(env)
+            result = self._run(
+                env,
+                "checkpoint",
+                {
+                    "watch_id": watch_id,
+                    "expected_generation": 1,
+                    "expected_head_sha": "a" * 40,
+                    "observed_head_sha": "a" * 40,
+                    "observed_at": "2026-08-29T19:01:00Z",
+                    "next_snapshot_at": "2026-08-29T19:02:00Z",
+                    "to": "merge-ready",
+                    "merge_ready_evidence": self._MERGE_READY_EVIDENCE,
+                },
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            output = self._json(result)
+            self.assertEqual(output["state"], "merge-ready")
+            self.assertEqual(
+                output["merge_ready_evidence"],
+                self._MERGE_READY_EVIDENCE,
+            )
         finally:
             shutil.rmtree(root, ignore_errors=True)
 
@@ -6546,14 +6892,20 @@ if os.environ.get("FAKE_GC_FAIL") == "1":
                         },
                     )
                 else:
+                    transition_payload = {
+                        "watch_id": watch_id,
+                        "to": state,
+                        **({"reason": "test-stop"} if state == "terminal" else {}),
+                    }
+                    if state == "merge-ready":
+                        transition_payload["merge_ready_evidence"] = dict(
+                            MERGE_READY_EVIDENCE,
+                            current_head_sha="a" * 40,
+                        )
                     transition = self._run_state(
                         env,
                         "transition",
-                        {
-                            "watch_id": watch_id,
-                            "to": state,
-                            **({"reason": "test-stop"} if state == "terminal" else {}),
-                        },
+                        transition_payload,
                     )
                 self.assertEqual(transition.returncode, 0, transition.stderr)
             result = self._run_sweep(env)
@@ -6697,6 +7049,7 @@ class PrBabysitPublicationHandoffTests(unittest.TestCase):
     @staticmethod
     def _fake_gh_script() -> str:
         return r"""#!/usr/bin/env python3
+import fcntl
 import json
 import os
 import sys
@@ -6704,14 +7057,24 @@ from pathlib import Path
 
 root = Path(os.environ["FAKE_PUBLICATION_ROOT"])
 calls_path = root / "gh-calls.json"
-calls = []
-if calls_path.exists():
-    calls = json.loads(calls_path.read_text(encoding="utf-8"))
-calls.append(sys.argv[1:])
-calls_path.write_text(
-    json.dumps(calls, sort_keys=True, separators=(",", ":")) + "\n",
-    encoding="utf-8",
-)
+lock_path = calls_path.with_name(calls_path.name + ".lock")
+with lock_path.open("a+", encoding="utf-8") as lock:
+    fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+    calls = []
+    if calls_path.exists():
+        calls = json.loads(calls_path.read_text(encoding="utf-8"))
+    calls.append(sys.argv[1:])
+    replacement = calls_path.with_name(
+        f".{calls_path.name}.{os.getpid()}.tmp"
+    )
+    with replacement.open("w", encoding="utf-8") as output:
+        output.write(
+            json.dumps(calls, sort_keys=True, separators=(",", ":")) + "\n"
+        )
+        output.flush()
+        os.fsync(output.fileno())
+    os.replace(replacement, calls_path)
+    fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
 if os.environ.get("FAKE_GH_FAIL") == "1":
     print("pull request not found", file=sys.stderr)
     raise SystemExit(1)
@@ -6934,21 +7297,21 @@ print(json.dumps({"ok": True}))
         gh = shutil.which("gh")
         if gh is None:
             self.skipTest("gh is unavailable")
-        fields = (
-            "number,url,state,isDraft,baseRefName,headRefName,headRefOid,"
-            "isCrossRepository,headRepository,headRepositoryOwner"
-        )
+        state_module = PrBabysitStateTests._state_module()
+        context = {
+            "github_host": "github.com",
+            "owner": "octo",
+            "repository": "example",
+            "pr_number": 999999999,
+        }
+        with mock.patch.dict(
+            os.environ,
+            {"PR_BABYSIT_GH_BIN": gh},
+            clear=False,
+        ):
+            command = state_module.github_publication_command(context)
         result = subprocess.run(
-            [
-                gh,
-                "pr",
-                "view",
-                "999999999",
-                "--repo",
-                "octo/example",
-                "--json",
-                fields,
-            ],
+            command,
             cwd=ROOT,
             env=os.environ
             | {
@@ -7383,18 +7746,24 @@ print(json.dumps({"ok": True}))
                             },
                         )
                     else:
+                        transition_payload = {
+                            "watch_id": watch_id,
+                            "to": state,
+                            **(
+                                {"reason": "later-blocker"}
+                                if state == "blocked"
+                                else {}
+                            ),
+                        }
+                        if state == "merge-ready":
+                            transition_payload["merge_ready_evidence"] = dict(
+                                MERGE_READY_EVIDENCE,
+                                current_head_sha="b" * 40,
+                            )
                         stopped = self._run(
                             env,
                             "transition",
-                            {
-                                "watch_id": watch_id,
-                                "to": state,
-                                **(
-                                    {"reason": "later-blocker"}
-                                    if state == "blocked"
-                                    else {}
-                                ),
-                            },
+                            transition_payload,
                         )
                     self.assertEqual(stopped.returncode, 0, stopped.stderr)
                     rearmed = self._run(
@@ -7740,18 +8109,24 @@ print(json.dumps({"ok": True}))
                             },
                         )
                     else:
+                        transition_payload = {
+                            "watch_id": watch_id,
+                            "to": state,
+                            **(
+                                {"reason": "verify-state"}
+                                if state in {"blocked", "terminal"}
+                                else {}
+                            ),
+                        }
+                        if state == "merge-ready":
+                            transition_payload["merge_ready_evidence"] = dict(
+                                MERGE_READY_EVIDENCE,
+                                current_head_sha="b" * 40,
+                            )
                         moved = self._run(
                             env,
                             "transition",
-                            {
-                                "watch_id": watch_id,
-                                "to": state,
-                                **(
-                                    {"reason": "verify-state"}
-                                    if state in {"blocked", "terminal"}
-                                    else {}
-                                ),
-                            },
+                            transition_payload,
                         )
                     self.assertEqual(moved.returncode, 0, moved.stderr)
                     verified = self._run(
@@ -7980,6 +8355,7 @@ print(json.dumps({"ok": True, "root_id": "repair-root"}))
         verdict_head_sha: str | None = None,
         verdict_generation: str = "1",
         verdict_action_id: str = "action-1",
+        claim_status: str = "claimed",
     ) -> tuple[pathlib.Path, dict[str, str], str, str, str]:
         root = _temporary_root(f"u6-validation-{name}-")
         repository = root / "repository"
@@ -8032,6 +8408,29 @@ print(json.dumps({"ok": True, "root_id": "repair-root"}))
         )
         subprocess.run(
             ["git", "-C", str(repository), "remote", "add", "origin", str(remote)],
+            check=True,
+        )
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(repository),
+                "remote",
+                "set-url",
+                "origin",
+                "https://github.com/octo/example.git",
+            ],
+            check=True,
+        )
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(repository),
+                "config",
+                f'url.file://{remote}.insteadOf',
+                "https://github.com/octo/example.git",
+            ],
             check=True,
         )
         subprocess.run(
@@ -8157,7 +8556,7 @@ print(json.dumps({"ok": True, "root_id": "repair-root"}))
                 "generation": "1",
                 "action_kind": "ci",
                 "action_fingerprint": "f" * 64,
-                "claim_status": "claimed",
+                "claim_status": claim_status,
                 "expected_old_head": old_sha,
                 "candidate_head_sha": new_sha,
                 "review_verdict": review_verdict,
@@ -8172,6 +8571,17 @@ print(json.dumps({"ok": True, "root_id": "repair-root"}))
                 "worktree_action_id": "action-1",
             },
         }
+        if claim_status == "result-recorded":
+            action["metadata"].update(
+                {
+                    "expected_new_head": new_sha,
+                    "expected_old_sha": old_sha,
+                    "expected_new_sha": new_sha,
+                    "pushed_sha": new_sha,
+                    "validation_status": "passed",
+                    "make_check_result": "passed",
+                }
+            )
         gc_script = bin_dir / "gc"
         gc_script.write_text(
             f"""#!{shutil.which("python3")}
@@ -8828,6 +9238,75 @@ else:
         finally:
             shutil.rmtree(root, ignore_errors=True)
 
+    def test_post_validator_git_disables_shared_hooks(self):
+        root, env, _, new_sha, _ = self._validation_fixture(
+            "shared-hook",
+        )
+        try:
+            hook = pathlib.Path(env["GC_RIG_ROOT"]) / ".git" / "hooks" / "pre-push"
+            hook.write_text(
+                "#!/bin/sh\n"
+                f"printf 'hook ran\\n' > {root / 'hook-called'}\n"
+                "exit 1\n",
+                encoding="utf-8",
+            )
+            hook.chmod(0o755)
+            result = self._run_validation(root, env)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertFalse((root / "hook-called").exists())
+            self.assertEqual(
+                subprocess.check_output(
+                    [
+                        "git",
+                        "--git-dir",
+                        str(root / "remote.git"),
+                        "rev-parse",
+                        "refs/heads/feature/u4",
+                    ],
+                    text=True,
+                ).strip(),
+                new_sha,
+            )
+            push_args = json.loads(
+                (root / "push-args.json").read_text(encoding="utf-8")
+            )
+            self.assertIn("-c", push_args)
+            self.assertIn("core.hooksPath=/dev/null", push_args)
+            self.assertIn("--no-verify", push_args)
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
+
+    def test_wrong_origin_blocks_before_validator_or_push(self):
+        root, env, _, _, _ = self._validation_fixture(
+            "wrong-origin",
+        )
+        try:
+            subprocess.run(
+                [
+                    "git",
+                    "-C",
+                    env["PR_BABYSIT_WORKTREE"],
+                    "remote",
+                    "set-url",
+                    "origin",
+                    "https://evil.example/octo/example.git",
+                ],
+                check=True,
+            )
+            result = self._run_validation(root, env)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("origin URL", result.stderr)
+            self.assertFalse((root / "validator-env.json").exists())
+            self.assertFalse((root / "push-called").exists())
+            calls = json.loads((root / "gc-calls.json").read_text())
+            result_call = calls[-1]
+            self.assertEqual(
+                result_call[result_call.index("--reason") + 1],
+                "origin-mismatch",
+            )
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
+
     def test_missing_or_stale_review_verdict_blocks_before_validation(self):
         for name, kwargs, reason in (
             (
@@ -8883,6 +9362,32 @@ else:
             self.assertEqual(
                 result_call[result_call.index("--pushed-sha") + 1],
                 new_sha,
+            )
+            self.assertNotEqual(old_sha, new_sha)
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
+
+    def test_crash_after_recorded_result_replays_without_validator_or_push(self):
+        root, env, old_sha, new_sha, _ = self._validation_fixture(
+            "crash-after-record",
+            remote_pre_pushed=True,
+            claim_status="result-recorded",
+        )
+        try:
+            result = self._run_validation(
+                root,
+                env,
+                extra_env={
+                    "PR_BABYSIT_VALIDATOR": str(root / "missing-validator"),
+                },
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertFalse((root / "push-called").exists())
+            self.assertFalse((root / "validator-env.json").exists())
+            calls = json.loads((root / "gc-calls.json").read_text())
+            self.assertEqual(
+                [call for call in calls if call[:2] == ["bd", "show"]],
+                [["bd", "show", "action-1", "--json"]],
             )
             self.assertNotEqual(old_sha, new_sha)
         finally:
@@ -9062,8 +9567,13 @@ else:
                         (root / "push-args.json").read_text()
                     )
                     self.assertEqual(
-                        push_args[-3:],
-                        ["push", "origin", "HEAD:refs/heads/feature/u4"],
+                        push_args[-4:],
+                        [
+                            "push",
+                            "--no-verify",
+                            "origin",
+                            "HEAD:refs/heads/feature/u4",
+                        ],
                     )
                 finally:
                     shutil.rmtree(root, ignore_errors=True)
@@ -9127,9 +9637,20 @@ else:
             self.assertTrue(path.is_file(), path)
 
     def test_repair_formula_compiles_with_native_formula_v2(self):
-        gc = shutil.which("gc")
-        if gc is None:
-            self.skipTest("gc unavailable")
+        gc = os.environ.get("GC_BIN")
+        if not gc:
+            self.skipTest("GC_BIN is not set; pinned native formula smoke is optional")
+        if not os.path.isabs(gc):
+            gc = shutil.which(gc) or str((ROOT / gc).resolve())
+        version = subprocess.run(
+            [gc, "version", "--json"],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(version.returncode, 0, version.stderr)
+        self.assertEqual(json.loads(version.stdout)["version"], GASCITY_VERSION)
         result = subprocess.run(
             [
                 gc,
@@ -9235,7 +9756,7 @@ else:
         ):
             self.assertIn(marker.lower(), prepare.lower() + "\n" + validate.lower())
         self.assertIn(
-            'git_bounded -C "$WORKTREE" push origin \\\n'
+            'git_post_validator -C "$WORKTREE" push --no-verify origin \\\n'
             '    "HEAD:refs/heads/$HEAD_REF"',
             validate,
         )
@@ -9253,17 +9774,19 @@ else:
         self.assertIn('"$VALIDATOR" "$WORKTREE"', validate)
         for marker in (
             "git -C \"$WORKTREE\" config --local --list",
-            "git -C \"$WORKTREE\" remote get-url origin",
+            "git -C \"$WORKTREE\" config --local --get remote.origin.url",
             "remote\\..*\\.fetch",
             "-u GH_TOKEN",
             "-u GITHUB_TOKEN",
             "-u COPILOT_TOKEN",
             "-u PR_BABYSIT_GITHUB_CAPABILITY_ATTESTED",
+            "core.hooksPath=/dev/null",
+            "push --no-verify",
         ):
             self.assertIn(marker, validate)
         self.assertEqual(validate.count("record_result()"), 1)
         self.assertEqual(
-            validate.count("gc pr-babysit pr-babysit record-repair-result"),
+            validate.count("gc core-city pr-babysit record-repair-result"),
             1,
         )
         for call in (
@@ -9987,6 +10510,142 @@ else:
             )
         finally:
             shutil.rmtree(root, ignore_errors=True)
+
+    def test_rearm_cleans_failed_ambiguous_and_formula_blocked_actions(self):
+        scenarios = (
+            "failed",
+            "result-recorded",
+            "ambiguous",
+            "formula-blocked",
+        )
+        for scenario in scenarios:
+            with self.subTest(scenario=scenario):
+                root, env = self._repair_fixture("rearm-" + scenario)
+                try:
+                    handoff = self._run(env, "handoff", self._HANDOFF)
+                    self.assertEqual(handoff.returncode, 0, handoff.stderr)
+                    watch_id = self._json(handoff)["watch_id"]
+                    dispatch_env = (
+                        env | {"FAKE_GC_FAIL": "1"}
+                        if scenario == "formula-blocked"
+                        else env
+                    )
+                    dispatched = self._dispatch(
+                        dispatch_env,
+                        watch_id,
+                        generation=1,
+                        head_sha="a" * 40,
+                        action_kind="ci",
+                        fingerprint=scenario,
+                    )
+                    self.assertEqual(
+                        dispatched.returncode,
+                        0 if scenario != "formula-blocked" else 1,
+                        dispatched.stderr,
+                    )
+                    action_id = (
+                        self._json(dispatched).get("action_id")
+                        if dispatched.stdout
+                        else None
+                    )
+                    if action_id is None:
+                        records = json.loads((root / "beads.json").read_text())
+                        action_id = next(
+                            record["id"]
+                            for record in records
+                            if record["id"] != watch_id
+                            and record["metadata"].get("watch_id") == watch_id
+                        )
+                    if scenario == "failed":
+                        recorded = self._run(
+                            env,
+                            "record-repair-result",
+                            {
+                                "watch_id": watch_id,
+                                "action_id": action_id,
+                                "generation": 1,
+                                "expected_old_sha": "a" * 40,
+                                "validation_status": "failed",
+                                "make_check_result": "failed",
+                                "reason": "validator-failed",
+                            },
+                        )
+                        self.assertEqual(recorded.returncode, 0, recorded.stderr)
+                    elif scenario in {"result-recorded", "ambiguous"}:
+                        verdict = self._run(
+                            env,
+                            "record-review-verdict",
+                            {
+                                "watch_id": watch_id,
+                                "action_id": action_id,
+                                "generation": 1,
+                                "candidate_head_sha": "b" * 40,
+                                "verdict": "passed",
+                            },
+                        )
+                        self.assertEqual(verdict.returncode, 0, verdict.stderr)
+                        result_payload = {
+                            "watch_id": watch_id,
+                            "action_id": action_id,
+                            "generation": 1,
+                            "expected_old_sha": "a" * 40,
+                            "pushed_sha": "b" * 40,
+                            "validation_status": "passed",
+                            "make_check_result": "passed",
+                        }
+                        if scenario == "ambiguous":
+                            result_payload["remote_head_sha"] = "c" * 40
+                        recorded = self._run(
+                            env,
+                            "record-repair-result",
+                            result_payload,
+                        )
+                        self.assertEqual(recorded.returncode, 0, recorded.stderr)
+                        if scenario == "result-recorded":
+                            blocked = self._run(
+                                env,
+                                "transition",
+                                {
+                                    "watch_id": watch_id,
+                                    "to": "blocked",
+                                    "reason": "recorded-result-rearm",
+                                },
+                            )
+                            self.assertEqual(blocked.returncode, 0, blocked.stderr)
+                    else:
+                        self.assertEqual(
+                            self._json(
+                                self._run(env, "show", {"watch_id": watch_id})
+                            )["metadata"]["state"],
+                            "blocked",
+                        )
+                    rearmed = self._run(
+                        env,
+                        "handoff",
+                        dict(
+                            self._HANDOFF,
+                            rearm=True,
+                            observed_at="2026-09-02T00:00:00Z",
+                            backstop_at="2026-09-05T00:00:00Z",
+                        ),
+                    )
+                    self.assertEqual(rearmed.returncode, 0, rearmed.stderr)
+                    watch = self._json(rearmed)
+                    self.assertEqual(watch["state"], "watching")
+                    records = json.loads((root / "beads.json").read_text())
+                    action = next(
+                        record
+                        for record in records
+                        if record["id"] == action_id
+                    )
+                    self.assertEqual(
+                        action["metadata"]["claim_status"],
+                        "stale",
+                    )
+                    self.assertEqual(action["status"], "closed")
+                    self.assertNotIn(action_id, action.get("blocked_by", []))
+                finally:
+                    shutil.rmtree(root, ignore_errors=True)
 
     def test_review_budget_is_two_across_new_heads(self):
         root, env = self._repair_fixture("review-budget")

@@ -15,7 +15,7 @@
       "local": "skills/pr-babysit/SKILL.md",
       "source": "skills/ce-babysit-pr/SKILL.md",
       "sha256": "a611e493ae6979063d71f4990c2f6cda9c9f1a4b114a83717c26c66c4cf4bd90",
-      "local_sha256": "8922231e0f85a889895397d8472a35484a96373ecb2efc5d513767319545e511"
+      "local_sha256": "c13da9a8f8d02c36de2d8f5a10ea23dd57a8f8074bb2bef917990cc34eb02806"
     },
     {
       "local": "skills/pr-babysit/references/branch-currency.md",
@@ -42,19 +42,20 @@
     {
       "local": "skills/pr-babysit/references/settle.md",
       "source": "skills/ce-babysit-pr/references/settle.md",
-      "sha256": "e83f49cb2511f68cf9131584737b73a91ae9a2a92435f7fd70cba40b99fc1759"
+      "sha256": "e83f49cb2511f68cf9131584737b73a91ae9a2a92435f7fd70cba40b99fc1759",
+      "local_sha256": "325165b26f0945dc988df09bc8ba6dbc1baad1311a0d39d946b60f3253923e1f"
     },
     {
       "local": "skills/pr-babysit/references/setup.md",
       "source": "skills/ce-babysit-pr/references/setup.md",
       "sha256": "0465242d6116c3f958f76cc332c1af34896f48d8e8cc4c9716b0f089d1809954",
-      "local_sha256": "c026058ecccf8bc97ea4de8edcd380e5652b7011469bee55b449a76f2a7e9141"
+      "local_sha256": "d3eee9d0b5a132738613b353de879cdb52ceab1394d274101de7749d8377818c"
     },
     {
       "local": "skills/pr-babysit/references/tick.md",
       "source": "skills/ce-babysit-pr/references/tick.md",
       "sha256": "cf1fc87e87a3520c9446d997ff09ba2cccacb4a5e0a33f33fb9752325ede820c",
-      "local_sha256": "74fe9650e6d5904ecb60a85ac0513f8b53899c5a7b4a2e673fb23a949ffc8d91"
+      "local_sha256": "1111fdd1f0852a6b895ed873bd9dd8e4589c42d1c53d23502795ba78041afe96"
     },
     {
       "local": "skills/pr-babysit/references/watch-loop.md",
@@ -65,7 +66,7 @@
       "local": "skills/pr-babysit/scripts/pr-snapshot",
       "source": "skills/ce-babysit-pr/scripts/pr-snapshot",
       "sha256": "fd8a0b403703714a1257530e7053461e437b662b0ef381f780b8850439d980e7",
-      "local_sha256": "b8aaff26d9542181446b86b11280f5330fd7d532fdfd2027a2afabdfd9e4bb97"
+      "local_sha256": "485f39b22e88f50e8c6e03c154e312c049f86cea64af81941d1810548fbaccaf"
     }
   ],
   "excluded_surfaces": [
@@ -87,6 +88,8 @@
     "Adapt report status examples from Unicode symbols and em dashes to ASCII text and hyphen punctuation while retaining the upstream source hash.",
     "Retain only the deployed snapshot command and canonical identity flags while preserving all normalization helpers.",
     "Add bounded local feedback disposition by stable item identity and reopen changed content.",
-    "Bind repair validation to a persisted candidate head and independent reviewer verdict."
+    "Bind repair validation to a persisted candidate head and independent reviewer verdict.",
+    "Require structured current-snapshot merge-ready evidence and use crash-safe same-directory state writes.",
+    "Expose the deterministic state CLI through the city-scoped core-city pack and keep the rig-imported pack command-free."
   ]
 }

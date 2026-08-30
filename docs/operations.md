@@ -290,6 +290,13 @@ repository action. It fails closed if `GC_DIR`, `GC_RIG_ROOT`, the projection,
 or the pinned skill is missing or stale. The projection never writes the rig
 root or a user-global directory.
 
+The deterministic state CLI is exposed once by the already city-scoped
+`packs/core-city` pack as `gc core-city pr-babysit <action>`. Its wrapper
+delegates through the repository-relative sibling path
+`packs/pr-babysit/assets/scripts/pr-babysit-state.py` and fails closed when
+that helper is absent, not executable, or outside the expected packs root.
+The rig-imported pack has no second command entrypoint.
+
 Inspect the native surfaces without starting a service:
 
 ```text
@@ -307,10 +314,10 @@ calls the local command below with the verified publication bead and PR
 identity:
 
 ```text
-gc pr-babysit pr-babysit publication-handoff \
+gc core-city pr-babysit publication-handoff \
   --rig d2b --publication-bead-id <publication-bead-id> \
   --url <pull-request-url> --pr-number <number> --json
-gc pr-babysit pr-babysit verify-handoff \
+gc core-city pr-babysit verify-handoff \
   --rig d2b --publication-bead-id <publication-bead-id> \
   --url <pull-request-url> --pr-number <number> --json
 ```
@@ -328,7 +335,7 @@ another wake. Publication may close only after
 `verify-handoff` re-reads the matching receipt. Inspect safe state with:
 
 ```text
-gc pr-babysit pr-babysit show --watch-id <watch-id> --json
+gc core-city pr-babysit show --watch-id <watch-id> --json
 ```
 
 The handoff result carries
@@ -378,7 +385,7 @@ rig and limit, lists due records, rechecks that each is still a routable
 target:
 
 ```text
-gc pr-babysit pr-babysit sweep --rig d2b --limit 32 --json
+gc core-city pr-babysit sweep --rig d2b --limit 32 --json
 ```
 
 One checkpoint is one fresh snapshot, one ordered decision pass, and one
@@ -387,8 +394,10 @@ reconciliation, review feedback, current-head CI, exact branch currency, then
 settle or wait. A repair action follows `claim -> act -> confirm`; its child
 must be linked with `bd dep <action-id> --blocks <watch-id>`. Native
 dependency-close wake resumes the watch only after the action is confirmed.
-The order is short-lived and owns no daemon, webhook, relay, or in-session
-watcher process.
+Due listing uses an unbounded metadata-filtered Beads listing, then sorts by
+due time and applies the requested limit, so a large watch set cannot starve
+older due records. The order is short-lived and owns no daemon, webhook,
+relay, or in-session watcher process.
 
 ### Bounded repair and stop behavior
 
@@ -397,9 +406,14 @@ watcher process.
 `close-action` steps. It uses the existing PR head and branch, validates
 `make check`, records a candidate head and independent reviewer verdict,
 performs one normal push, verifies the new remote SHA, and confirms the
-action. Git fetch, push, and `ls-remote` calls use a bounded timeout and
-reconcile the remote after failures. It never creates a replacement PR or
-remote branch.
+action. The Formula workflow is attached to the durable watch bead; the
+action child carries the claim and blocks that watch until confirmation. Git
+fetch, push, and `ls-remote` calls use a bounded timeout and reconcile the
+remote after failures. It never creates a replacement PR or remote branch.
+If a crash leaves an action `claim_status=result-recorded`, replay verifies the
+persisted candidate, verdict, validation, pushed SHA, and remote head, then
+returns successfully without rerunning validation or pushing; `close-action`
+performs the final confirmation.
 
 CI repairs have three attempts per normalized head and failure fingerprint;
 review repairs have two. The active budget is eight active hours and the hard
@@ -407,6 +421,12 @@ backstop is three days. A new fingerprint has its own bounded counter. A
 failed validation, stale remote, missing branch, or uncertain result is a
 blocker. An ambiguous push records `ambiguous-outcome`, blocks the watch, and
 is never retried.
+
+`merge-ready` requires a structured current-snapshot evidence object with
+`current_head_sha`, certain mergeability, a clean branch, terminal and
+successful required checks, no actionable feedback, no pending human
+interaction, no currency item, and a satisfied quiet window. Missing or false
+evidence is rejected.
 
 `MERGED` and `CLOSED` are absorbing `terminal` outcomes. An open
 `blocked`, `exhausted`, or `merge-ready` watch may be explicitly rearmed with
@@ -444,7 +464,7 @@ request:
 ```text
 PR_BABYSIT_GITHUB_CAPABILITY_ATTESTED=contents-write,pull-requests-read \
 PR_BABYSIT_VALIDATOR_ATTESTED=credential-isolated-v1 \
-  gc pr-babysit pr-babysit check-credentials --json
+  gc core-city pr-babysit check-credentials --json
 ```
 
 This command checks the operator attestations and token separation only. The

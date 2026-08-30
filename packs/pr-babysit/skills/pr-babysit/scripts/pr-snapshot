@@ -24,6 +24,7 @@ import shlex
 import stat
 import subprocess
 import sys
+import tempfile
 import time
 import uuid
 from pathlib import Path
@@ -42,6 +43,7 @@ FAILING = {
 OPEN = "open"
 ISO_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
 GITHUB_TIMEOUT_SECONDS = 30
+QUIET_WINDOW_SECONDS = 5 * 60
 MAX_GRAPHQL_PAGES = 20
 MAX_GRAPHQL_THREADS = 2_000
 MAX_GRAPHQL_COMMENTS = 2_000
@@ -994,24 +996,78 @@ def _state_dir(args: argparse.Namespace) -> Path:
 
 
 def _atomic_write(path: Path, value: dict[str, Any]) -> None:
-    replacement = path.with_name(f"{path.name}.next")
     _validate_path(
         path.parent,
         label="state directory",
         allow_missing=False,
     )
-    if replacement.exists() or replacement.is_symlink():
-        _error("state replacement path already exists")
+    if path.is_symlink():
+        _error("state journal is a symlink")
+    stale_names = {f"{path.name}.next"}
+    stale_prefix = f".{path.name}."
     try:
-        replacement.write_text(
-            json.dumps(value, indent=2, sort_keys=True, ensure_ascii=False)
-            + "\n",
-            encoding="utf-8",
-        )
-        os.chmod(replacement, 0o600)
-        os.replace(replacement, path)
+        candidates = list(path.parent.iterdir())
     except OSError:
         _error("state journal could not be written")
+    for candidate in candidates:
+        if candidate.name not in stale_names and not (
+            candidate.name.startswith(stale_prefix)
+            and candidate.name.endswith(".tmp")
+        ):
+            continue
+        try:
+            info = candidate.lstat()
+        except OSError:
+            _error("state journal could not be written")
+        if stat.S_ISLNK(info.st_mode):
+            _error("state replacement path is a symlink")
+        if not stat.S_ISREG(info.st_mode):
+            _error("state replacement path is not a regular file")
+        try:
+            candidate.unlink()
+        except OSError:
+            _error("state journal could not be written")
+    replacement: Path | None = None
+    try:
+        descriptor, name = tempfile.mkstemp(
+            prefix=stale_prefix,
+            suffix=".tmp",
+            dir=path.parent,
+        )
+        replacement = Path(name)
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            handle.write(
+                json.dumps(value, indent=2, sort_keys=True, ensure_ascii=False)
+                + "\n"
+            )
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.chmod(replacement, 0o600)
+        os.replace(replacement, path)
+        replacement = None
+        try:
+            directory_fd = os.open(path.parent, os.O_RDONLY)
+        except OSError:
+            _error("state journal could not be written")
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
+    except OSError:
+        _error("state journal could not be written")
+    finally:
+        if replacement is not None:
+            try:
+                info = replacement.lstat()
+            except FileNotFoundError:
+                info = None
+            except OSError:
+                info = None
+            if info is not None and stat.S_ISREG(info.st_mode):
+                try:
+                    replacement.unlink()
+                except OSError:
+                    pass
 
 
 @contextlib.contextmanager
@@ -1033,9 +1089,9 @@ def _locked_state(
     os.chmod(state_dir, 0o700)
     lock_path = state_dir / "lock"
     state_path = state_dir / "state.json"
-    if lock_path.exists() and lock_path.is_symlink():
+    if lock_path.is_symlink():
         _error("state lock is a symlink")
-    if state_path.exists() and state_path.is_symlink():
+    if state_path.is_symlink():
         _error("state journal is a symlink")
     flags = os.O_RDWR | os.O_CREAT
     if hasattr(os, "O_NOFOLLOW"):
@@ -1349,6 +1405,32 @@ def _snapshot(
         "invocation_started_at": state.get("started_at"),
         "invocation_budget_seconds": state.get("invocation_budget_seconds"),
         "unrequested_base_merge": current.get("unrequested_base_merge"),
+    }
+    result["merge_ready_evidence"] = {
+        "current_head_sha": head,
+        "mergeability_certain": (
+            current.get("mergeable") == "MERGEABLE"
+            and base.get("identity") == "current"
+            and identity_blocker is None
+        ),
+        "branch_clean": (
+            str(current.get("merge_state_status") or "").upper() == "CLEAN"
+            and currency is None
+        ),
+        "required_checks_terminal": checks_terminal,
+        "required_checks_successful": (
+            bool(state["checks"]) and checks_terminal and not has_failing
+        ),
+        "no_actionable_feedback": not actionable_threads and not actionable_feedback,
+        "no_pending_human_interaction": (
+            not state.get("needs_human_residuals")
+            and not current.get("review_in_progress", False)
+        ),
+        "no_currency_item": currency is None,
+        "quiet_window_satisfied": (
+            _elapsed(state.get("last_change_at")) >= QUIET_WINDOW_SECONDS
+            and not current.get("review_in_progress", False)
+        ),
     }
     return result
 

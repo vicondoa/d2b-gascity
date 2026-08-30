@@ -34,6 +34,10 @@ executable `PR_BABYSIT_VALIDATOR` and set
 in a credential- and network-isolated environment, and a missing validator
 blocks repair. It may never merge; it may never force-push or rebase, approve
 workflow runs, or update branch currency. Merge decisions remain human-owned.
+The deterministic state CLI is exposed only through the city-scoped
+`core-city` pack as `gc core-city pr-babysit <action>`, delegating to the
+rig-imported helper without importing that pack city-wide or exposing a second
+command entrypoint.
 Host branch protection for `v3` is defense-in-depth: it must require pull
 requests and apply to administrators. This repository does not claim that the
 current host is already configured that way.

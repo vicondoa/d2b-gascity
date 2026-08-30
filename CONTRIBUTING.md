@@ -51,14 +51,18 @@ state.
   `city-source/pr-babysit.pr-babysitter`; keep the workdir-local
   `.github/skills/pr-babysit` and `.agents/skills/pr-babysit` projection and
   its mandatory prompt gate intact.
+- The deterministic state CLI is exposed only by the already city-scoped
+  `packs/core-city` pack as `gc core-city pr-babysit <action>`. It delegates
+  to the sibling helper in the rig-imported pack; do not add a second command
+  entrypoint or import the rig pack city-wide.
 - Publication must refuse direct merges and never merge or force-push. Host
   branch protection for `v3` is defense-in-depth and must require pull
   requests and apply to administrators; this repository does not claim the
   current host is already configured that way. Merge decisions remain
   human-owned.
 - Keep publication handoff deterministic: run
-  `gc pr-babysit pr-babysit publication-handoff`, then
-  `gc pr-babysit pr-babysit verify-handoff`, before a publish bead closes.
+  `gc core-city pr-babysit publication-handoff`, then
+  `gc core-city pr-babysit verify-handoff`, before a publish bead closes.
   The `1m` `pr-babysit-sweep` order and native dependency-close wake own
   checkpoint routing; do not add a daemon, webhook, relay, service, or
   publication helper.

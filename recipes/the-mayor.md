@@ -29,10 +29,10 @@ When publication opens or updates a pull request, the mayor routes the native
 pack handoff and waits for its deterministic receipt:
 
 ```text
-gc pr-babysit pr-babysit publication-handoff \
+gc core-city pr-babysit publication-handoff \
   --rig <rig> --publication-bead-id <publication-bead-id> \
   --url <pull-request-url> --pr-number <number> --json
-gc pr-babysit pr-babysit verify-handoff \
+gc core-city pr-babysit verify-handoff \
   --rig <rig> --publication-bead-id <publication-bead-id> \
   --url <pull-request-url> --pr-number <number> --json
 ```

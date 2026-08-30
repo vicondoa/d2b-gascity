@@ -95,6 +95,13 @@ publication machinery is introduced. Repairs are same-repository-only:
 cross-repository PRs are human blockers in v1 and receive no autonomous
 repair.
 
+The deterministic state CLI is city-scoped at `gc core-city pr-babysit
+<action>`. Its wrapper accepts only the sibling helper under
+`packs/pr-babysit/assets/scripts/`, verifies that the helper is executable,
+and rejects symlinks or paths resolving outside the expected packs root.
+The rig-imported pack is not imported city-wide and does not expose a second
+command entrypoint.
+
 ### PR babysitting rollout
 
 d2b is enabled first. The `city-source` rig remains suspended-on-start and
