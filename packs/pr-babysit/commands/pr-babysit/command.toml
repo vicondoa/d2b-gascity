@@ -6,7 +6,7 @@ claims, formula attachment, validation results, and confirmation in Beads.
 identifiers; `confirm-action` closes the action child after the pushed SHA is
 verified. Repair dispatch requires operator-attested least-privilege GitHub
 capability and rejects coupled Copilot credentials. `check-credentials` only
-checks the operator attestation and token separation; it never introspects
-fine-grained permissions.
+checks the operator capability and credential-isolated validator attestations
+plus token separation; it never introspects fine-grained permissions.
 """
 run = "run.sh"

@@ -50,6 +50,7 @@ TIME_BUDGET_REASON = "time-budget-exhausted"
 BACKSTOP_REASON = "backstop-expired"
 ATTEMPT_LIMITS = {"ci": 3, "review": 2}
 REPAIR_FORMULA = "mol-pr-babysit-repair"
+VALIDATOR_ATTESTATION = "credential-isolated-v1"
 ACTIVE_BUDGET = timedelta(hours=8)
 BACKSTOP_BUDGET = timedelta(days=3)
 ORDER_TIMEOUT_SECONDS = 30
@@ -85,6 +86,7 @@ SAFE_METADATA_KEYS = {
     "target_branch",
     "merge_strategy",
     "head_ref",
+    "head_repository",
     "head_sha",
     "observed_head_sha",
     "posture",
@@ -363,6 +365,11 @@ def require_repair_credentials() -> None:
             "Pull requests read capability",
             "credential-capability",
         )
+    if os.environ.get("PR_BABYSIT_VALIDATOR_ATTESTED", "") != VALIDATOR_ATTESTATION:
+        fail(
+            "repair requires an attested credential-isolated validator",
+            "credential-validator",
+        )
 
 
 def check_repair_credentials() -> dict[str, Any]:
@@ -371,6 +378,7 @@ def check_repair_credentials() -> dict[str, Any]:
         "ok": True,
         "action": "check-credentials",
         "operator_attested": True,
+        "validator_attested": True,
     }
 
 
@@ -466,6 +474,21 @@ def payload_value(payload: dict[str, Any], *names: str) -> Any:
     return None
 
 
+def repository_name_with_owner(
+    value: Any,
+    field: str,
+) -> str:
+    if not isinstance(value, str):
+        fail(f"{field} must be an owner/repository identity", "identity-mismatch")
+    text = text_value(value, field)
+    parts = text.split("/")
+    if len(parts) != 2:
+        fail(f"{field} must be an owner/repository identity", "identity-mismatch")
+    owner = safe_slug(parts[0], f"{field}_owner")
+    repository = safe_slug(parts[1], field)
+    return f"{owner.lower()}/{repository.lower()}"
+
+
 def parse_identity(payload: dict[str, Any]) -> dict[str, Any]:
     if "verified" in payload and not bool_value(payload["verified"], "verified"):
         fail("verified handoff is required")
@@ -545,6 +568,24 @@ def parse_identity(payload: dict[str, Any]) -> dict[str, Any]:
     if head_sha != current_sha:
         fail("head_sha and current_sha must match")
 
+    head_repository_raw = payload_value(
+        payload,
+        "head_repository",
+        "head_repository_name_with_owner",
+    )
+    head_repository = None
+    if head_repository_raw is not None:
+        head_repository = repository_name_with_owner(
+            head_repository_raw,
+            "head_repository",
+        )
+        expected_repository = f"{owner.lower()}/{repository.lower()}"
+        if head_repository != expected_repository:
+            fail(
+                "pull-request head repository does not match base repository",
+                "cross-repository-head",
+            )
+
     pr_state_raw = payload_value(payload, "pr_state", "state")
     pr_state = (
         text_value(pr_state_raw, "pr_state").upper()
@@ -567,6 +608,8 @@ def parse_identity(payload: dict[str, Any]) -> dict[str, Any]:
         "head_sha": current_sha,
         "observed_head_sha": current_sha,
     }
+    if head_repository is not None:
+        identity["head_repository"] = head_repository
     identity["pr_state"] = pr_state
     return identity
 
@@ -1007,6 +1050,10 @@ def immutable_matches(
         expected = identity[key] if key not in {"target_posture", "posture"} else "target"
         if metadata.get(key) != str(expected):
             fail("existing watch identity does not match handoff", "identity-mismatch")
+    if "head_repository" in identity and metadata.get("head_repository") != str(
+        identity["head_repository"]
+    ):
+        fail("existing watch head repository does not match handoff", "identity-mismatch")
 
 
 def metadata_response(
@@ -1214,6 +1261,7 @@ def action_metadata(
         "url": identity.get("url", ""),
         "base_ref": identity.get("base_ref", ""),
         "head_ref": identity.get("head_ref", ""),
+        "head_repository": identity.get("head_repository", ""),
         "head_sha": head_sha,
         "observed_head_sha": head_sha,
         "posture": "target",
@@ -1270,6 +1318,7 @@ def create_action(
         "url",
         "base_ref",
         "head_ref",
+        "head_repository",
         "head_sha",
         "observed_head_sha",
         "posture",
@@ -1819,6 +1868,66 @@ def publication_context(
     }
 
 
+def github_repository_identity(
+    value: Any,
+    field: str,
+    *,
+    require_name_with_owner: bool = False,
+) -> str:
+    if require_name_with_owner and not isinstance(value, dict):
+        fail(
+            f"GitHub response {field} identity is malformed",
+            "github-invalid-response",
+        )
+    if isinstance(value, dict):
+        if require_name_with_owner:
+            name_with_owner = value.get("nameWithOwner")
+        else:
+            name_with_owner = (
+                value.get("nameWithOwner")
+                or value.get("name_with_owner")
+                or value.get("fullName")
+                or value.get("full_name")
+            )
+        if name_with_owner is None and not require_name_with_owner:
+            owner_value = value.get("owner")
+            if isinstance(owner_value, dict):
+                owner_value = owner_value.get("login") or owner_value.get("name")
+            name_value = value.get("name")
+            if owner_value and name_value:
+                name_with_owner = f"{owner_value}/{name_value}"
+        value = name_with_owner
+    if value is None:
+        fail(
+            f"GitHub response is missing {field} identity",
+            "github-invalid-response",
+        )
+    try:
+        return repository_name_with_owner(value, field)
+    except StateError:
+        fail(
+            f"GitHub response {field} identity is malformed",
+            "github-invalid-response",
+        )
+
+
+def github_repository_owner(value: Any, field: str) -> str:
+    if isinstance(value, dict):
+        value = value.get("login") or value.get("name")
+    if value is None or not isinstance(value, str):
+        fail(
+            f"GitHub response is missing {field} owner",
+            "github-invalid-response",
+        )
+    try:
+        return safe_slug(value, f"{field}_owner").lower()
+    except StateError:
+        fail(
+            f"GitHub response {field} owner is malformed",
+            "github-invalid-response",
+        )
+
+
 def query_github_publication(context: dict[str, Any]) -> dict[str, Any]:
     number = context.get("pr_number")
     if number is None:
@@ -1833,7 +1942,7 @@ def query_github_publication(context: dict[str, Any]) -> dict[str, Any]:
         "--json",
         (
             "number,url,state,isDraft,baseRefName,headRefName,headRefOid,"
-            "repository"
+            "repository,isCrossRepository,headRepository,headRepositoryOwner"
         ),
     ]
     environment = os.environ.copy()
@@ -1919,6 +2028,39 @@ def query_github_publication(context: dict[str, Any]) -> dict[str, Any]:
     )
     head_sha = sha_value(sha_value_raw, "head_sha")
 
+    cross_value = raw.get("isCrossRepository", raw.get("cross_repository"))
+    if cross_value is None:
+        fail(
+            "GitHub response is missing cross-repository status",
+            "github-invalid-response",
+        )
+    try:
+        cross_repository = bool_value(cross_value, "isCrossRepository")
+    except StateError:
+        fail(
+            "GitHub response cross-repository status is malformed",
+            "github-invalid-response",
+        )
+    head_repository = github_repository_identity(
+        raw.get("headRepository", raw.get("head_repository")),
+        "headRepository",
+        require_name_with_owner=True,
+    )
+    head_repository_owner = github_repository_owner(
+        raw.get("headRepositoryOwner", raw.get("head_repository_owner")),
+        "headRepositoryOwner",
+    )
+    expected_repository = f"{context['owner']}/{context['repository']}"
+    if (
+        cross_repository
+        or head_repository != expected_repository
+        or head_repository_owner != context["owner"]
+    ):
+        fail(
+            "cross-repository pull-request heads are not supported",
+            "cross-repository-head",
+        )
+
     repository_value = raw.get("repository")
     if repository_value is not None:
         if isinstance(repository_value, dict):
@@ -1957,6 +2099,7 @@ def query_github_publication(context: dict[str, Any]) -> dict[str, Any]:
         "url": canonical_url,
         "base_ref": base_ref,
         "head_ref": head_ref,
+        "head_repository": head_repository,
         "head_sha": head_sha,
         "current_sha": head_sha,
         "pr_state": state,
@@ -2156,6 +2299,7 @@ def watch_identity_from_metadata(
         "url",
         "base_ref",
         "head_ref",
+        "head_repository",
         "head_sha",
     ):
         if not metadata.get(key):
@@ -2175,6 +2319,16 @@ def watch_identity_from_metadata(
     if base_ref != context["base_ref"]:
         fail("watch base does not match publication", "identity-mismatch")
     head_ref = validate_git_ref(metadata["head_ref"], "head_ref")
+    head_repository = repository_name_with_owner(
+        metadata["head_repository"],
+        "head_repository",
+    )
+    expected_repository = f"{context['owner']}/{context['repository']}"
+    if head_repository != expected_repository:
+        fail(
+            "watch head repository does not match publication",
+            "identity-mismatch",
+        )
     head_sha = sha_value(metadata["head_sha"], "head_sha")
     return {
         "rig": metadata.get("rig", ""),
@@ -2186,6 +2340,7 @@ def watch_identity_from_metadata(
         "url": f"https://{host}/{owner.lower()}/{repository.lower()}/pull/{number}",
         "base_ref": base_ref,
         "head_ref": head_ref,
+        "head_repository": head_repository,
         "head_sha": head_sha,
     }
 
@@ -2397,6 +2552,20 @@ def _claim_action_locked(
     _, metadata = show_issue(watch_id)
     if metadata.get("record_kind") != "watch":
         fail("requested Beads record is not a watch", "identity-mismatch")
+    head_repository = metadata.get("head_repository", "")
+    if not head_repository:
+        fail(
+            "watch head repository identity is missing",
+            "identity-mismatch",
+        )
+    if head_repository != (
+        f"{metadata.get('owner', '').lower()}/"
+        f"{metadata.get('repository', '').lower()}"
+    ):
+        fail(
+            "watch head repository does not match base repository",
+            "cross-repository-head",
+        )
     state = state_from_metadata(metadata)
     generation = generation_from_metadata(metadata)
     attempts = attempts_from_metadata(metadata)
@@ -2484,6 +2653,7 @@ def _claim_action_locked(
                 "url": metadata.get("url", ""),
                 "base_ref": metadata.get("base_ref", ""),
                 "head_ref": metadata.get("head_ref", ""),
+                "head_repository": metadata.get("head_repository", ""),
             },
             generation,
             action_kind,
@@ -2585,6 +2755,7 @@ def repair_formula_vars(
         "pr_number": watch_metadata.get("pr_number", ""),
         "base_ref": watch_metadata.get("base_ref", ""),
         "head_ref": watch_metadata.get("head_ref", ""),
+        "head_repository": watch_metadata.get("head_repository", ""),
         "observed_head_sha": watch_metadata.get("head_sha", ""),
         "watch_id": action_metadata_value.get("watch_id", ""),
         "action_id": action_id,
@@ -2609,6 +2780,12 @@ def repair_formula_vars(
     )
     validate_git_ref(required["base_ref"], "base_ref")
     validate_git_ref(required["head_ref"], "head_ref")
+    head_repository = repository_name_with_owner(
+        required["head_repository"],
+        "head_repository",
+    )
+    if head_repository != f"{required['owner'].lower()}/{required['repository'].lower()}":
+        fail("repair head repository does not match publication", "identity-mismatch")
     sha_value(required["observed_head_sha"], "observed_head_sha")
     integer_value(required["generation"], "generation")
     return sorted(required.items())
@@ -2813,6 +2990,7 @@ def action_context(
         "url",
         "base_ref",
         "head_ref",
+        "head_repository",
         "head_sha",
         "observed_head_sha",
         "posture",
@@ -2885,6 +3063,11 @@ def _record_repair_result_locked(payload: dict[str, Any]) -> dict[str, Any]:
     ).lower()
     if make_check_result not in VALIDATION_STATUSES:
         fail("make_check_result is not supported")
+    result_reason = safe_reason(
+        payload_value(payload, "reason", "failure_reason"),
+        "reason",
+        required=False,
+    )
     if validation_status == "passed" and make_check_result != "passed":
         fail("a passed repair result requires a passed make check")
     addressed_thread_ids = safe_identifier_list(
@@ -2946,7 +3129,7 @@ def _record_repair_result_locked(payload: dict[str, Any]) -> dict[str, Any]:
         "terminal_reason": (
             AMBIGUOUS_REASON
             if validation_status == "ambiguous"
-            else "repair-validation-failed"
+            else result_reason or "repair-validation-failed"
             if validation_status == "failed"
             else ""
         ),
@@ -2985,7 +3168,7 @@ def _record_repair_result_locked(payload: dict[str, Any]) -> dict[str, Any]:
         watch_updates.update(
             {
                 "state": "blocked",
-                "terminal_reason": "repair-validation-failed",
+                "terminal_reason": result_reason or "repair-validation-failed",
                 "blocker_emitted": "true",
             }
         )

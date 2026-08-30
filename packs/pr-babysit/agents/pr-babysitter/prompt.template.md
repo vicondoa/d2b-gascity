@@ -106,6 +106,7 @@ metadata.rig
 metadata.github_host
 metadata.owner
 metadata.repository
+metadata.head_repository
 metadata.pr_number
 metadata.url
 metadata.base_ref
@@ -117,6 +118,8 @@ metadata.state
 
 The verified rig must carry its canonical base: `d2b` uses `v3` and
 `city-source` uses `main`. Reject any other rig/base pairing.
+Reject any cross-repository head; `metadata.head_repository` must equal the
+verified base repository before any repair action.
 
 Reject missing, malformed, stale, or mismatched fields. Do not infer any
 identity from the current branch. Validate the ephemeral state path before

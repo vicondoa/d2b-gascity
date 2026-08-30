@@ -22,6 +22,7 @@ RIG='{{rig}}'
 GITHUB_HOST='{{github_host}}'
 OWNER='{{owner}}'
 REPOSITORY='{{repository}}'
+HEAD_REPOSITORY='{{head_repository}}'
 URL='{{url}}'
 PR_NUMBER='{{pr_number}}'
 BASE_REF='{{base_ref}}'
@@ -43,6 +44,8 @@ esac
 [ -n "$GITHUB_HOST" ] || blocker 'GitHub host is missing'
 [ -n "$OWNER" ] || blocker 'repository owner is missing'
 [ -n "$REPOSITORY" ] || blocker 'repository name is missing'
+[ "$HEAD_REPOSITORY" = "$OWNER/$REPOSITORY" ] ||
+    blocker 'pull-request head repository is not the verified base repository'
 [ -n "$URL" ] || blocker 'pull-request URL is missing'
 [ -n "$PR_NUMBER" ] || blocker 'PR number is missing'
 [ -n "$WATCH_ID" ] || blocker 'watch ID is missing'
@@ -85,6 +88,8 @@ esac
 git check-ref-format --branch "$HEAD_REF" >/dev/null 2>&1 ||
     blocker 'head ref is invalid'
 
+# The verified same-repository identity is authoritative; never infer a fork
+# head from the base repository's origin.
 if ! git -C "$GC_RIG_ROOT" fetch --prune origin \
     "refs/heads/$HEAD_REF:refs/remotes/origin/$HEAD_REF" \
     >/dev/null 2>&1; then
@@ -131,6 +136,7 @@ expect_meta rig "$RIG"
 expect_meta github_host "$GITHUB_HOST"
 expect_meta owner "$OWNER"
 expect_meta repository "$REPOSITORY"
+expect_meta head_repository "$HEAD_REPOSITORY"
 expect_meta url "$URL"
 expect_meta pr_number "$PR_NUMBER"
 expect_meta base_ref "$BASE_REF"

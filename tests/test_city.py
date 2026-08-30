@@ -3512,6 +3512,7 @@ class PrBabysitStateTests(unittest.TestCase):
         "pr_number": 7,
         "base_ref": "v3",
         "head_ref": "feature/u3",
+        "head_repository": "octo/example",
         "head_sha": "a" * 40,
         "current_sha": "a" * 40,
         "observed_at": "2026-08-29T19:00:00Z",
@@ -4293,6 +4294,7 @@ if command == "close":
             other_repo = dict(
                 self._HANDOFF,
                 repository="other",
+                head_repository="octo/other",
                 url="https://github.com/octo/other/pull/7",
             )
             other_rig = dict(
@@ -4301,6 +4303,7 @@ if command == "close":
                 prefix="city",
                 base_ref="main",
                 repository="example",
+                head_repository="octo/example",
                 url="https://github.com/octo/example/pull/7",
             )
             second = self._run(env, "handoff", other_repo)
@@ -4668,6 +4671,7 @@ if command == "close":
             second = dict(
                 self._HANDOFF,
                 repository="later",
+                head_repository="octo/later",
                 url="https://github.com/octo/later/pull/7",
                 next_snapshot_at="2026-08-29T20:00:00Z",
             )
@@ -4698,6 +4702,7 @@ if command == "close":
             second = dict(
                 self._HANDOFF,
                 repository="later",
+                head_repository="octo/later",
                 url="https://github.com/octo/later/pull/7",
                 next_snapshot_at="2026-08-29T18:30:00Z",
             )
@@ -5156,6 +5161,7 @@ if os.environ.get("FAKE_GC_FAIL") == "1":
                 dict(
                     self._HANDOFF,
                     repository="later",
+                    head_repository="octo/later",
                     url="https://github.com/octo/later/pull/7",
                     next_snapshot_at="2026-08-29T18:30:00Z",
                 ),
@@ -5201,6 +5207,7 @@ if os.environ.get("FAKE_GC_FAIL") == "1":
                 payload = dict(
                     self._HANDOFF,
                     repository=f"skip-{index}",
+                    head_repository=f"octo/skip-{index}",
                     url=f"https://github.com/octo/skip-{index}/pull/7",
                     next_snapshot_at="2026-08-29T18:00:00Z",
                 )
@@ -5359,6 +5366,9 @@ class PrBabysitPublicationHandoffTests(unittest.TestCase):
         "url": "https://github.com/octo/example/pull/7",
         "state": "OPEN",
         "isDraft": False,
+        "isCrossRepository": False,
+        "headRepository": {"nameWithOwner": "octo/example"},
+        "headRepositoryOwner": {"login": "octo"},
         "baseRefName": "v3",
         "headRefName": "feature/u4",
         "headRefOid": "b" * 40,
@@ -5555,6 +5565,13 @@ print(json.dumps({"ok": True}))
             self.assertEqual(len(gh_calls), 1)
             self.assertEqual(gh_calls[0][:3], ["pr", "view", "7"])
             self.assertIn("--repo", gh_calls[0])
+            requested_fields = gh_calls[0][gh_calls[0].index("--json") + 1]
+            for field in (
+                "isCrossRepository",
+                "headRepository",
+                "headRepositoryOwner",
+            ):
+                self.assertIn(field, requested_fields)
 
             gc_calls = json.loads(
                 (root / "gc-calls.json").read_text(encoding="utf-8")
@@ -5570,6 +5587,13 @@ print(json.dumps({"ok": True}))
                     "--json",
                 ]],
             )
+            records = json.loads((root / "beads.json").read_text(encoding="utf-8"))
+            watch = next(
+                record
+                for record in records
+                if record["metadata"].get("record_kind") == "watch"
+            )
+            self.assertEqual(watch["metadata"]["head_repository"], "octo/example")
         finally:
             shutil.rmtree(root, ignore_errors=True)
 
@@ -5595,6 +5619,8 @@ print(json.dumps({"ok": True}))
             baseRefName="main",
             headRefName="feature/city-source",
             repository={"nameWithOwner": "octo/gascity"},
+            headRepository={"nameWithOwner": "octo/gascity"},
+            headRepositoryOwner={"login": "octo"},
         )
         root, env = self._fixture(
             "city-source",
@@ -5640,6 +5666,63 @@ print(json.dumps({"ok": True}))
             (
                 "malformed-head",
                 dict(self._D2B_GITHUB, headRefOid="not-a-sha"),
+                {},
+            ),
+            (
+                "cross-repository",
+                dict(
+                    self._D2B_GITHUB,
+                    isCrossRepository=True,
+                    headRepository={"nameWithOwner": "fork/example"},
+                    headRepositoryOwner={"login": "fork"},
+                ),
+                {},
+            ),
+            (
+                "mismatched-head-repository",
+                dict(
+                    self._D2B_GITHUB,
+                    headRepository={"nameWithOwner": "fork/example"},
+                    headRepositoryOwner={"login": "fork"},
+                ),
+                {},
+            ),
+            (
+                "missing-cross-repository-status",
+                {
+                    key: value
+                    for key, value in self._D2B_GITHUB.items()
+                    if key != "isCrossRepository"
+                },
+                {},
+            ),
+            (
+                "missing-head-repository",
+                {
+                    key: value
+                    for key, value in self._D2B_GITHUB.items()
+                    if key != "headRepository"
+                },
+                {},
+            ),
+            (
+                "missing-head-repository-owner",
+                {
+                    key: value
+                    for key, value in self._D2B_GITHUB.items()
+                    if key != "headRepositoryOwner"
+                },
+                {},
+            ),
+            (
+                "head-repository-without-name-with-owner",
+                dict(
+                    self._D2B_GITHUB,
+                    headRepository={
+                        "name": "example",
+                        "owner": {"login": "octo"},
+                    },
+                ),
                 {},
             ),
         )
@@ -6061,6 +6144,7 @@ print(json.dumps({"ok": True, "root_id": "repair-root"}))
                 "PR_BABYSIT_GITHUB_CAPABILITY_ATTESTED": (
                     "contents-write,pull-requests-read"
                 ),
+                "PR_BABYSIT_VALIDATOR_ATTESTED": "credential-isolated-v1",
             }
         )
         return root, env
@@ -6139,6 +6223,546 @@ print(json.dumps({"ok": True, "root_id": "repair-root"}))
         self.assertEqual(confirmed.returncode, 0, confirmed.stderr)
         return action_id
 
+    def _validation_fixture(
+        self,
+        name: str,
+        *,
+        validator_mode: str = "ok",
+        push_mode: str = "success",
+    ) -> tuple[pathlib.Path, dict[str, str], str, str, str]:
+        root = ROOT / ".scratch" / f"u6-validation-{name}"
+        shutil.rmtree(root, ignore_errors=True)
+        root.mkdir(parents=True)
+        repository = root / "repository"
+        remote = root / "remote.git"
+        worktree = (
+            repository
+            / ".gc"
+            / "agents"
+            / "pr-babysitter"
+            / "worktrees"
+            / "action-1"
+        )
+        bin_dir = root / "bin"
+        bin_dir.mkdir()
+        subprocess.run(
+            ["git", "init", "-q", str(repository)],
+            check=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(repository), "config", "user.name", "Test"],
+            check=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(repository), "config", "user.email", "test@example.invalid"],
+            check=True,
+        )
+        (repository / ".gitignore").write_text(".gc/\n", encoding="utf-8")
+        (repository / "Makefile").write_text(
+            ".PHONY: check\ncheck:\n\t@:\n",
+            encoding="utf-8",
+        )
+        (repository / "tracked.txt").write_text("old\n", encoding="utf-8")
+        subprocess.run(
+            ["git", "-C", str(repository), "add", "."],
+            check=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(repository), "commit", "-qm", "old"],
+            check=True,
+        )
+        old_sha = subprocess.check_output(
+            ["git", "-C", str(repository), "rev-parse", "HEAD"],
+            text=True,
+        ).strip()
+        subprocess.run(
+            ["git", "init", "--bare", "-q", str(remote)],
+            check=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(repository), "remote", "add", "origin", str(remote)],
+            check=True,
+        )
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(repository),
+                "push",
+                "-q",
+                "origin",
+                f"HEAD:refs/heads/feature/u4",
+            ],
+            check=True,
+        )
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(repository),
+                "worktree",
+                "add",
+                "--detach",
+                "-q",
+                str(worktree),
+                old_sha,
+            ],
+            check=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(worktree), "config", "user.name", "Test"],
+            check=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(worktree), "config", "user.email", "test@example.invalid"],
+            check=True,
+        )
+        (worktree / "tracked.txt").write_text("new\n", encoding="utf-8")
+        subprocess.run(
+            ["git", "-C", str(worktree), "add", "tracked.txt"],
+            check=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(worktree), "commit", "-qm", "repair"],
+            check=True,
+        )
+        new_sha = subprocess.check_output(
+            ["git", "-C", str(worktree), "rev-parse", "HEAD"],
+            text=True,
+        ).strip()
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(worktree),
+                "push",
+                "-q",
+                "origin",
+                "HEAD:refs/heads/validator-seed",
+            ],
+            check=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(worktree), "commit", "--allow-empty", "-qm", "other"],
+            check=True,
+        )
+        other_sha = subprocess.check_output(
+            ["git", "-C", str(worktree), "rev-parse", "HEAD"],
+            text=True,
+        ).strip()
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(worktree),
+                "push",
+                "-q",
+                "origin",
+                "HEAD:refs/heads/validator-other",
+            ],
+            check=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(worktree), "reset", "--hard", new_sha],
+            check=True,
+            stdout=subprocess.DEVNULL,
+        )
+
+        action = {
+            "id": "action-1",
+            "status": "open",
+            "assignee": "",
+            "metadata": {
+                "record_kind": "action",
+                "provenance_version": "pr-repair-v1",
+                "action_id": "action-1",
+                "watch_id": "d2b-watch",
+                "rig": "d2b",
+                "rig_prefix": "d2b",
+                "github_host": "github.com",
+                "owner": "octo",
+                "repository": "example",
+                "head_repository": "octo/example",
+                "pr_number": "7",
+                "url": "https://github.com/octo/example/pull/7",
+                "base_ref": "v3",
+                "head_ref": "feature/u4",
+                "head_sha": old_sha,
+                "observed_head_sha": old_sha,
+                "posture": "target",
+                "target_posture": "target",
+                "generation": "1",
+                "action_kind": "ci",
+                "action_fingerprint": "f" * 64,
+                "claim_status": "claimed",
+                "expected_old_head": old_sha,
+                "worktree_provenance": "pr-repair-v1",
+                "worktree_head_sha": old_sha,
+                "worktree_head_ref": "feature/u4",
+                "worktree_base_ref": "v3",
+                "worktree_generation": "1",
+                "worktree_action_id": "action-1",
+            },
+        }
+        gc_script = bin_dir / "gc"
+        gc_script.write_text(
+            f"""#!{shutil.which("python3")}
+import json
+import sys
+from pathlib import Path
+
+root = Path({str(root)!r})
+calls_path = root / "gc-calls.json"
+calls = json.loads(calls_path.read_text()) if calls_path.exists() else []
+args = sys.argv[1:]
+calls.append(args)
+calls_path.write_text(json.dumps(calls, sort_keys=True) + "\\n")
+if args[:2] == ["bd", "show"]:
+    print(json.dumps({json.dumps(action, sort_keys=True)}))
+else:
+    print(json.dumps({{"ok": True}}))
+""",
+            encoding="utf-8",
+        )
+        gc_script.chmod(0o755)
+        git_script = bin_dir / "git"
+        remote_sha = {
+            "success": "",
+            "new": new_sha,
+            "old": old_sha,
+            "other": other_sha,
+        }[push_mode]
+        git_script.write_text(
+            f"""#!{shutil.which("python3")}
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+real_git = {shutil.which("git")!r}
+root = Path({str(root)!r})
+args = sys.argv[1:]
+if "push" in args:
+    (root / "push-called").write_text("1\\n")
+    if {push_mode!r} != "success":
+        subprocess.run(
+            [
+                real_git,
+                "--git-dir",
+                {str(remote)!r},
+                "update-ref",
+                "refs/heads/feature/u4",
+                {remote_sha!r},
+            ],
+            check=True,
+        )
+        raise SystemExit(1)
+os.execv(real_git, [real_git, *args])
+""",
+            encoding="utf-8",
+        )
+        git_script.chmod(0o755)
+        validator = root / "validator"
+        validator.write_text(
+            f"""#!{shutil.which("python3")}
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+root = Path({str(root)!r})
+worktree = sys.argv[1]
+names = (
+    "GH_TOKEN",
+    "GITHUB_TOKEN",
+    "COPILOT_GITHUB_TOKEN",
+    "COPILOT_REQUESTS_TOKEN",
+    "COPILOT_TOKEN",
+    "PR_BABYSIT_GITHUB_CAPABILITY_ATTESTED",
+    "PR_BABYSIT_VALIDATOR_ATTESTED",
+    "GIT_ASKPASS",
+    "GIT_SSH_COMMAND",
+    "GIT_PUSH_OPTION_COUNT",
+    "SSH_AUTH_SOCK",
+)
+(root / "validator-env.json").write_text(
+    json.dumps({{name: os.environ.get(name) for name in names}}, sort_keys=True) + "\\n"
+)
+check = subprocess.run(["make", "-C", worktree, "check"], check=False)
+if check.returncode:
+    raise SystemExit(check.returncode)
+mode = {validator_mode!r}
+if mode == "head":
+    subprocess.run(["git", "-C", worktree, "reset", "--hard", "HEAD~1"], check=True)
+elif mode == "config":
+    subprocess.run(["git", "-C", worktree, "config", "--local", "validator.mutated", "1"], check=True)
+elif mode == "origin":
+    subprocess.run(["git", "-C", worktree, "remote", "set-url", "origin", "file:///mutated"], check=True)
+elif mode == "status":
+    Path(worktree, "tracked.txt").write_text("mutated\\n")
+elif mode == "fail":
+    raise SystemExit(7)
+""",
+            encoding="utf-8",
+        )
+        validator.chmod(0o755)
+        script = self._render_validate_script(
+            root,
+            {
+                "rig": "d2b",
+                "github_host": "github.com",
+                "owner": "octo",
+                "repository": "example",
+                "head_repository": "octo/example",
+                "url": "https://github.com/octo/example/pull/7",
+                "pr_number": "7",
+                "base_ref": "v3",
+                "head_ref": "feature/u4",
+                "observed_head_sha": old_sha,
+                "watch_id": "d2b-watch",
+                "action_id": "action-1",
+                "generation": "1",
+                "action_kind": "ci",
+                "fingerprint": "f" * 64,
+                "addressed_thread_ids": "",
+            },
+        )
+        env = {
+            "GC_BIN": str(gc_script),
+            "GC_RIG": "d2b",
+            "GC_RIG_ROOT": str(repository),
+            "PR_BABYSIT_WORKTREE": str(worktree),
+            "PR_BABYSIT_VALIDATOR": str(validator),
+            "PR_BABYSIT_VALIDATOR_ATTESTED": "credential-isolated-v1",
+            "PR_BABYSIT_GITHUB_CAPABILITY_ATTESTED": (
+                "contents-write,pull-requests-read"
+            ),
+            "PATH": f"{bin_dir}:{os.environ['PATH']}",
+        }
+        return root, env, old_sha, new_sha, other_sha
+
+    @staticmethod
+    def _render_validate_script(
+        root: pathlib.Path,
+        values: dict[str, str],
+    ) -> pathlib.Path:
+        text = PR_BABYSIT_REPAIR_VALIDATE.read_text(encoding="utf-8")
+        for key, value in values.items():
+            text = text.replace("{{" + key + "}}", value)
+        script = root / "validate.sh"
+        script.write_text(
+            "#!/usr/bin/env bash\n"
+            + text.split("```sh\n", 1)[1].split("\n```", 1)[0],
+            encoding="utf-8",
+        )
+        script.chmod(0o755)
+        return script
+
+    def _run_validation(
+        self,
+        root: pathlib.Path,
+        env: dict[str, str],
+        *,
+        extra_env: dict[str, str] | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [str(root / "validate.sh")],
+            cwd=ROOT,
+            env=os.environ | env | (extra_env or {}),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+    def test_validator_is_credential_isolated_before_a_push(self):
+        root, env, _, new_sha, _ = self._validation_fixture(
+            "isolated",
+        )
+        try:
+            result = self._run_validation(
+                root,
+                env,
+                extra_env={
+                    "GH_TOKEN": "push-secret",
+                    "GITHUB_TOKEN": "push-secret-2",
+                    "COPILOT_GITHUB_TOKEN": "copilot-secret",
+                    "COPILOT_REQUESTS_TOKEN": "requests-secret",
+                    "COPILOT_TOKEN": "token-secret",
+                    "PR_BABYSIT_GITHUB_CAPABILITY_ATTESTED": (
+                        "contents-write,pull-requests-read"
+                    ),
+                    "PR_BABYSIT_VALIDATOR_ATTESTED": "credential-isolated-v1",
+                    "GIT_ASKPASS": "/secret/askpass",
+                    "GIT_SSH_COMMAND": "ssh -i /secret/key",
+                    "GIT_PUSH_OPTION_COUNT": "1",
+                    "SSH_AUTH_SOCK": "/secret/agent.sock",
+                },
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            isolated = json.loads(
+                (root / "validator-env.json").read_text(encoding="utf-8")
+            )
+            self.assertTrue(isolated)
+            self.assertTrue(all(value is None for value in isolated.values()))
+            self.assertEqual(
+                subprocess.check_output(
+                    ["git", "--git-dir", str(root / "remote.git"), "rev-parse", "refs/heads/feature/u4"],
+                    text=True,
+                ).strip(),
+                new_sha,
+            )
+            self.assertTrue((root / "push-called").is_file())
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
+
+    def test_validator_missing_bad_or_symlink_fails_closed(self):
+        for kind in ("missing", "bad", "symlink"):
+            with self.subTest(kind=kind):
+                root, env, _, _, _ = self._validation_fixture("validator-" + kind)
+                try:
+                    if kind == "missing":
+                        env.pop("PR_BABYSIT_VALIDATOR")
+                    elif kind == "bad":
+                        validator = pathlib.Path(env["PR_BABYSIT_VALIDATOR"])
+                        validator.chmod(0o644)
+                    else:
+                        validator = pathlib.Path(env["PR_BABYSIT_VALIDATOR"])
+                        target = root / "validator-target"
+                        target.write_bytes(validator.read_bytes())
+                        target.chmod(0o755)
+                        validator.unlink()
+                        validator.symlink_to(target)
+                    result = self._run_validation(root, env)
+                    self.assertNotEqual(result.returncode, 0, result.stderr)
+                    self.assertFalse((root / "push-called").exists())
+                    calls = json.loads((root / "gc-calls.json").read_text())
+                    self.assertTrue(
+                        any(
+                            "--validation-status" in call
+                            and "failed" in call
+                            for call in calls
+                        )
+                    )
+                finally:
+                    shutil.rmtree(root, ignore_errors=True)
+
+    def test_validator_mutations_block_push(self):
+        for mode in ("head", "config", "origin", "status"):
+            with self.subTest(mode=mode):
+                root, env, _, _, _ = self._validation_fixture(
+                    "mutation-" + mode,
+                    validator_mode=mode,
+                )
+                try:
+                    result = self._run_validation(root, env)
+                    self.assertNotEqual(result.returncode, 0, result.stderr)
+                    self.assertFalse((root / "push-called").exists())
+                    calls = json.loads((root / "gc-calls.json").read_text())
+                    result_call = calls[-1]
+                    self.assertIn("--validation-status", result_call)
+                    self.assertEqual(
+                        result_call[
+                            result_call.index("--validation-status") + 1
+                        ],
+                        "failed",
+                    )
+                    self.assertIn("--reason", result_call)
+                    self.assertEqual(
+                        result_call[result_call.index("--reason") + 1],
+                        "validator-invariant",
+                    )
+                finally:
+                    shutil.rmtree(root, ignore_errors=True)
+
+    def test_validator_failure_records_failed_without_push(self):
+        root, env, _, _, _ = self._validation_fixture(
+            "validator-failure",
+            validator_mode="fail",
+        )
+        try:
+            result = self._run_validation(root, env)
+            self.assertNotEqual(result.returncode, 0, result.stderr)
+            self.assertFalse((root / "push-called").exists())
+            calls = json.loads((root / "gc-calls.json").read_text())
+            result_call = calls[-1]
+            self.assertEqual(
+                result_call[result_call.index("--validation-status") + 1],
+                "failed",
+            )
+            self.assertEqual(
+                result_call[result_call.index("--reason") + 1],
+                "validator-failed",
+            )
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
+
+    def test_push_failure_is_classified_from_remote_observation(self):
+        for mode, expected_status, expected_returncode in (
+            ("new", "passed", 0),
+            ("old", "failed", 1),
+            ("other", "ambiguous", 1),
+        ):
+            with self.subTest(mode=mode):
+                root, env, old_sha, new_sha, other_sha = self._validation_fixture(
+                    "push-" + mode,
+                    push_mode=mode,
+                )
+                try:
+                    result = self._run_validation(root, env)
+                    self.assertEqual(
+                        result.returncode,
+                        expected_returncode,
+                        result.stderr,
+                    )
+                    calls = json.loads((root / "gc-calls.json").read_text())
+                    result_call = calls[-1]
+                    status = result_call[
+                        result_call.index("--validation-status") + 1
+                    ]
+                    self.assertEqual(status, expected_status)
+                    self.assertEqual(
+                        result_call[
+                            result_call.index("--make-check-result") + 1
+                        ],
+                        "passed",
+                    )
+                    self.assertEqual(
+                        calls.count(
+                            [
+                                "bd",
+                                "show",
+                                "action-1",
+                                "--json",
+                            ]
+                        ),
+                        1,
+                    )
+                    if mode == "new":
+                        self.assertEqual(
+                            result_call[
+                                result_call.index("--pushed-sha") + 1
+                            ],
+                            new_sha,
+                        )
+                    elif mode == "old":
+                        self.assertIn("--reason", result_call)
+                        self.assertEqual(
+                            result_call[result_call.index("--reason") + 1],
+                            "push-failed",
+                        )
+                        self.assertNotIn("--pushed-sha", result_call)
+                    else:
+                        self.assertEqual(
+                            result_call[
+                                result_call.index("--remote-head-sha") + 1
+                            ],
+                            other_sha,
+                        )
+                    self.assertTrue((root / "push-called").is_file())
+                finally:
+                    shutil.rmtree(root, ignore_errors=True)
+
     def test_repair_formula_declares_v2_targets_dependencies_and_assets(self):
         formula = tomllib.loads(
             PR_BABYSIT_REPAIR_FORMULA.read_text(encoding="utf-8")
@@ -6175,6 +6799,7 @@ print(json.dumps({"ok": True, "root_id": "repair-root"}))
             },
         )
         by_id = {step["id"]: step for step in steps}
+        self.assertIn("head_repository", formula["vars"])
         self.assertEqual(by_id["repair"]["needs"], ["prepare-worktree"])
         self.assertEqual(by_id["review"]["needs"], ["repair"])
         self.assertEqual(
@@ -6268,10 +6893,12 @@ print(json.dumps({"ok": True, "root_id": "repair-root"}))
         for marker in (
             "github host",
             "repository",
+            "head_repository",
             "pr number",
             "base_ref",
             "head_ref",
             "observed_head_sha",
+            "head_repository",
             "action_id",
             "generation",
             "dirty",
@@ -6296,6 +6923,10 @@ print(json.dumps({"ok": True, "root_id": "repair-root"}))
             "remote pull-request head changed after observation",
             "remote head is stale",
             "push outcome is ambiguous",
+            "credential-isolated-v1",
+            "pr_babysit_validator",
+            "validator-invariant",
+            "push-failed",
         ):
             self.assertIn(marker.lower(), prepare.lower() + "\n" + validate.lower())
         self.assertIn(
@@ -6311,7 +6942,18 @@ print(json.dumps({"ok": True, "root_id": "repair-root"}))
         self.assertNotIn("origin/v3", prepare.lower())
         self.assertNotIn("owning source checkout is dirty", prepare.lower())
         self.assertNotIn(".pr-babysit-state.json", validate)
-        self.assertIn('(cd "$WORKTREE" && make check)', validate)
+        self.assertNotIn('(cd "$WORKTREE" && make check)', validate)
+        self.assertIn('"$VALIDATOR" "$WORKTREE"', validate)
+        for marker in (
+            "git -C \"$WORKTREE\" config --local --list",
+            "git -C \"$WORKTREE\" remote get-url origin",
+            "remote\\..*\\.fetch",
+            "-u GH_TOKEN",
+            "-u GITHUB_TOKEN",
+            "-u COPILOT_TOKEN",
+            "-u PR_BABYSIT_GITHUB_CAPABILITY_ATTESTED",
+        ):
+            self.assertIn(marker, validate)
         self.assertEqual(validate.count("record_result()"), 1)
         self.assertEqual(
             validate.count("gc pr-babysit pr-babysit record-repair-result"),
@@ -6970,6 +7612,86 @@ print(json.dumps({"ok": True, "root_id": "repair-root"}))
                 state["metadata"]["terminal_reason"],
                 "ambiguous-outcome",
             )
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
+
+    def test_repair_dispatch_requires_validator_attestation(self):
+        root, env = self._repair_fixture("validator-attestation")
+        try:
+            handoff = self._run(env, "handoff", self._HANDOFF)
+            self.assertEqual(handoff.returncode, 0, handoff.stderr)
+            watch_id = self._json(handoff)["watch_id"]
+            missing = self._dispatch(
+                env | {"PR_BABYSIT_VALIDATOR_ATTESTED": ""},
+                watch_id,
+                generation=1,
+                head_sha="a" * 40,
+                action_kind="ci",
+                fingerprint="validator-attestation",
+            )
+            self.assertNotEqual(missing.returncode, 0)
+            error = self._json(missing)["error"]
+            self.assertEqual(error["code"], "credential-validator")
+            self.assertEqual(
+                json.loads((root / "gc-calls.json").read_text()),
+                [],
+            )
+            records = json.loads((root / "beads.json").read_text())
+            self.assertEqual(len(records), 1)
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
+
+    def test_check_credentials_requires_validator_attestation(self):
+        root, env = self._repair_fixture("check-credentials")
+        try:
+            valid = self._run(env, "check-credentials")
+            self.assertEqual(valid.returncode, 0, valid.stderr)
+            self.assertTrue(self._json(valid)["validator_attested"])
+            result = self._run(
+                env | {"PR_BABYSIT_VALIDATOR_ATTESTED": ""},
+                "check-credentials",
+            )
+            self.assertNotEqual(result.returncode, 0)
+            error = self._json(result)["error"]
+            self.assertEqual(error["code"], "credential-validator")
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
+
+    def test_repair_result_preserves_safe_push_failure_reason(self):
+        root, env = self._repair_fixture("push-failure-reason")
+        try:
+            handoff = self._run(env, "handoff", self._HANDOFF)
+            self.assertEqual(handoff.returncode, 0, handoff.stderr)
+            watch_id = self._json(handoff)["watch_id"]
+            dispatched = self._dispatch(
+                env,
+                watch_id,
+                generation=1,
+                head_sha="a" * 40,
+                action_kind="ci",
+                fingerprint="push-failure-reason",
+            )
+            self.assertEqual(dispatched.returncode, 0, dispatched.stderr)
+            action_id = self._json(dispatched)["action_id"]
+            recorded = self._run(
+                env,
+                "record-repair-result",
+                {
+                    "watch_id": watch_id,
+                    "action_id": action_id,
+                    "generation": 1,
+                    "expected_old_sha": "a" * 40,
+                    "validation_status": "failed",
+                    "make_check_result": "failed",
+                    "reason": "push-failed",
+                },
+            )
+            self.assertEqual(recorded.returncode, 0, recorded.stderr)
+            records = json.loads((root / "beads.json").read_text())
+            action = next(record for record in records if record["id"] == action_id)
+            watch = next(record for record in records if record["id"] == watch_id)
+            self.assertEqual(action["metadata"]["terminal_reason"], "push-failed")
+            self.assertEqual(watch["metadata"]["terminal_reason"], "push-failed")
         finally:
             shutil.rmtree(root, ignore_errors=True)
 
