@@ -67,7 +67,7 @@ verify_projection() {
   verify_file '158a3624dd0150de39bdaba507a7685bb887c6f28899b38b1c268492a5a66ceb' 'references/branch-currency.md'
   verify_file '43f5f9f31835a1663f1e37f0f01b1ac60fe25a5d4ec9b3241de0bc4059c9dd65' 'references/envelope.md'
   verify_file 'aebd3a9955d7fb53e94512e4bdc998dfe7e1ca725fbfde6f902fde8382903034' 'references/pipeline.md'
-  verify_file '1162855a51b818ca5c8e76cf74f80b92aa134209838aeb9065fc9212f2dec0e5' 'references/report.md'
+  verify_file '31d79d87f9e63940714656cb35af5746aed53cc6f263de17a60b4f0e04e6362f' 'references/report.md'
   verify_file '6d9b01a8871bc0cfdcca66e16a9b6d338d4bbb74e0913234fad120fdffcef03c' 'references/settle.md'
   verify_file '7442cf756411a7a274e48c38184d996f02554d59577721efe2a03cc3359ca739' 'references/setup.md'
   verify_file '40d954a7db9522aa0b94969c4bd06551f7146ce16989947a658d0731c4a7f7d4' 'references/tick.md'

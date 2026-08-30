@@ -150,11 +150,14 @@ credentials separate. Never put credentials, token paths, identifiers,
 allowlists, mappings, or live payloads in this repository. Publication must
 persist and re-read `metadata.merge_strategy=pr` plus
 `metadata.target=v3` for d2b or `metadata.target=main` for city-source,
-refuse direct merges, and never merge or force-push. Branch protection for
-`v3` is defense-in-depth and must require pull requests and apply to
-administrators; this repository does not claim that the current host is
-already configured that way.
-The policy requires pull requests and must apply to administrators.
+refuse direct merges, and never merge or force-push. The publication handoff
+result has `target=<rig>/pr-babysit.pr-babysitter` (stored as
+`handoff_target` in receipt metadata); that routing target is distinct from
+the watch's `base_ref=v3` or `base_ref=main` and the publication bead's
+`merge_strategy=pr`. Branch protection for `v3` is
+defense-in-depth and must require pull requests and apply to administrators;
+this repository does not claim that the current host is already configured
+that way. The policy requires pull requests and must apply to administrators.
 
 ## PR babysitting and human-gate recovery
 
@@ -202,8 +205,11 @@ resumes the watch only after confirmation. The `pr-babysit-sweep` cooldown
 order runs every `1m`, calls `list-due`, and routes
 `<rig>/pr-babysit.pr-babysitter` with `gc sling --nudge`; it is one short
 checkpoint, not a daemon or in-session watcher.
-Action claim statuses are `claimed`, `result-recorded`, `closed`, `blocked`,
-`ambiguous`, and `stale`; watch exhaustion is recorded on the watch. Only a
+Watch `claim_status` values written by state code are `none`, `claimed`,
+`result-recorded`, `blocked`, and `exhausted`. Action records may also use
+`ambiguous` and `stale`. `closed` is the Beads issue status written when a
+confirmed action child closes, or when a watch reaches terminal; it is not a
+`claim_status` value. Watch exhaustion is recorded on the watch. Only a
 confirmed passed result closes the action child.
 
 Each checkpoint takes one fresh snapshot, then handles terminal state, head
@@ -224,10 +230,19 @@ and `CLOSED` are absorbing `terminal` outcomes. An open `blocked`,
 `exhausted`, or `merge-ready` watch may be explicitly rearmed with
 `rearm=true`; a terminal watch cannot be rearmed.
 
+Repairs are same-repository-only: `head_repository` must equal the verified
+`owner/repository`. Fork or cross-repository PRs are human blockers in v1;
+they receive no autonomous repair. Before any repair, the operator must
+provide `PR_BABYSIT_VALIDATOR` as an absolute, non-symlink, executable file and set
+`PR_BABYSIT_VALIDATOR_ATTESTED=credential-isolated-v1`. It must run
+`make check` in a credential- and network-isolated environment. A missing
+validator blocks repair, as do an invalid or failed validator. There is no
+direct-make fallback.
+
 The non-network credential check is
 `gc pr-babysit pr-babysit check-credentials --json` with the operator
-attestation `contents-write,pull-requests-read`; it verifies separation but
-does not introspect fine-grained permissions.
+attestation `contents-write,pull-requests-read` and the validator attestation;
+it verifies separation but does not introspect fine-grained permissions.
 
 The d2b rig accepts only `v3`; city-source accepts only `main` and remains
 suspended-on-start. d2b is enabled first. Do not enable city-source for live
@@ -236,7 +251,8 @@ credential-free tests cover both configurations without mutating GitHub.
 Authenticated live evidence remains private and redacted. The capability never
 merges, force-pushes, rebases, approves workflow runs, creates a replacement
 PR, or changes another target. Human merge ownership remains with human
-owners, who retain the final merge decision.
+owners, who retain the final merge decision. No live U8 acceptance is claimed
+by this source tree.
 
 ## Clean reset
 

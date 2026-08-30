@@ -13,6 +13,13 @@ and this project follows semantic versioning where releases are published.
   qualified babysitter sessions, workdir-local dual Copilot projection,
   deterministic publication handoff and verification receipts, Beads watch
   and action state, the `1m` checkpoint sweep, and bounded Formula v2 repair.
+- Clarified that a handoff receipt targets
+  `<rig>/pr-babysit.pr-babysitter`, watch metadata records
+  `base_ref=v3` or `base_ref=main`, and publication metadata requires
+  `merge_strategy=pr`.
+- Documented same-repository-only repair, the mandatory absolute,
+  non-symlink executable `PR_BABYSIT_VALIDATOR`, and its
+  `PR_BABYSIT_VALIDATOR_ATTESTED=credential-isolated-v1` attestation.
 - Documented target-only d2b `v3` and city-source `main` behavior, review-
   before-CI checkpoint order, action-child dependency wake, three CI and two
   review attempts, eight active hours, a three-day backstop, explicit rearm,
@@ -79,6 +86,10 @@ and this project follows semantic versioning where releases are published.
   Pull requests read only; Pull requests write, merge/admin, and workflow
   approval authority are refused, and `GH_TOKEN`/`GITHUB_TOKEN` never reuse
   Copilot tokens.
+- Repair validation now requires the operator-supplied validator to run
+  `make check` with credential and network isolation; missing, invalid, or
+  failed validation blocks repair. Fork and cross-repository PRs are human
+  blockers in v1.
 - Recorded that d2b rolls out first while city-source remains
   suspended-on-start until U8 disposable acceptance, with live evidence kept
   private and redacted.

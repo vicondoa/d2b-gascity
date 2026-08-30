@@ -43,7 +43,9 @@ state.
 - Use the official Gas City formulas (`build-basic`, `implement`,
   `github-issue-fix`, `publish`) on the repository-owning rig. Publication
   must persist and re-read `merge_strategy=pr` plus `target=v3` for d2b or
-  `target=main` for city-source.
+  `target=main` for city-source. The handoff receipt's
+  `target=<rig>/pr-babysit.pr-babysitter` is separate from the watch's
+  `base_ref=v3` or `base_ref=main`.
 - The rig-imported `pr-babysit` pack is the only babysitting surface. Use the
   binding-qualified targets `d2b/pr-babysit.pr-babysitter` and
   `city-source/pr-babysit.pr-babysitter`; keep the workdir-local
@@ -73,7 +75,13 @@ state.
   push is never retried. Keep `GH_TOKEN` and `GITHUB_TOKEN` separate from
   Copilot tokens. Never use `--force-with-lease` or a raw rebase. Rearm only
   an open blocked, exhausted, or merge-ready watch with `rearm=true`; terminal
-  watches stay terminal.
+  watches stay terminal. Repairs are same-repository-only:
+  `head_repository` must equal `owner/repository`; fork or cross-repository
+  PRs are human blockers in v1. Before repair, require
+  `PR_BABYSIT_VALIDATOR` as an absolute, non-symlink, executable file and
+  `PR_BABYSIT_VALIDATOR_ATTESTED=credential-isolated-v1`. It must run
+  `make check` in a credential- and network-isolated environment. A missing
+  validator blocks repair, as do an invalid or failed validator.
 - Preserve upstream licenses and notices. Use ASCII hyphens only.
 - Keep portable source in Git. Keep credentials, runtime state, logs,
   prompts, responses, mappings, bindings, and host configuration outside the
@@ -121,7 +129,7 @@ U7 static and native credential-free tests cover both `d2b`/`v3` and
 `city-source`/`main` without mutating GitHub. Enable d2b first; keep
 city-source suspended-on-start and defer live repair there until the U8
 disposable d2b acceptance passes. Record live evidence privately and redact
-it before sharing.
+it before sharing. No live U8 acceptance is claimed by this source tree.
 
 Before staging, inspect `git status --short`, the staged file list, and the
 complete diff. Remove private values, live payloads, and runtime artifacts.

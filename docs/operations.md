@@ -77,11 +77,13 @@ The principal formulas include:
 The d2b rig formula defaults set `base_branch = "v3"` and
 `target_branch = "v3"`; city-source uses `main` for both. Publication must
 persist `metadata.merge_strategy=pr` plus `metadata.target=v3` for d2b or
-`metadata.target=main` for city-source and refuse direct merges. Never merge
-or force-push. Host branch protection for `v3` is defense-in-depth and must
-require pull requests and apply to administrators; this repository does not
-claim the current host is already configured that way. Merge decisions remain
-human-owned.
+`metadata.target=main` for city-source and refuse direct merges. The handoff
+receipt uses `target=<rig>/pr-babysit.pr-babysitter`; the watch records
+`base_ref=v3` or `base_ref=main`; and the publication bead records
+`merge_strategy=pr`. Never merge or force-push. Host branch protection for
+`v3` is defense-in-depth and must require pull requests and apply to
+administrators; this repository does not claim the current host is already
+configured that way. Merge decisions remain human-owned.
 
 Inspect the composed workflow with native commands such as:
 
@@ -258,7 +260,10 @@ official Discord workflow behavior is retained.
 
 Publication is PR-only: persist and verify `merge_strategy=pr` plus
 `target=v3` for d2b or `target=main` for city-source, refuse direct merges,
-and keep merge decisions human-owned.
+and keep merge decisions human-owned. This publication metadata is distinct
+from the handoff receipt's
+`target=<rig>/pr-babysit.pr-babysitter` and the watch's `base_ref=v3` or
+`base_ref=main`.
 
 Mappings and command sync are native pack state. The city does not copy or
 hard-code them.
@@ -321,11 +326,16 @@ deterministic receipt. Publication may close only after
 gc pr-babysit pr-babysit show --watch-id <watch-id> --json
 ```
 
-The d2b receipt must carry target `v3`; the city-source receipt must carry
-target `main`; both carry `metadata.merge_strategy=pr`. A missing, mismatched,
-draft, wrong-base, wrong-repository, or absent PR identity creates no watcher
-and no route. Repeat the commands with `--rig city-source` and the
-city-source publication bead for a `main`-targeted pull request.
+The handoff result carries
+`target=<rig>/pr-babysit.pr-babysitter`, stored as `handoff_target` in the
+receipt metadata. The watch record carries
+`base_ref=v3` for d2b or `base_ref=main` for city-source. The publication bead
+must carry `metadata.merge_strategy=pr` and the matching
+`metadata.target=v3` or `metadata.target=main`; these are separate fields
+with separate meanings. A missing, mismatched, draft, wrong-base,
+wrong-repository, or absent PR identity creates no watcher and no route.
+Repeat the commands with `--rig city-source` and the city-source publication
+bead for a `main`-targeted pull request.
 
 ### Watch states and checkpoint order
 
@@ -344,11 +354,14 @@ ephemeral in the ignored babysitter workdir. The legal watch states are:
 | `exhausted` | A repair or time budget ended autonomous progress. |
 | `terminal` | The PR is merged or closed; no further action is allowed. |
 
-Repair action children use safe claim statuses `claimed`, `result-recorded`,
-`closed`, `blocked`, `ambiguous`, and `stale`; the watch records exhaustion
-when its repair or time budget ends. Only a `result-recorded` action with a
-passed `make check` and matching pushed SHA may be confirmed and closed;
-failed or ambiguous actions remain human blockers.
+Watch `claim_status` values written by state code are `none`, `claimed`,
+`result-recorded`, `blocked`, and `exhausted`. Action records may also use
+`ambiguous` and `stale`. Beads issue status `closed` is separate from
+`claim_status` and is written when a confirmed action child closes or a watch
+reaches terminal. The watch records exhaustion when its repair or time budget
+ends. Only a `result-recorded` action with a passed `make check` and matching
+pushed SHA may be confirmed and closed; failed or ambiguous actions remain
+human blockers.
 
 The `pr-babysit-sweep` cooldown order in the rig-imported pack runs every
 `1m`, calls `list-due`, and routes only due `watching` or `waiting` records
@@ -387,7 +400,10 @@ is never retried.
 `blocked`, `exhausted`, or `merge-ready` watch may be explicitly rearmed with
 `rearm=true`; rearming advances the generation and clears stale claims. A
 terminal watch cannot be rearmed. `merge-ready` is an evidence handoff only,
-never permission for an automatic merge.
+never permission for an automatic merge. Repairs are same-repository-only:
+`head_repository` must equal the verified `owner/repository`. Fork or
+cross-repository PRs are human blockers in v1 and receive no autonomous
+repair.
 
 ### Credential and target boundary
 
@@ -397,15 +413,25 @@ human blockers. The repair identity is operator-attested with repository
 Contents write and Pull requests read only. It must not have Pull requests
 write, merge/admin, workflow-approval, or Copilot Requests authority. The
 agent cannot introspect fine-grained permissions, so it fails closed without
-the operator attestation.
+the operator attestation. Before repair, provide
+`PR_BABYSIT_VALIDATOR` as an absolute, non-symlink, executable file and set
+`PR_BABYSIT_VALIDATOR_ATTESTED=credential-isolated-v1`. It must run
+`make check` in a credential- and network-isolated environment. A missing
+validator blocks repair, as do an invalid or failed validator. There is no
+direct-make fallback.
 
 The operator may verify the attestation and token separation without a GitHub
 request:
 
 ```text
 PR_BABYSIT_GITHUB_CAPABILITY_ATTESTED=contents-write,pull-requests-read \
+PR_BABYSIT_VALIDATOR_ATTESTED=credential-isolated-v1 \
   gc pr-babysit pr-babysit check-credentials --json
 ```
+
+This command checks the operator attestations and token separation only. The
+repair workflow separately validates the absolute, non-symlink executable
+`PR_BABYSIT_VALIDATOR` and runs it.
 
 Publication credentials, repair GitHub credentials, Copilot Requests
 credentials, and Discord app credentials are separate. `GH_TOKEN` and
@@ -422,7 +448,7 @@ must not be enabled for live repair until U8 disposable d2b acceptance passes.
 Static and native credential-free tests cover both d2b/`v3` and
 city-source/`main` without mutating GitHub. Authenticated live evidence is
 host-local, private, and redacted; record only safe pass/fail results outside
-this repository.
+this repository. No live U8 acceptance is claimed by this source tree.
 
 The existing `gate-sweep` remains the native mechanical gate sweep. Human-gate
 notification and stale-gate re-notification are separate from the
@@ -719,7 +745,8 @@ protected, and `discord-gateway` is private. The official Discord pack owns
 all three services. Keep Copilot Requests, d2b publication, and Discord app
 credentials separate, then verify `merge_strategy=pr` plus `target=v3` for
 d2b or `target=main` for city-source before any human-owned pull-request
-publication.
+publication. Do not confuse that publication metadata with the handoff
+receipt target `<rig>/pr-babysit.pr-babysitter` or the watch `base_ref`.
 
 ## Stop or unregister
 

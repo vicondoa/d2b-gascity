@@ -51,12 +51,15 @@ those values outside this repository.
 - Keep Copilot Requests, d2b publication credentials, and Discord app
   credentials separate. Never set `GH_TOKEN` from a Copilot token.
 - Publication stamps and re-reads `merge_strategy=pr` plus the owning rig's
-  target: `v3` for d2b and `main` for city-source. The d2b Discord extension is
-  product-only. Publication must refuse direct merges and never merge or
-  force-push. Host branch protection for `v3` is defense-in-depth: it must
-  require pull requests and apply to administrators, but this repository does
-  not claim that the current host is already configured that way. Merge
-  decisions remain human-owned.
+  publication target: `v3` for d2b and `main` for city-source. The handoff
+  receipt's `target=<rig>/pr-babysit.pr-babysitter` is a routing target; the
+  watch records `base_ref=v3` or `base_ref=main`, and the publication bead
+  records `merge_strategy=pr`. The d2b Discord extension is product-only.
+  Publication must refuse direct merges and never merge or force-push. Host
+  branch protection for `v3` is defense-in-depth: it must require pull
+  requests and apply to administrators, but this repository does not claim
+  that the current host is already configured that way. Merge decisions remain
+  human-owned.
 
 ### PR babysitting credentials and authority
 
@@ -72,6 +75,12 @@ credentials, and Discord app credentials separate. `GH_TOKEN` and
 `GITHUB_TOKEN` must not reuse any Copilot token or token variable. Never print
 or persist any of these credentials. The repair path fails closed when the
 attestation is missing or when a GitHub token is coupled to a Copilot token.
+Before repair, the operator must provide `PR_BABYSIT_VALIDATOR` as an
+absolute, non-symlink, executable file and set
+`PR_BABYSIT_VALIDATOR_ATTESTED=credential-isolated-v1`. It must run
+`make check` in a credential- and network-isolated environment. A missing
+validator blocks repair, as do an invalid or failed validator. There is no
+direct-make fallback.
 
 The repair path uses only the existing PR head and normal push. Version 1 does
 not use `update-branch`; `BEHIND`, dirty, conflicting, stale-head, unknown
@@ -81,7 +90,10 @@ force-pushes (including `--force-with-lease`), performs a raw rebase, approves
 workflows, creates a replacement PR, or changes another target. A
 `merge-ready` result is a handoff, not human merge authorization. No service
 change, daemon, webhook, relay, custom provider, or separate custom
-publication machinery is introduced.
+publication machinery is introduced. Repairs are same-repository-only:
+`head_repository` must equal the verified `owner/repository`. Fork or
+cross-repository PRs are human blockers in v1 and receive no autonomous
+repair.
 
 ### PR babysitting rollout
 
@@ -90,6 +102,7 @@ must not be enabled for live repair until the U8 disposable d2b acceptance
 passes. Static and native credential-free tests cover both d2b/`v3` and
 city-source/`main` without mutating GitHub. Live authenticated acceptance
 evidence stays private and redacted; only safe pass/fail results may be shared.
+No live U8 acceptance is claimed by this source tree.
 
 ## Human-only clean reset
 

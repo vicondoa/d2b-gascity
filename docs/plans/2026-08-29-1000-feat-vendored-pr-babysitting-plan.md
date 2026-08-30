@@ -36,8 +36,8 @@ The official babysitting skill already defines a strong snapshot-first watch con
 
 ### Key Decisions
 
-- **Vendor the skill locally.** (session-settled: user-directed — chosen over waiting for an upstream Pack v2 export: the repository may own and modify the MIT-licensed capability.) Governs R1-R4.
-- **Do not modify the Gas City service.** (session-settled: user-directed — chosen over patching the supervisor or API: integration must use existing Pack v2, agent, order, formula, session, and Beads seams.) Governs R5-R8, R18.
+- **Vendor the skill locally.** (session-settled: user-directed - chosen over waiting for an upstream Pack v2 export: the repository may own and modify the MIT-licensed capability.) Governs R1-R4.
+- **Do not modify the Gas City service.** (session-settled: user-directed - chosen over patching the supervisor or API: integration must use existing Pack v2, agent, order, formula, session, and Beads seams.) Governs R5-R8, R18.
 - **Use target-only posture.** The babysitter may repair and push the named PR but never merges, force-pushes, rebases, approves gated CI, or broadens to another PR. Governs R9-R13.
 - **Adapt a self-contained subset instead of importing the full Compound Engineering pack.** This avoids unrelated skills, lifecycle assumptions, and dependency expansion. Governs R1-R4, R14.
 - **Persist PR identity before dispatch.** The current build publication path does not durably record the created PR URL or number, so a local publication handoff must establish that identity before the watcher is routed. Governs R6-R8.
@@ -194,7 +194,7 @@ The official babysitting skill already defines a strong snapshot-first watch con
 
 ### Key Technical Decisions
 
-- KTD1. **Vendor the target-only subset from `compound-engineering-v3.23.4` at commit `33d9bd92689d60580e732890f94466e5793385b1`.** Retain the MIT notice and record a file allowlist with hashes. Remove stack, land, plugin-delegation, and `/tmp`-durability assumptions. Governs R1-R4, R13, R24. (session-settled: user-directed — chosen over waiting for upstream packaging: the repository will own and adapt the capability.)
+- KTD1. **Vendor the target-only subset from `compound-engineering-v3.23.4` at commit `33d9bd92689d60580e732890f94466e5793385b1`.** Retain the MIT notice and record a file allowlist with hashes. Remove stack, land, plugin-delegation, and `/tmp`-durability assumptions. Governs R1-R4, R13, R24. (session-settled: user-directed - chosen over waiting for upstream packaging: the repository will own and adapt the capability.)
 - KTD2. **Create a dedicated rig-imported `pr-babysit` pack.** Import it independently on `d2b` and `city-source`; do not add it to `packs/core-city` and do not import it at both city and rig scope. Governs R2, R5, R21, R22.
 - KTD3. **Run one on-demand `pr-babysitter` agent per rig.** Set `max_active_sessions = 1`, use `fast-worker`, and place its work directory under the rig's ignored `.gc/agents/` state. One stable Beads watch record owns each PR. Governs R7-R10, R22, R25.
 - KTD4. **Project the skill during session setup.** An idempotent setup script replaces only the owned `pr-babysit` directories under the isolated workdir's `.github/skills` and `.agents/skills`; it never writes the rig root or a user-global directory. The agent fails closed when native Copilot discovery cannot be verified. Governs R9, R10, R24.
@@ -361,31 +361,31 @@ Do not store review bodies, check logs, credentials, prompts, model responses, h
 
 ```text
 packs/pr-babysit/
-├── pack.toml
-├── LICENSE
-├── UPSTREAM.json
-├── agents/pr-babysitter/
-│   ├── agent.toml
-│   └── prompt.template.md
-├── skills/pr-babysit/
-│   ├── SKILL.md
-│   ├── references/
-│   └── scripts/pr-snapshot
-├── commands/pr-babysit/
-│   ├── command.toml
-│   └── run.sh
-├── formulas/mol-pr-babysit-repair.toml
-├── orders/pr-babysit-sweep.toml
-├── assets/scripts/
-│   ├── project-copilot-skill.sh
-│   ├── pr-babysit-state.py
-│   └── pr-babysit-sweep.sh
-└── assets/workflows/pr-babysit/
-    ├── prepare-worktree.md
-    └── validate-and-report.md
+|-- pack.toml
+|-- LICENSE
+|-- UPSTREAM.json
+|-- agents/pr-babysitter/
+|   |-- agent.toml
+|   `-- prompt.template.md
+|-- skills/pr-babysit/
+|   |-- SKILL.md
+|   |-- references/
+|   `-- scripts/pr-snapshot
+|-- commands/pr-babysit/
+|   |-- command.toml
+|   `-- run.sh
+|-- formulas/mol-pr-babysit-repair.toml
+|-- orders/pr-babysit-sweep.toml
+|-- assets/scripts/
+|   |-- project-copilot-skill.sh
+|   |-- pr-babysit-state.py
+|   `-- pr-babysit-sweep.sh
+`-- assets/workflows/pr-babysit/
+    |-- prepare-worktree.md
+    `-- validate-and-report.md
 
 cities/d2b-gascity/
-└── assets/workflows/publish/open-pr.md
+`-- assets/workflows/publish/open-pr.md
 ```
 
 ---
@@ -510,7 +510,7 @@ cities/d2b-gascity/
 - **Patterns to follow:** Current documentation marker tests, native city smoke, and privacy scans.
 - **Test scenarios:**
   - All unit scenarios run through the integrated local pack.
-  - The old “not imported” and “no local watcher” markers are absent.
+  - The old "not imported" and "no local watcher" markers are absent.
   - No service, relay, daemon, custom transport, or merge machinery appears.
   - d2b accepts only `v3`; city-source accepts only `main`.
   - Model tiers resolve fast Luna babysitting, Luna max repair, and Grok review.

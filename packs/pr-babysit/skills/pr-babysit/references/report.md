@@ -2,10 +2,10 @@
 
 Start every terminal report with one status line:
 
-- `✅ Looks merge-ready — <evidence>. Your call for final integration.`
-- `🟡 Cautiously looks ready — <review evidence>. Your call for final integration.`
-- `🎉 Merged`, `🚫 Closed`, `⛔ Blocked`, `⏱️ Budget exhausted`, or
-  `⏸️ Paused` for the other terminal states.
+- `Looks merge-ready - <evidence>. Your call for final integration.`
+- `Cautiously looks ready - <review evidence>. Your call for final integration.`
+- `Merged`, `Closed`, `Blocked`, `Budget exhausted`, or `Paused` for the other
+  terminal states.
 
 Then summarize the target pull request, the feedback themes handled, current
 head CI results, pushes actually observed, elapsed budget, and every parked

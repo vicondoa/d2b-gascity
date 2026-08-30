@@ -44,6 +44,9 @@ workdir-local projection gate runs before GitHub actions. Its Beads states
 and `terminal`) and `claim -> act -> confirm` repair protocol remain native
 state. The `1m` checkpoint order wakes only due, unclaimed watches; an action
 child blocks its watch until native dependency-close wake.
+The handoff receipt's `target=<rig>/pr-babysit.pr-babysitter` is distinct from
+the watch's `base_ref=v3` or `base_ref=main` and the publication bead's
+`merge_strategy=pr`.
 
 ## Hard boundaries
 
@@ -61,7 +64,14 @@ The mayor must not:
 - use `update-branch` in v1, because repair has only operator-attested
   Contents write and Pull requests read only. Pull requests write,
   merge/admin, workflow approval, and Copilot Requests authority are outside
-  the repair identity.
+  the repair identity;
+- dispatch a fork or cross-repository repair. Repairs are
+  same-repository-only and those PRs are human blockers in v1;
+- bypass the mandatory `PR_BABYSIT_VALIDATOR`, which must be an absolute,
+  non-symlink, executable file, run `make check` in a credential- and
+  network-isolated environment, and use
+  `PR_BABYSIT_VALIDATOR_ATTESTED=credential-isolated-v1`. A missing validator
+  blocks repair.
 
 The `d2b-governance` global fragment remains the source of the PR-only
 publication rule and applies target-only behavior to babysitter and repair.

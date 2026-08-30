@@ -139,6 +139,9 @@ PR_BABYSIT_FILES = {
             "31774e3ad7d5ea97d6360ff5d404ade79331d42a53ec50e8cd"
             "5bae531dc98e5b"
         ),
+        "local_sha256": (
+            "31d79d87f9e63940714656cb35af5746aed53cc6f263de17a60b4f0e04e6362f"
+        ),
     },
     "skills/pr-babysit/references/settle.md": {
         "source": "skills/ce-babysit-pr/references/settle.md",
@@ -1360,6 +1363,18 @@ class RootPortableCityTests(unittest.TestCase):
             "target-only",
             "metadata.target=v3",
             "metadata.merge_strategy=pr",
+            "target=<rig>/pr-babysit.pr-babysitter",
+            "handoff_target",
+            "base_ref=v3",
+            "base_ref=main",
+            "pr_babysit_validator",
+            "credential-isolated-v1",
+            "absolute, non-symlink, executable",
+            "credential- and network-isolated",
+            "missing validator blocks repair",
+            "same-repository-only",
+            "fork or cross-repository prs are human blockers",
+            "no live u8 acceptance is claimed",
             "human-owned",
             "human merge",
         ):
@@ -1374,6 +1389,30 @@ class RootPortableCityTests(unittest.TestCase):
             "blocked upstream request",
         ):
             self.assertNotIn(marker, docs_flat, marker)
+
+    def test_review_docs_and_report_use_ascii_text(self) -> None:
+        paths = [
+            ROOT / relative
+            for relative in (
+                "README.md",
+                "AGENTS.md",
+                "CONTRIBUTING.md",
+                "PROVENANCE.md",
+                "SECURITY.md",
+                "CHANGELOG.md",
+                "docs/operations.md",
+                "docs/testing.md",
+                "recipes/the-mayor.md",
+                "cities/d2b-gascity/template-fragments/d2b-governance.template.md",
+                "docs/plans/2026-08-29-1000-feat-vendored-pr-babysitting-plan.md",
+                "packs/pr-babysit/skills/pr-babysit/references/report.md",
+            )
+        ]
+        for path in paths:
+            self.assertTrue(
+                path.read_text(encoding="utf-8").isascii(),
+                str(path.relative_to(ROOT)),
+            )
 
     def test_u7_pack_docs_and_governance_preserve_target_only_privacy(
         self,
@@ -2563,11 +2602,11 @@ class VendoredPrBabysitTests(unittest.TestCase):
             set(PR_BABYSIT_FILES),
         )
         for entry in entries:
-            self.assertEqual(
-                set(entry),
-                {"local", "source", "sha256"},
-            )
             expected = PR_BABYSIT_FILES[entry["local"]]
+            expected_keys = {"local", "source", "sha256"}
+            if entry["local"] == "skills/pr-babysit/references/report.md":
+                expected_keys.add("local_sha256")
+            self.assertEqual(set(entry), expected_keys)
             self.assertEqual(entry["source"], expected["source"])
             self.assertEqual(entry["sha256"], expected["sha256"])
             self.assertRegex(entry["sha256"], r"^[0-9a-f]{64}$")
@@ -2575,6 +2614,21 @@ class VendoredPrBabysitTests(unittest.TestCase):
                 (PR_BABYSIT_ROOT / entry["local"]).is_file(),
                 entry["local"],
             )
+            if "local_sha256" in entry:
+                self.assertRegex(
+                    entry["local_sha256"],
+                    r"^[0-9a-f]{64}$",
+                )
+                self.assertEqual(
+                    entry["local_sha256"],
+                    expected["local_sha256"],
+                )
+                self.assertEqual(
+                    entry["local_sha256"],
+                    hashlib.sha256(
+                        (PR_BABYSIT_ROOT / entry["local"]).read_bytes()
+                    ).hexdigest(),
+                )
 
     def test_pr_babysit_license_retains_mit_notice(self) -> None:
         license_path = PR_BABYSIT_ROOT / "LICENSE"

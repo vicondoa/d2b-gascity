@@ -43,12 +43,15 @@ bypass either repository's pull-request handoff.
 
 Keep `d2b-governance` registered as a global fragment. Publication must
 persist and re-read `metadata.merge_strategy=pr` plus the repository-specific
-target: `v3` for `d2b`, `main` for `city-source`. Refuse direct merges and
-accept only the pull-request handoff. The d2b Discord formula extension is
-product-only. Human owners make merge decisions. Host branch protection for
-`v3` is defense-in-depth: it must require pull requests and apply to
-administrators, but this repository does not claim the current host is already
-configured that way.
+target: `v3` for `d2b`, `main` for `city-source`. The handoff receipt's
+`target=<rig>/pr-babysit.pr-babysitter` is the routing target, not the watch
+base. The watch stores `base_ref=v3` or `base_ref=main`, while the publication
+bead stores `merge_strategy=pr`. Refuse direct merges and accept only the
+pull-request handoff. The d2b Discord formula extension is product-only.
+Human owners make merge decisions. Host branch protection for `v3` is
+defense-in-depth: it must require pull requests and apply to administrators,
+but this repository does not claim the current host is already configured
+that way.
 
 The rig-imported `pr-babysit` pack provides one binding-qualified babysitter
 per rig: `d2b/pr-babysit.pr-babysitter` and
@@ -85,10 +88,25 @@ retried. Never use `--force-with-lease` or a raw rebase. `rearm=true` may
 rearm an open blocked, exhausted, or merge-ready watch, but never a terminal
 watch.
 
+Watch `claim_status` values written by state code are `none`, `claimed`,
+`result-recorded`, `blocked`, and `exhausted`. Action records may also use
+`ambiguous` and `stale`; Beads issue status `closed` is separate from
+`claim_status` and is written when a confirmed action child closes or a watch
+reaches terminal. Repairs are same-repository-only:
+`head_repository` must equal `owner/repository`.
+Fork or cross-repository PRs are human blockers in v1. Before repair, provide
+`PR_BABYSIT_VALIDATOR` as an absolute, non-symlink, executable file and set
+`PR_BABYSIT_VALIDATOR_ATTESTED=credential-isolated-v1`. It must run
+`make check` in a credential- and network-isolated environment. A missing
+validator blocks repair, as do an invalid or failed validator. Keep the
+operator-attested `contents-write,pull-requests-read` GitHub capability and
+all Copilot, GitHub, and Discord credentials separate.
+
 Enable d2b first. The `city-source` rig remains suspended-on-start and must
 not be enabled for live repair until the U8 disposable d2b acceptance passes.
 Static and native credential-free tests cover both targets without mutating
-GitHub; authenticated evidence stays private and redacted.
+GitHub; authenticated evidence stays private and redacted. No live U8
+acceptance is claimed by this source tree.
 
 ## Source, host, and reset boundaries
 

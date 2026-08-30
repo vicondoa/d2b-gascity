@@ -34,7 +34,8 @@
     {
       "local": "skills/pr-babysit/references/report.md",
       "source": "skills/ce-babysit-pr/references/report.md",
-      "sha256": "31774e3ad7d5ea97d6360ff5d404ade79331d42a53ec50e8cd5bae531dc98e5b"
+      "sha256": "31774e3ad7d5ea97d6360ff5d404ade79331d42a53ec50e8cd5bae531dc98e5b",
+      "local_sha256": "31d79d87f9e63940714656cb35af5746aed53cc6f263de17a60b4f0e04e6362f"
     },
     {
       "local": "skills/pr-babysit/references/settle.md",
@@ -77,6 +78,7 @@
     "Replace host skill calls and user questions with native-session handoff language.",
     "Use only the caller-supplied state directory and one checkpoint per turn.",
     "Add native bounded repair dispatch, least-privilege credential fencing, and safe SHA/thread result handling.",
-    "Treat every branch-currency item as a human decision, never an automatic claim."
+    "Treat every branch-currency item as a human decision, never an automatic claim.",
+    "Adapt report status examples from Unicode symbols and em dashes to ASCII text and hyphen punctuation while retaining the upstream source hash."
   ]
 }

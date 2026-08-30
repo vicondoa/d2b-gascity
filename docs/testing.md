@@ -118,12 +118,20 @@ gc pr-babysit pr-babysit verify-handoff \
   --url <pull-request-url> --pr-number <number> --json
 ```
 
+The handoff result must show
+`target=<rig>/pr-babysit.pr-babysitter` and store it as `handoff_target` in
+receipt metadata. The watch record must show
+`base_ref=v3` for d2b or `base_ref=main` for city-source. The publication
+bead must show `merge_strategy=pr`; its `metadata.target=v3` or
+`metadata.target=main` is publication metadata, not the handoff routing
+target.
+
 Credential-free tests use fake GitHub, Beads, and Gas City commands to cover
 both d2b/`v3` and city-source/`main`: duplicate handoff, one-writer action
 claims, fresh checkpoint ordering, feedback-before-CI, current-head repair,
 `bd dep <action-id> --blocks <watch-id>`, restart recovery, retry exhaustion,
-terminal state, explicit `rearm=true`, and ambiguous push blocking. They do
-not mutate GitHub or use credentials.
+terminal state, explicit `rearm=true`, ambiguous push blocking, and
+same-repository-only repair. They do not mutate GitHub or use credentials.
 
 The first version does not call `update-branch`. Repair requires an
 operator-attested identity with Contents write and Pull requests read only;
@@ -131,13 +139,21 @@ the agent cannot introspect fine-grained permissions. Pull requests write,
 merge/admin, workflow-approval, and Copilot Requests authority are refused.
 Keep publication, repair GitHub, Copilot Requests, and Discord credentials
 separate, and never reuse a Copilot token for `GH_TOKEN` or `GITHUB_TOKEN`.
+Before a repair, require `PR_BABYSIT_VALIDATOR` as an absolute, non-symlink,
+executable file and set
+`PR_BABYSIT_VALIDATOR_ATTESTED=credential-isolated-v1`. It must run
+`make check` in a credential- and network-isolated environment. A missing
+validator blocks repair, as do an invalid or failed validator. Fork or
+cross-repository PRs are human blockers in v1.
 The credential-free `gc pr-babysit pr-babysit check-credentials --json`
-command verifies the operator attestation and token separation only.
+command verifies the operator capability and validator attestations plus
+token separation only; it does not replace the validator run.
 
 d2b is enabled first. The `city-source` rig remains suspended-on-start and
 must not be enabled for live repair until the U8 disposable d2b acceptance
 passes. Live authenticated evidence is private and redacted; retain only
-safe pass/fail notes outside this repository.
+safe pass/fail notes outside this repository. No live U8 acceptance is claimed
+by this source tree.
 
 ### Human-gate recovery
 
@@ -213,8 +229,11 @@ host-local.
 
 ### PR-only publication
 
-- Verify publication persists and re-reads `metadata.merge_strategy=pr` plus
-  `metadata.target=v3` for d2b or `metadata.target=main` for city-source.
+- Verify the handoff receipt's
+  `target=<rig>/pr-babysit.pr-babysitter`, the watch's
+  `base_ref=v3` or `base_ref=main`, and the publication bead's
+  `metadata.merge_strategy=pr` plus `metadata.target=v3` for d2b or
+  `metadata.target=main` for city-source.
 - Verify publication refuses direct merges and never merges or force-pushes.
 
 ## Documentation and reset evidence
