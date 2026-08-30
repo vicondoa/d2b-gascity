@@ -115,7 +115,34 @@ commands. Review only repository state and only the explicitly addressed
 thread IDs {{addressed_thread_ids}} for pull request
 {{github_host}}/{{owner}}/{{repository}}#{{pr_number}} at generation
 {{generation}}. Report findings without changing the target or widening
-scope, and do not push.
+scope, and do not push. Do not resolve, close, or otherwise mutate GitHub
+review threads; the repair credential is Pull requests read only. After
+reviewing the repaired worktree, record the candidate head and your
+machine-readable verdict before validation:
+
+```sh
+CANDIDATE_HEAD_SHA="$(
+  git -C "$GC_RIG_ROOT/.gc/agents/pr-babysitter/worktrees/{{action_id}}" \
+    rev-parse 'HEAD^{commit}'
+)" || exit 1
+gc pr-babysit pr-babysit record-candidate-head \
+  --watch-id "{{watch_id}}" \
+  --action-id "{{action_id}}" \
+  --generation "{{generation}}" \
+  --candidate-head-sha "$CANDIDATE_HEAD_SHA" \
+  --json
+gc pr-babysit pr-babysit record-review-verdict \
+  --watch-id "{{watch_id}}" \
+  --action-id "{{action_id}}" \
+  --generation "{{generation}}" \
+  --candidate-head-sha "$CANDIDATE_HEAD_SHA" \
+  --verdict passed \
+  --json
+```
+
+Use `failed` instead when the repair is not safe to validate. The verdict must
+be `passed` for validation to continue. A failed verdict is a durable blocker
+and must not be bypassed.
 """
 
 [[steps]]

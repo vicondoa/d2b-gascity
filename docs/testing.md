@@ -120,11 +120,14 @@ gc pr-babysit pr-babysit verify-handoff \
 
 The handoff result must show
 `target=<rig>/pr-babysit.pr-babysitter` and store it as `handoff_target` in
-receipt metadata. The watch record must show
-`base_ref=v3` for d2b or `base_ref=main` for city-source. The publication
-bead must show `merge_strategy=pr`; its `metadata.target=v3` or
-`metadata.target=main` is publication metadata, not the handoff routing
-target.
+receipt metadata. Publication metadata must persist `merge_strategy=pr` plus
+`base_ref`, `target`, or `target_branch`; a missing target is rejected. The
+handoff routes without wake, writes matching `handoff_verified=true` receipts,
+then nudges. `handoff_route_status=pending` or `route-failed` is never
+actionable, and a repeated complete receipt does not duplicate the wake. The
+watch record must show `base_ref=v3` for d2b or `base_ref=main` for
+city-source. The publication bead's target is publication metadata, not the
+handoff routing target.
 
 The cooldown smoke invokes the canonical bounded state action and verifies
 that it lists, rechecks, and routes due watches in deterministic order:
@@ -139,6 +142,14 @@ claims, fresh checkpoint ordering, feedback-before-CI, current-head repair,
 `bd dep <action-id> --blocks <watch-id>`, restart recovery, retry exhaustion,
 terminal state, explicit `rearm=true`, ambiguous push blocking, and
 same-repository-only repair. They do not mutate GitHub or use credentials.
+
+The repair formula records a candidate HEAD and requires a passed reviewer
+verdict bound to its action ID, generation, and exact candidate SHA before the
+validator or normal push. Failed, missing, or stale verdicts block. Review
+credentials are Pull requests read only; tests must not auto-resolve GitHub
+threads. The bounded `pr-snapshot mark` command records local
+`handled` or `ignored` feedback by stable item ID and content identity, and a
+changed content identity reopens the item.
 
 The first version does not call `update-branch`. Repair requires an
 operator-attested identity with Contents write and Pull requests read only;

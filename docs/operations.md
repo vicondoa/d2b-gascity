@@ -317,9 +317,14 @@ gc pr-babysit pr-babysit verify-handoff \
 
 The handoff queries GitHub and verifies the host, owner, repository, PR number
 or URL, open state, draft state, base ref, head ref, and current head SHA. It
-derives one stable watch ID, creates or reuses exactly one Beads watch, routes
-the binding-qualified babysitter with `gc sling --nudge`, and writes a
-deterministic receipt. Publication may close only after
+requires persisted `merge_strategy=pr` plus `base_ref`, `target`, or
+`target_branch`; it never infers a missing target. It derives one stable watch
+ID, creates or reuses exactly one Beads watch, routes it without wake, writes
+matching verified receipts, and then nudges the binding-qualified babysitter.
+A complete receipt requires `handoff_verified=true`, the self watch ID, the
+binding-qualified target, and the publication bead. `pending` and
+`route-failed` receipts cannot act. A repeated complete receipt does not issue
+another wake. Publication may close only after
 `verify-handoff` re-reads the matching receipt. Inspect safe state with:
 
 ```text
@@ -330,9 +335,10 @@ The handoff result carries
 `target=<rig>/pr-babysit.pr-babysitter`, stored as `handoff_target` in the
 receipt metadata. The watch record carries
 `base_ref=v3` for d2b or `base_ref=main` for city-source. The publication bead
-must carry `metadata.merge_strategy=pr` and the matching
-`metadata.target=v3` or `metadata.target=main`; these are separate fields
-with separate meanings. A missing, mismatched, draft, wrong-base,
+must carry `metadata.merge_strategy=pr` and one matching target field:
+`metadata.base_ref`, `metadata.target`, or `metadata.target_branch`. These are
+publication metadata and separate from the handoff routing target. A missing,
+mismatched, draft, wrong-base,
 wrong-repository, or absent PR identity creates no watcher and no route.
 Repeat the commands with `--rig city-source` and the city-source publication
 bead for a `main`-targeted pull request.
@@ -360,8 +366,10 @@ Watch `claim_status` values written by state code are `none`, `claimed`,
 `claim_status` and is written when a confirmed action child closes or a watch
 reaches terminal. The watch records exhaustion when its repair or time budget
 ends. Only a `result-recorded` action with a passed `make check` and matching
-pushed SHA may be confirmed and closed; failed or ambiguous actions remain
-human blockers.
+pushed SHA plus a current passed reviewer verdict may be confirmed and
+closed; failed or ambiguous actions remain human blockers. Only `watching`
+watches may claim repairs; `waiting` may transition to `merge-ready` or
+`blocked` but not directly to `repairing`.
 
 The `pr-babysit-sweep` cooldown order in the rig-imported pack runs every
 `1m` through the canonical bounded `sweep` state action. It validates the
@@ -387,8 +395,11 @@ watcher process.
 `mol-pr-babysit-repair` is a Formula v2 graph with
 `prepare-worktree`, `repair`, `review`, `validate-and-report`, and
 `close-action` steps. It uses the existing PR head and branch, validates
-`make check`, performs one normal push, verifies the new remote SHA, and
-confirms the action. It never creates a replacement PR or remote branch.
+`make check`, records a candidate head and independent reviewer verdict,
+performs one normal push, verifies the new remote SHA, and confirms the
+action. Git fetch, push, and `ls-remote` calls use a bounded timeout and
+reconcile the remote after failures. It never creates a replacement PR or
+remote branch.
 
 CI repairs have three attempts per normalized head and failure fingerprint;
 review repairs have two. The active budget is eight active hours and the hard
@@ -420,6 +431,12 @@ the operator attestation. Before repair, provide
 `make check` in a credential- and network-isolated environment. A missing
 validator blocks repair, as do an invalid or failed validator. There is no
 direct-make fallback.
+
+The reviewer is read-only with respect to GitHub and never resolves review
+threads. After a confirmed review repair, record each addressed thread,
+comment, or review locally with `pr-snapshot mark` and its current
+content identity using `handled` or `ignored`; changed content reopens the
+item.
 
 The operator may verify the attestation and token separation without a GitHub
 request:

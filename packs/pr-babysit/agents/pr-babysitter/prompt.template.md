@@ -63,16 +63,16 @@ verify_projection() {
   marker_value="$(cat "$marker")" || blocker "cannot read $marker"
   [ "$marker_value" = "$commit" ] || blocker "wrong commit in $marker"
 
-  verify_file '9afc7495f69582e75c001c48e1c9c1a1b53302ea4a6b577473004a6f59714ecf' 'SKILL.md'
+  verify_file '8922231e0f85a889895397d8472a35484a96373ecb2efc5d513767319545e511' 'SKILL.md'
   verify_file '158a3624dd0150de39bdaba507a7685bb887c6f28899b38b1c268492a5a66ceb' 'references/branch-currency.md'
-  verify_file '43f5f9f31835a1663f1e37f0f01b1ac60fe25a5d4ec9b3241de0bc4059c9dd65' 'references/envelope.md'
+  verify_file '180ff7b0d7da65b126d584d12af769d9837b4464584b1eefa3a7764622f05499' 'references/envelope.md'
   verify_file 'aebd3a9955d7fb53e94512e4bdc998dfe7e1ca725fbfde6f902fde8382903034' 'references/pipeline.md'
   verify_file '31d79d87f9e63940714656cb35af5746aed53cc6f263de17a60b4f0e04e6362f' 'references/report.md'
   verify_file '6d9b01a8871bc0cfdcca66e16a9b6d338d4bbb74e0913234fad120fdffcef03c' 'references/settle.md'
-  verify_file '7442cf756411a7a274e48c38184d996f02554d59577721efe2a03cc3359ca739' 'references/setup.md'
-  verify_file '40d954a7db9522aa0b94969c4bd06551f7146ce16989947a658d0731c4a7f7d4' 'references/tick.md'
+  verify_file 'c026058ecccf8bc97ea4de8edcd380e5652b7011469bee55b449a76f2a7e9141' 'references/setup.md'
+  verify_file '74fe9650e6d5904ecb60a85ac0513f8b53899c5a7b4a2e673fb23a949ffc8d91' 'references/tick.md'
   verify_file 'ffa2bbb69316326c9d6f52a6834008c77e095607678292e228f6cd99ad748932' 'references/watch-loop.md'
-  verify_file '98fd2ae7a7215968fe1c85f821338f8b568e3afb8b2b234cdf1ae97635d419dc' 'scripts/pr-snapshot'
+  verify_file 'b8aaff26d9542181446b86b11280f5330fd7d532fdfd2027a2afabdfd9e4bb97' 'scripts/pr-snapshot'
 }
 
 for projection in \
@@ -144,6 +144,24 @@ state_dir="$GC_DIR/state/$watch_id"
   blocker "state directory is a symlink"
 ```
 
+Before any snapshot or other action, require the complete persisted
+publication receipt:
+
+```text
+metadata.handoff_verified=true
+metadata.handoff_watch_id=<watch-id>
+metadata.handoff_target=<rig>/pr-babysit.pr-babysitter
+metadata.handoff_publication_bead=<publication-bead-id>
+metadata.handoff_route_status=complete (or absent for a complete legacy receipt)
+```
+
+The exact same-repository fence is mandatory:
+`metadata.head_repository` must equal
+`metadata.owner/metadata.repository`. Explicit `pending` and
+`route-failed` receipt states, missing receipt fields, and any other
+identity mismatch are blockers. Do not invoke `gh`, Git, a snapshot, or a
+repair until this receipt check passes.
+
 All snapshots must use exactly `$GC_DIR/state/<watch-id>`. The helper also
 validates every existing path component and refuses paths outside this
 directory.
@@ -214,3 +232,23 @@ current-head checks, review-before-CI handling, exact branch-currency evidence,
 and bounded handoff. `snapshot.base.identity` must be `current`; unknown,
 stale, or wrong-base identity, cross-repository head identity, dirty state,
 conflicting state, and unknown capability are human blockers.
+
+The repair credential is Pull requests read only. Never resolve or close
+GitHub review threads. After `confirm-action` succeeds for a review repair,
+persist each explicitly addressed feedback item in local watch state:
+
+```text
+scripts/pr-snapshot mark \
+  --watch-id <watch-id> \
+  --pr <metadata.pr_number> \
+  --repo <metadata.github_host>/<metadata.owner>/<metadata.repository> \
+  --head-sha <confirmed-head-sha> \
+  --thread <stable-thread-id> \
+  --identity <current-content-identity> \
+  --disposition handled
+```
+
+Use `ignored` only for a deliberate local disposition. Content identity
+changes reopen the item on the next snapshot; no GitHub thread mutation is
+performed. Use `--comment` or `--review` instead of `--thread` for those
+stable feedback IDs.

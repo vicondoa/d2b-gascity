@@ -73,10 +73,8 @@ EveryInc's MIT-licensed `compound-engineering-plugin` source. The source tag is
 
 They are copied to the local `packs/pr-babysit/skills/pr-babysit` namespace
 with the original MIT notice retained in `packs/pr-babysit/LICENSE`.
-`UPSTREAM.json` records the selected-file hashes and the excluded surfaces.
-The report reference has a local ASCII status-line adaptation; its manifest
-entry retains the recorded upstream source hash and records a separate local
-projection hash. All existing upstream notices remain alongside their
+`UPSTREAM.json` records the selected-file hashes, local adaptation hashes, and
+the excluded surfaces. All existing upstream notices remain alongside their
 imported sources; local documentation, Pack v2 glue, and city configuration
 remain Apache-2.0.
 
@@ -86,6 +84,10 @@ Local modifications are deliberately narrow: the skill is renamed to
 installation, plugin delegation, scheduler or daemon lifecycle, and durable
 `/tmp` state are removed; and native Gas City agent, Beads, projection,
 publication-handoff, checkpoint, and Formula v2 repair seams are added.
+Publication uses route-only, verified-receipt, then wake phases; incomplete,
+pending, or route-failed receipts cannot act. Repair records a candidate head
+and machine-enforced reviewer verdict before validation or a bounded normal
+push, and local snapshot disposition replaces any GitHub thread mutation.
 Repairs are same-repository-only; fork and cross-repository PRs are human
 blockers in v1. Repair also requires an absolute, non-symlink, executable
 `PR_BABYSIT_VALIDATOR` with

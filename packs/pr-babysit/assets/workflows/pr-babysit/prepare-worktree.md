@@ -18,6 +18,19 @@ blocker() {
     exit 1
 }
 
+GIT_TIMEOUT_SECONDS="${PR_BABYSIT_GIT_TIMEOUT_SECONDS:-30}"
+case "$GIT_TIMEOUT_SECONDS" in
+    ''|*[!0-9]*) blocker 'Git timeout must be a positive integer' ;;
+esac
+[ "$GIT_TIMEOUT_SECONDS" -gt 0 ] ||
+    blocker 'Git timeout must be a positive integer'
+command -v timeout >/dev/null 2>&1 ||
+    blocker 'bounded timeout command is unavailable'
+git_bounded() {
+    timeout --foreground --kill-after=5s \
+        "${GIT_TIMEOUT_SECONDS}s" git "$@"
+}
+
 RIG='{{rig}}'
 GITHUB_HOST='{{github_host}}'
 OWNER='{{owner}}'
@@ -90,7 +103,7 @@ git check-ref-format --branch "$HEAD_REF" >/dev/null 2>&1 ||
 
 # The verified same-repository identity is authoritative; never infer a fork
 # head from the base repository's origin.
-if ! git -C "$GC_RIG_ROOT" fetch --prune origin \
+if ! git_bounded -C "$GC_RIG_ROOT" fetch --prune origin \
     "refs/heads/$HEAD_REF:refs/remotes/origin/$HEAD_REF" \
     >/dev/null 2>&1; then
     blocker 'exact pull-request head fetch failed'

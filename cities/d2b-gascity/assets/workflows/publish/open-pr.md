@@ -24,6 +24,13 @@ When `open_pr` is true:
      --pr-number "$PR_NUMBER"
    ```
 
+   The command first routes the watch without waking it, persists matching
+   `handoff_verified=true` identity receipts on the publication and watch
+   beads, then nudges the binding-qualified babysitter. A route or wake
+   failure records a recoverable `handoff_route_status=route-failed` state
+   without leaving a verified receipt. Repeating a complete receipt does not
+   issue another wake.
+
 4. Immediately before closing this publication step, verify the machine-owned
    receipt:
 
@@ -39,3 +46,7 @@ Both commands must exit successfully and return JSON with
 `"verified":true`, the same stable watch ID, and the binding-qualified target
 for the owning rig. If either command fails, do not close publication. Report
 the handoff blocker without attempting a merge or another pull request.
+
+The publication bead must already persist `merge_strategy=pr` and its
+repository target as `base_ref`, `target`, or `target_branch`; the handoff
+never infers a missing target.

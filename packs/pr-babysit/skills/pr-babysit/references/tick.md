@@ -44,6 +44,10 @@ checkpoint sweep.  `repairing` watches with an open or unconfirmed child wait
 for the native dependency-close wake. A confirmed action starts the next
 checkpoint from a fresh snapshot.
 
+`waiting` may settle to `merge-ready` or `blocked`, or return to `watching`.
+It must return to `watching` before a repair claim; no checkpoint or claim may
+transition `waiting` directly to `repairing`.
+
 Checkpoint timing is bounded by `active_since`, an eight-hour active budget,
 and a three-day RFC3339 backstop.  Expiry transitions `watching` or `waiting`
 to `exhausted`.

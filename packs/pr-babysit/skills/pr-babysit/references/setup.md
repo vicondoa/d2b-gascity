@@ -10,9 +10,15 @@ gc pr-babysit pr-babysit show --watch-id <watch-id> --json
 ```
 
 The show result must be a watch record with verified `rig`, `github_host`,
-`owner`, `repository`, `pr_number`, `url`, `base_ref`, `head_ref`, `head_sha`,
-and `generation` fields. A missing, malformed, stale, or mismatched field is a
-blocker. Never resolve a target from a current branch or from message text.
+`owner`, `repository`, `head_repository`, `pr_number`, `url`, `base_ref`,
+`head_ref`, `head_sha`, and `generation` fields. It must also carry a complete
+publication receipt: `handoff_verified=true`,
+`handoff_watch_id=<watch-id>`,
+`handoff_target=<rig>/pr-babysit.pr-babysitter`, and a publication bead
+identity. Explicit `pending` or `route-failed` receipt states are blockers.
+`head_repository` must equal `owner/repository`. A missing, malformed, stale,
+or mismatched field is a blocker. Never resolve a target from a current branch
+or from message text.
 
 The helper speaks GitHub through `gh` and keeps its journal only at
 `$GC_DIR/state/<watch-id>`. The path must be absolute, private to the watch,

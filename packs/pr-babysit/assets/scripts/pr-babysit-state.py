@@ -37,7 +37,7 @@ REARMABLE_STATES = {"blocked", "exhausted", "merge-ready"}
 CHECKPOINT_STATES = {"watching", "waiting"}
 TRANSITIONS = {
     "watching": {"waiting", "repairing", "merge-ready", "blocked", "terminal"},
-    "waiting": {"watching", "terminal"},
+    "waiting": {"watching", "merge-ready", "blocked", "terminal"},
     "repairing": {"watching", "exhausted", "blocked", "terminal"},
     "merge-ready": {"terminal"},
     "blocked": {"terminal"},
@@ -45,6 +45,9 @@ TRANSITIONS = {
     "terminal": set(),
 }
 VALIDATION_STATUSES = {"passed", "failed", "not-run", "ambiguous"}
+REVIEW_VERDICTS = {"passed", "failed"}
+HANDOFF_ROUTE_STATUSES = {"pending", "complete", "route-failed"}
+HANDOFF_WAKE_STATUSES = {"not-started", "ready", "delivered", "failed"}
 AMBIGUOUS_REASON = "ambiguous-outcome"
 TIME_BUDGET_REASON = "time-budget-exhausted"
 BACKSTOP_REASON = "backstop-expired"
@@ -129,6 +132,13 @@ SAFE_METADATA_KEYS = {
     "handoff_watch_id",
     "handoff_target",
     "handoff_publication_bead",
+    "handoff_route_status",
+    "handoff_wake_status",
+    "candidate_head_sha",
+    "review_verdict",
+    "review_verdict_action_id",
+    "review_verdict_generation",
+    "review_verdict_head_sha",
 }
 
 
@@ -1282,6 +1292,11 @@ def action_metadata(
         "validation_status": "",
         "make_check_result": "",
         "addressed_thread_ids": "",
+        "candidate_head_sha": "",
+        "review_verdict": "",
+        "review_verdict_action_id": "",
+        "review_verdict_generation": "",
+        "review_verdict_head_sha": "",
         "formula_attached": "false",
         "formula_root": "",
         "blocker_emitted": "false",
@@ -1563,6 +1578,8 @@ def _handoff_locked(
     rearm: bool,
     watch_id: str,
     initial: dict[str, str],
+    *,
+    preserve_budget: bool = False,
 ) -> dict[str, Any]:
     created, reused, _, metadata = create_watch(watch_id, initial, identity)
     immutable_matches(metadata, identity)
@@ -1619,11 +1636,19 @@ def _handoff_locked(
     )
     parse_time(observed_at, "observed_at")
     parse_time(next_snapshot_at, "next_snapshot_at")
-    if should_rearm:
+    reset_budget = should_rearm and not preserve_budget
+    if not created and not reset_budget:
+        active_since = text_value(
+            metadata.get("active_since", ""),
+            "active_since",
+        )
+        if not active_since:
+            fail("existing watch is missing active_since", "corrupt-state")
+    if reset_budget:
         active_since = observed_at
     active_since_time = parse_time(active_since, "active_since")
     supplied_backstop = payload_value(payload, "backstop_at")
-    if should_rearm:
+    if reset_budget:
         backstop_at = text_value(
             supplied_backstop or "",
             "backstop_at",
@@ -1637,12 +1662,14 @@ def _handoff_locked(
             backstop_at = format_time(active_since_time + BACKSTOP_BUDGET)
     else:
         backstop_at = text_value(
-            supplied_backstop
-            if supplied_backstop is not None
-            else metadata.get("backstop_at", ""),
+            metadata.get("backstop_at", "")
+            if not created or supplied_backstop is None
+            else supplied_backstop,
             "backstop_at",
             required=False,
         )
+        if not backstop_at:
+            backstop_at = format_time(active_since_time + BACKSTOP_BUDGET)
         if backstop_at:
             parse_time(backstop_at, "backstop_at")
     head_changed = current_head != incoming_head
@@ -1691,15 +1718,19 @@ def _handoff_locked(
             head_sha=incoming_head,
             observed_at=observed_at,
             next_snapshot_at=next_snapshot_at,
-            active_since=active_since,
+            active_since=(
+                metadata.get("active_since", active_since)
+                if not reset_budget
+                else active_since
+            ),
             last_pushed_sha=metadata.get("last_pushed_sha", ""),
             backstop_at=backstop_at,
-            attempt_key="" if should_rearm else metadata.get("attempt_key", ""),
-            attempts=0 if should_rearm else attempts_from_metadata(metadata),
-            attempt_limit="" if should_rearm else metadata.get("attempt_limit", ""),
+            attempt_key="" if reset_budget else metadata.get("attempt_key", ""),
+            attempts=0 if reset_budget else attempts_from_metadata(metadata),
+            attempt_limit="" if reset_budget else metadata.get("attempt_limit", ""),
             attempt_history=(
                 ""
-                if should_rearm
+                if reset_budget
                 else metadata.get("attempt_history", "")
             ),
         )
@@ -1820,18 +1851,25 @@ def publication_context(
     if supplied_host and supplied_host != host:
         fail("pull-request URL host does not match publication", "identity-mismatch")
 
-    recorded_base = (
-        metadata.get("base_ref")
-        or metadata.get("target")
-        or metadata.get("target_branch")
-    )
-    if recorded_base:
-        recorded_base = validate_git_ref(recorded_base, "base_ref")
-        if recorded_base != expected_rig["base_ref"]:
-            fail(
-                f"publication base must be {expected_rig['base_ref']}",
-                "identity-mismatch",
-            )
+    recorded_bases = [
+        metadata.get(field, "")
+        for field in ("base_ref", "target", "target_branch")
+        if metadata.get(field, "")
+    ]
+    if not recorded_bases:
+        fail(
+            "publication bead is missing persisted target metadata",
+            "identity-mismatch",
+        )
+    normalized_bases = {
+        validate_git_ref(value, "base_ref")
+        for value in recorded_bases
+    }
+    if len(normalized_bases) != 1 or expected_rig["base_ref"] not in normalized_bases:
+        fail(
+            f"publication base must be {expected_rig['base_ref']}",
+            "identity-mismatch",
+        )
 
     return {
         "rig": rig,
@@ -1923,7 +1961,7 @@ def query_github_publication(context: dict[str, Any]) -> dict[str, Any]:
         "--json",
         (
             "number,url,state,isDraft,baseRefName,headRefName,headRefOid,"
-            "repository,isCrossRepository,headRepository,headRepositoryOwner"
+            "isCrossRepository,headRepository,headRepositoryOwner"
         ),
     ]
     environment = os.environ.copy()
@@ -2042,34 +2080,6 @@ def query_github_publication(context: dict[str, Any]) -> dict[str, Any]:
             "cross-repository-head",
         )
 
-    repository_value = raw.get("repository")
-    if repository_value is not None:
-        if isinstance(repository_value, dict):
-            repository_value = (
-                repository_value.get("nameWithOwner")
-                or repository_value.get("name_with_owner")
-                or repository_value.get("fullName")
-                or repository_value.get("full_name")
-            )
-        if repository_value is None or not isinstance(repository_value, str):
-            fail(
-                "GitHub response repository identity is malformed",
-                "github-invalid-response",
-            )
-        response_parts = repository_value.split("/")
-        if len(response_parts) != 2:
-            fail(
-                "GitHub response repository identity is malformed",
-                "github-invalid-response",
-            )
-        response_repo_owner = safe_slug(response_parts[0], "owner")
-        response_repo_name = safe_slug(response_parts[1], "repository")
-        if (
-            response_repo_owner.lower() != context["owner"]
-            or response_repo_name.lower() != context["repository"]
-        ):
-            fail("GitHub repository does not match publication", "wrong-repository")
-
     return {
         "rig": context["rig"],
         "rig_prefix": context["rig_prefix"],
@@ -2095,12 +2105,20 @@ def receipt_updates(
     publication_bead_id: str,
     watch_id: str,
     target: str,
+    *,
+    route_status: str = "complete",
+    verified: bool | None = None,
 ) -> dict[str, str]:
+    if route_status not in HANDOFF_ROUTE_STATUSES:
+        fail("handoff route status is unsupported", "invalid-request")
+    if verified is None:
+        verified = route_status == "complete"
     return {
-        "handoff_verified": "true",
+        "handoff_verified": "true" if verified else "false",
         "handoff_watch_id": watch_id,
         "handoff_target": target,
         "handoff_publication_bead": publication_bead_id,
+        "handoff_route_status": route_status,
     }
 
 
@@ -2108,63 +2126,205 @@ def existing_receipt_matches(
     metadata: dict[str, str],
     receipt: dict[str, str],
 ) -> None:
-    present = set(receipt) & set(metadata)
+    receipt_keys = {
+        "handoff_watch_id",
+        "handoff_target",
+        "handoff_publication_bead",
+    }
+    present = receipt_keys & set(metadata)
     if not present:
         return
-    for key, value in receipt.items():
-        if metadata.get(key) != value:
+    for key in receipt_keys:
+        value = receipt[key]
+        if key in metadata and metadata.get(key) != value:
             fail(
                 "existing handoff receipt does not match",
                 "identity-mismatch",
             )
+    if (
+        "handoff_route_status" in metadata
+        and metadata["handoff_route_status"] not in HANDOFF_ROUTE_STATUSES
+    ):
+        fail(
+            "existing handoff receipt has an invalid route status",
+            "corrupt-state",
+        )
+    if (
+        "handoff_wake_status" in metadata
+        and metadata["handoff_wake_status"] not in HANDOFF_WAKE_STATUSES
+    ):
+        fail(
+            "existing handoff receipt has an invalid wake status",
+            "corrupt-state",
+        )
+    if (
+        "handoff_verified" in metadata
+        and metadata["handoff_verified"] not in {"true", "false"}
+    ):
+        fail(
+            "existing handoff receipt has an invalid verification flag",
+            "corrupt-state",
+        )
 
 
 def has_complete_receipt(
     metadata: dict[str, str],
     receipt: dict[str, str],
 ) -> bool:
-    return all(metadata.get(key) == value for key, value in receipt.items())
-
-
-def block_route_failure(watch_id: str) -> None:
-    _, metadata = show_issue(watch_id)
-    state = state_from_metadata(metadata)
-    if state in {"terminal", "exhausted", "merge-ready"}:
-        return
-    if state in {"watching", "repairing"}:
-        try:
-            transition(
-                {
-                    "watch_id": watch_id,
-                    "to": "blocked",
-                    "reason": "route-failed",
-                }
-            )
-            return
-        except StateError as error:
-            if error.code not in {"illegal-transition", "stale-transition"}:
-                raise
-    metadata_updates(
-        watch_id,
-        {
-            "state": "blocked",
-            "claim_status": "blocked",
-            "terminal_reason": "route-failed",
-        },
-        status="blocked",
-        assignee="",
+    watch_id = receipt.get("handoff_watch_id", "")
+    target = receipt.get("handoff_target", "")
+    publication_bead_id = receipt.get("handoff_publication_bead", "")
+    route_status = metadata.get("handoff_route_status", "")
+    if route_status in {"pending", "route-failed"}:
+        return False
+    if route_status and route_status != "complete":
+        return False
+    if metadata.get("handoff_wake_status") == "failed":
+        return False
+    return (
+        metadata.get("handoff_verified") == "true"
+        and bool(watch_id)
+        and metadata.get("handoff_watch_id") == watch_id
+        and bool(target)
+        and target == metadata.get("handoff_target")
+        and bool(publication_bead_id)
+        and metadata.get("handoff_publication_bead") == publication_bead_id
     )
 
 
-def route_watch(target: str, watch_id: str) -> None:
-    command = gc_command() + [
-        "sling",
-        "--nudge",
-        target,
+def require_complete_receipt(
+    metadata: dict[str, str],
+    watch_id: str,
+    target: str,
+    publication_bead_id: str,
+) -> None:
+    receipt = receipt_updates(
+        publication_bead_id,
         watch_id,
-        "--no-formula",
-        "--json",
-    ]
+        target,
+    )
+    route_status = metadata.get("handoff_route_status", "")
+    if route_status == "route-failed":
+        fail(
+            "publication handoff route previously failed",
+            "route-failed",
+        )
+    if route_status == "pending":
+        fail(
+            "publication handoff receipt is pending",
+            "not-routable",
+        )
+    if not has_complete_receipt(metadata, receipt):
+        fail(
+            "publication handoff receipt is missing",
+            "not-routable",
+        )
+
+
+def watch_receipt_is_complete(
+    metadata: dict[str, str],
+    watch_id: str,
+) -> bool:
+    publication_bead_id = metadata.get("handoff_publication_bead", "")
+    rig = metadata.get("rig", "")
+    if not publication_bead_id or rig not in RIGS:
+        return False
+    return has_complete_receipt(
+        metadata,
+        receipt_updates(
+            publication_bead_id,
+            watch_id,
+            handoff_target(rig),
+        ),
+    )
+
+
+def require_watch_receipt(
+    metadata: dict[str, str],
+    watch_id: str,
+) -> None:
+    rig = metadata.get("rig", "")
+    publication_bead_id = metadata.get("handoff_publication_bead", "")
+    if rig not in RIGS or not publication_bead_id:
+        fail(
+            "watch has no complete publication handoff receipt",
+            "not-routable",
+        )
+    require_complete_receipt(
+        metadata,
+        watch_id,
+        handoff_target(rig),
+        publication_bead_id,
+    )
+
+
+def block_route_failure(
+    watch_id: str,
+    publication_bead_id: str | None = None,
+    target: str | None = None,
+) -> None:
+    _, metadata = show_issue(watch_id)
+    state = state_from_metadata(metadata)
+    updates = {
+        "handoff_route_status": "route-failed",
+        "handoff_verified": "false",
+        "handoff_wake_status": "failed",
+    }
+    if publication_bead_id and target:
+        updates.update(
+            receipt_updates(
+                publication_bead_id,
+                watch_id,
+                target,
+                route_status="route-failed",
+                verified=False,
+            )
+        )
+    if state not in {"terminal", "exhausted", "merge-ready"}:
+        updates.update(
+            {
+                "state": "blocked",
+                "claim_status": "blocked",
+                "terminal_reason": "route-failed",
+                "blocker_emitted": "true",
+            }
+        )
+        metadata_updates(
+            watch_id,
+            updates,
+            status="blocked",
+            assignee="",
+        )
+    else:
+        metadata_updates(watch_id, updates)
+    if publication_bead_id:
+        try:
+            metadata_updates(
+                publication_bead_id,
+                receipt_updates(
+                    publication_bead_id,
+                    watch_id,
+                    target or metadata.get("handoff_target", ""),
+                    route_status="route-failed",
+                    verified=False,
+                ),
+            )
+        except StateError:
+            pass
+
+
+def route_watch(target: str, watch_id: str, *, wake: bool = True) -> None:
+    command = gc_command() + ["sling"]
+    if wake:
+        command.append("--nudge")
+    command.extend(
+        [
+            target,
+            watch_id,
+            "--no-formula",
+            "--json",
+        ]
+    )
     try:
         result = subprocess.run(
             command,
@@ -2212,8 +2372,12 @@ def publication_handoff(payload: dict[str, Any]) -> dict[str, Any]:
     )
     watch_id = watch_id_for(identity)
     target = handoff_target(context["rig"])
-    receipt = receipt_updates(publication_bead_id, watch_id, target)
-    existing_receipt_matches(publication_metadata, receipt)
+    complete_receipt = receipt_updates(
+        publication_bead_id,
+        watch_id,
+        target,
+    )
+    existing_receipt_matches(publication_metadata, complete_receipt)
 
     handoff_payload = {
         **identity,
@@ -2235,15 +2399,58 @@ def publication_handoff(payload: dict[str, Any]) -> dict[str, Any]:
     initial = initial_watch_metadata(identity, handoff_payload)
     route_failed_rearm = False
     with watch_lock(watch_id):
+        _, publication_metadata = show_bead(publication_bead_id)
+        existing_receipt_matches(publication_metadata, complete_receipt)
         existing_watch = show_issue_if_present(watch_id)
         if existing_watch is not None:
             _, existing_watch_metadata = existing_watch
             immutable_matches(existing_watch_metadata, identity)
-            existing_receipt_matches(existing_watch_metadata, receipt)
+            existing_receipt_matches(
+                existing_watch_metadata,
+                complete_receipt,
+            )
+            if (
+                not rearm
+                and has_complete_receipt(
+                    publication_metadata,
+                    complete_receipt,
+                )
+                and has_complete_receipt(
+                    existing_watch_metadata,
+                    complete_receipt,
+                )
+                and existing_watch_metadata.get(
+                    "handoff_wake_status",
+                    "delivered",
+                )
+                in {"", "delivered"}
+                and publication_metadata.get(
+                    "handoff_wake_status",
+                    "delivered",
+                )
+                in {"", "delivered"}
+                and existing_watch_metadata.get("head_sha")
+                == identity["head_sha"]
+            ):
+                return {
+                    "ok": True,
+                    "action": "publication-handoff",
+                    "rig": context["rig"],
+                    "publication_bead_id": publication_bead_id,
+                    "watch_id": watch_id,
+                    "target": target,
+                    "verified": True,
+                    "created": False,
+                    "reused": True,
+                    "wake": False,
+                }
             route_failed_rearm = (
                 state_from_metadata(existing_watch_metadata) == "blocked"
                 and existing_watch_metadata.get("terminal_reason") == "route-failed"
-                and not has_complete_receipt(existing_watch_metadata, receipt)
+                and not has_complete_receipt(
+                    existing_watch_metadata,
+                    complete_receipt,
+                )
             )
         handoff_payload["rearm"] = rearm or route_failed_rearm
         handoff_result = _handoff_locked(
@@ -2252,27 +2459,92 @@ def publication_handoff(payload: dict[str, Any]) -> dict[str, Any]:
             rearm or route_failed_rearm,
             watch_id,
             initial,
+            preserve_budget=route_failed_rearm and not rearm,
         )
-    try:
-        route_watch(target, watch_id)
-    except StateError as error:
-        if error.code in {"route-failed", "route-exec"}:
-            block_route_failure(watch_id)
-        raise
+        pending_receipt = receipt_updates(
+            publication_bead_id,
+            watch_id,
+            target,
+            route_status="pending",
+            verified=True,
+        )
+        pending_receipt["handoff_wake_status"] = "not-started"
+        metadata_updates(watch_id, pending_receipt)
+        try:
+            metadata_updates(publication_bead_id, pending_receipt)
+        except StateError:
+            block_route_failure(
+                watch_id,
+                publication_bead_id,
+                target,
+            )
+            raise
+        try:
+            route_watch(target, watch_id, wake=False)
+        except StateError as error:
+            if error.code in {"route-failed", "route-exec"}:
+                block_route_failure(
+                    watch_id,
+                    publication_bead_id,
+                    target,
+                )
+            raise
 
-    metadata_updates(watch_id, receipt)
-    metadata_updates(publication_bead_id, receipt)
-    return {
-        "ok": True,
-        "action": "publication-handoff",
-        "rig": context["rig"],
-        "publication_bead_id": publication_bead_id,
-        "watch_id": watch_id,
-        "target": target,
-        "verified": True,
-        "created": bool(handoff_result.get("created", False)),
-        "reused": bool(handoff_result.get("reused", False)),
-    }
+        ready_receipt = {
+            **complete_receipt,
+            "handoff_wake_status": "ready",
+        }
+        try:
+            metadata_updates(watch_id, ready_receipt)
+            metadata_updates(publication_bead_id, ready_receipt)
+        except StateError:
+            block_route_failure(
+                watch_id,
+                publication_bead_id,
+                target,
+            )
+            raise
+
+        try:
+            route_watch(target, watch_id, wake=True)
+        except StateError as error:
+            if error.code in {"route-failed", "route-exec"}:
+                block_route_failure(
+                    watch_id,
+                    publication_bead_id,
+                    target,
+                )
+            raise
+
+        try:
+            metadata_updates(
+                watch_id,
+                {"handoff_wake_status": "delivered"},
+            )
+            metadata_updates(
+                publication_bead_id,
+                {"handoff_wake_status": "delivered"},
+            )
+        except StateError:
+            block_route_failure(
+                watch_id,
+                publication_bead_id,
+                target,
+            )
+            raise
+
+        return {
+            "ok": True,
+            "action": "publication-handoff",
+            "rig": context["rig"],
+            "publication_bead_id": publication_bead_id,
+            "watch_id": watch_id,
+            "target": target,
+            "verified": True,
+            "created": bool(handoff_result.get("created", False)),
+            "reused": bool(handoff_result.get("reused", False)),
+            "wake": True,
+        }
 
 
 def watch_identity_from_metadata(
@@ -2374,24 +2646,18 @@ def verify_handoff(payload: dict[str, Any]) -> dict[str, Any]:
     _, watch_metadata = show_issue(watch_id)
     existing_receipt_matches(watch_metadata, expected_receipt)
     watch_state = state_from_metadata(watch_metadata)
-    if (
-        watch_state == "blocked"
-        and watch_metadata.get("terminal_reason") == "route-failed"
-    ):
-        fail(
-            "publication handoff route previously failed",
-            "route-failed",
-        )
-    if watch_state not in CHECKPOINT_STATES:
-        fail(
-            "publication handoff target is not routable",
-            "not-routable",
-        )
-    if (
-        not has_complete_receipt(publication_metadata, expected_receipt)
-        or not has_complete_receipt(watch_metadata, expected_receipt)
-    ):
-        fail("publication handoff receipt is missing", "not-routable")
+    require_complete_receipt(
+        publication_metadata,
+        watch_id,
+        target,
+        publication_bead_id,
+    )
+    require_complete_receipt(
+        watch_metadata,
+        watch_id,
+        target,
+        publication_bead_id,
+    )
     identity = watch_identity_from_metadata(watch_metadata, context)
     if watch_id_for(identity) != watch_id:
         fail("watch ID does not match watch identity", "identity-mismatch")
@@ -2446,6 +2712,7 @@ def _transition_locked(
     _, metadata = show_issue(watch_id)
     if metadata.get("record_kind") != "watch":
         fail("requested Beads record is not a watch", "identity-mismatch")
+    require_watch_receipt(metadata, watch_id)
     current = state_from_metadata(metadata)
     generation = generation_from_metadata(metadata)
     if not SHA_RE.fullmatch(metadata.get("head_sha", "")):
@@ -2542,6 +2809,7 @@ def _claim_action_locked(
     _, metadata = show_issue(watch_id)
     if metadata.get("record_kind") != "watch":
         fail("requested Beads record is not a watch", "identity-mismatch")
+    require_watch_receipt(metadata, watch_id)
     head_repository = metadata.get("head_repository", "")
     if not head_repository:
         fail(
@@ -2559,6 +2827,11 @@ def _claim_action_locked(
     state = state_from_metadata(metadata)
     generation = generation_from_metadata(metadata)
     attempts = attempts_from_metadata(metadata)
+    if state == "waiting":
+        fail(
+            "waiting watch must transition to watching before repair",
+            "illegal-transition",
+        )
     if state in {"blocked", "exhausted", "merge-ready", "terminal"}:
         fail(f"cannot claim an action while watch is {state}", "not-claimable")
     if generation != expected_generation or metadata.get("head_sha") != head_sha:
@@ -2823,7 +3096,13 @@ def attach_repair_formula(
         fail("could not execute repair formula", "formula-exec")
     if result.returncode:
         fail("repair formula attachment failed", "formula-attach")
-    return formula_result_root(result.stdout)
+    formula_root = formula_result_root(result.stdout)
+    if not formula_root:
+        fail(
+            "repair formula attachment returned no root ID",
+            "formula-invalid-response",
+        )
+    return formula_root
 
 
 def block_repair_dispatch(
@@ -2914,7 +3193,11 @@ def dispatch_repair(payload: dict[str, Any]) -> dict[str, Any]:
                 addressed_thread_ids,
             )
         except StateError as error:
-            if error.code in {"formula-exec", "formula-attach"}:
+            if error.code in {
+                "formula-exec",
+                "formula-attach",
+                "formula-invalid-response",
+            }:
                 block_repair_dispatch(
                     watch_id,
                     action_id,
@@ -2944,6 +3227,7 @@ def action_context(
     _, watch_metadata = show_issue(watch_id)
     if watch_metadata.get("record_kind") != "watch":
         fail("requested Beads record is not a watch", "identity-mismatch")
+    require_watch_receipt(watch_metadata, watch_id)
     _, action_metadata_value = show_issue(action_id)
     if action_metadata_value.get("record_kind") != "action":
         fail("requested Beads record is not an action", "identity-mismatch")
@@ -3009,6 +3293,166 @@ def action_context(
         action_metadata_value,
         generation,
         action_kind,
+    )
+
+
+def record_candidate_head(payload: dict[str, Any]) -> dict[str, Any]:
+    watch_id = validate_watch_id(payload_value(payload, "watch_id", "id"))
+    with watch_lock(watch_id):
+        (
+            watch_id,
+            action_id,
+            _,
+            action_metadata_value,
+            generation,
+            _,
+        ) = action_context(payload)
+        candidate_head_sha = sha_value(
+            payload_value(
+                payload,
+                "candidate_head_sha",
+                "candidate_sha",
+                "head_sha",
+            ),
+            "candidate_head_sha",
+        )
+        recorded_candidate = action_metadata_value.get(
+            "candidate_head_sha",
+            "",
+        )
+        if recorded_candidate and recorded_candidate != candidate_head_sha:
+            fail(
+                "candidate head changed after it was recorded",
+                "stale-candidate",
+            )
+        recorded_verdict_head = action_metadata_value.get(
+            "review_verdict_head_sha",
+            "",
+        )
+        if recorded_verdict_head and recorded_verdict_head != candidate_head_sha:
+            fail(
+                "candidate head does not match the reviewer verdict",
+                "stale-candidate",
+            )
+        if not recorded_candidate:
+            metadata_updates(
+                action_id,
+                {"candidate_head_sha": candidate_head_sha},
+            )
+        return {
+            "ok": True,
+            "action": "record-candidate-head",
+            "watch_id": watch_id,
+            "action_id": action_id,
+            "generation": generation,
+            "candidate_head_sha": candidate_head_sha,
+            "reused": bool(recorded_candidate),
+        }
+
+
+def record_review_verdict(payload: dict[str, Any]) -> dict[str, Any]:
+    watch_id = validate_watch_id(payload_value(payload, "watch_id", "id"))
+    with watch_lock(watch_id):
+        (
+            watch_id,
+            action_id,
+            _,
+            action_metadata_value,
+            generation,
+            _,
+        ) = action_context(payload)
+        candidate_head_sha = sha_value(
+            payload_value(
+                payload,
+                "candidate_head_sha",
+                "candidate_sha",
+                "head_sha",
+            ),
+            "candidate_head_sha",
+        )
+        verdict = text_value(
+            payload_value(payload, "verdict", "review_verdict"),
+            "verdict",
+        ).strip().lower()
+        if verdict not in REVIEW_VERDICTS:
+            fail("review verdict must be passed or failed")
+        recorded_candidate = action_metadata_value.get(
+            "candidate_head_sha",
+            "",
+        )
+        if recorded_candidate and recorded_candidate != candidate_head_sha:
+            fail(
+                "review verdict is stale for the candidate head",
+                "stale-verdict",
+            )
+        recorded_verdict = action_metadata_value.get("review_verdict", "")
+        if recorded_verdict and (
+            recorded_verdict != verdict
+            or action_metadata_value.get("review_verdict_action_id")
+            != action_id
+            or action_metadata_value.get("review_verdict_generation")
+            != str(generation)
+            or action_metadata_value.get("review_verdict_head_sha")
+            != candidate_head_sha
+        ):
+            fail(
+                "review verdict does not match the action claim",
+                "stale-verdict",
+            )
+        updates = {
+            "candidate_head_sha": candidate_head_sha,
+            "review_verdict": verdict,
+            "review_verdict_action_id": action_id,
+            "review_verdict_generation": str(generation),
+            "review_verdict_head_sha": candidate_head_sha,
+        }
+        if not recorded_verdict:
+            metadata_updates(action_id, updates)
+        if verdict == "failed":
+            metadata_updates(
+                action_id,
+                {
+                    "claim_status": "blocked",
+                    "terminal_reason": "review-failed",
+                },
+                status="blocked",
+                assignee="",
+            )
+            metadata_updates(
+                watch_id,
+                {
+                    "state": "blocked",
+                    "claim_status": "blocked",
+                    "terminal_reason": "review-failed",
+                    "blocker_emitted": "true",
+                },
+                status="blocked",
+                assignee="",
+            )
+        return {
+            "ok": True,
+            "action": "record-review-verdict",
+            "watch_id": watch_id,
+            "action_id": action_id,
+            "generation": generation,
+            "candidate_head_sha": candidate_head_sha,
+            "review_verdict": verdict,
+            "reused": bool(recorded_verdict),
+        }
+
+
+def review_verdict_matches(
+    metadata: dict[str, str],
+    action_id: str,
+    generation: int,
+    candidate_head_sha: str,
+) -> bool:
+    return (
+        metadata.get("review_verdict") == "passed"
+        and metadata.get("review_verdict_action_id") == action_id
+        and metadata.get("review_verdict_generation") == str(generation)
+        and metadata.get("review_verdict_head_sha") == candidate_head_sha
+        and metadata.get("candidate_head_sha") == candidate_head_sha
     )
 
 
@@ -3090,6 +3534,21 @@ def _record_repair_result_locked(payload: dict[str, Any]) -> dict[str, Any]:
         )
     if validation_status == "passed" and not pushed_sha:
         fail("a passed repair result requires pushed_sha")
+    if validation_status == "passed" and not review_verdict_matches(
+        action_metadata_value,
+        action_id,
+        generation,
+        pushed_sha,
+    ):
+        block_repair_dispatch(
+            watch_id,
+            action_id,
+            "review-verdict-required",
+        )
+        fail(
+            "a passed repair result requires a current passed review verdict",
+            "review-verdict-required",
+        )
     if (
         expected_old_sha != watch_metadata.get("expected_old_head")
         or expected_old_sha != action_metadata_value.get("expected_old_head")
@@ -3205,12 +3664,25 @@ def _confirm_action_locked(payload: dict[str, Any]) -> dict[str, Any]:
     make_check_result = action_metadata_value.get("make_check_result", "")
     pushed_sha = action_metadata_value.get("pushed_sha", "")
     expected_old_sha = action_metadata_value.get("expected_old_head", "")
+    review_verdict_ok = bool(
+        pushed_sha
+        and review_verdict_matches(
+            action_metadata_value,
+            action_id,
+            generation,
+            pushed_sha,
+        )
+    )
     if (
         not pushed_sha
         or validation_status != "passed"
         or make_check_result != "passed"
+        or not review_verdict_ok
     ):
         reason = (
+            "review-verdict-failed"
+            if not review_verdict_ok
+            else
             "repair-validation-failed"
             if validation_status == "failed"
             else AMBIGUOUS_REASON
@@ -3238,12 +3710,9 @@ def _confirm_action_locked(payload: dict[str, Any]) -> dict[str, Any]:
             assignee="",
         )
         _, metadata = show_issue(watch_id)
-        return metadata_response(
-            "confirm-action",
-            watch_id,
-            metadata,
-            action_id=action_id,
-            terminal_reason=reason,
+        fail(
+            "repair confirmation fence failed",
+            reason,
         )
     if current_sha != pushed_sha:
         reason = AMBIGUOUS_REASON
@@ -3268,12 +3737,9 @@ def _confirm_action_locked(payload: dict[str, Any]) -> dict[str, Any]:
             assignee="",
         )
         _, metadata = show_issue(watch_id)
-        return metadata_response(
-            "confirm-action",
-            watch_id,
-            metadata,
-            action_id=action_id,
-            terminal_reason=reason,
+        fail(
+            "repair confirmation fence failed",
+            reason,
         )
 
     observed_at = text_value(
@@ -3297,12 +3763,13 @@ def _confirm_action_locked(payload: dict[str, Any]) -> dict[str, Any]:
             head_sha=current_sha,
             observed_at=observed_at,
             next_snapshot_at=next_snapshot_at,
-            active_since=observed_at,
+            active_since=watch_metadata["active_since"],
             last_pushed_sha=pushed_sha,
             attempt_key=watch_metadata.get("attempt_key", ""),
             attempts=attempts_from_metadata(watch_metadata),
             attempt_limit=watch_metadata.get("attempt_limit", ""),
             attempt_history=watch_metadata.get("attempt_history", ""),
+            backstop_at=watch_metadata.get("backstop_at", ""),
         ),
         status="open",
         assignee="",
@@ -3331,6 +3798,7 @@ def _checkpoint_locked(
     _, metadata = show_issue(watch_id)
     if metadata.get("record_kind") != "watch":
         fail("requested Beads record is not a watch", "identity-mismatch")
+    require_watch_receipt(metadata, watch_id)
     current = state_from_metadata(metadata)
     generation = generation_from_metadata(metadata)
     current_head = sha_value(metadata.get("head_sha"), "head_sha")
@@ -3693,6 +4161,8 @@ def list_due(payload: dict[str, Any]) -> dict[str, Any]:
         next_time = parse_time(next_at, "next_snapshot_at")
         if rig and metadata.get("rig") != rig:
             continue
+        if not watch_receipt_is_complete(metadata, record["id"]):
+            continue
         if state not in CHECKPOINT_STATES:
             continue
         if (
@@ -3760,15 +4230,21 @@ def sweep(payload: dict[str, Any]) -> dict[str, Any]:
             or not isinstance(metadata, dict)
         ):
             fail("list-due returned an unsafe watch", "beads-invalid-response")
-        if (
-            metadata.get("state") not in CHECKPOINT_STATES
-            or metadata.get("claim_status", "none") != "none"
-            or metadata.get("action_kind", "")
-            or metadata.get("action_fingerprint", "")
-        ):
-            fail("list-due returned a non-routable watch", "beads-invalid-response")
-        route_watch(target, watch_id)
-        routed += 1
+        with watch_lock(watch_id):
+            _, current_metadata = show_issue(watch_id)
+            if (
+                current_metadata.get("state") not in CHECKPOINT_STATES
+                or current_metadata.get("claim_status", "none") != "none"
+                or current_metadata.get("action_kind", "")
+                or current_metadata.get("action_fingerprint", "")
+                or not watch_receipt_is_complete(
+                    current_metadata,
+                    watch_id,
+                )
+            ):
+                continue
+            route_watch(target, watch_id)
+            routed += 1
 
     return {
         "ok": True,
@@ -3872,6 +4348,19 @@ def parse_cli_request(argv: list[str]) -> dict[str, Any]:
                 "head_sha",
                 "addressed_thread_ids",
             ),
+            "record-candidate-head": (
+                "watch_id",
+                "action_id",
+                "generation",
+                "candidate_head_sha",
+            ),
+            "record-review-verdict": (
+                "watch_id",
+                "action_id",
+                "generation",
+                "candidate_head_sha",
+                "verdict",
+            ),
             "record-repair-result": (
                 "watch_id",
                 "action_id",
@@ -3929,6 +4418,10 @@ def dispatch(payload: dict[str, Any]) -> dict[str, Any]:
         return claim_action(payload)
     if action == "dispatch-repair":
         return dispatch_repair(payload)
+    if action == "record-candidate-head":
+        return record_candidate_head(payload)
+    if action == "record-review-verdict":
+        return record_review_verdict(payload)
     if action == "record-repair-result":
         return record_repair_result(payload)
     if action == "confirm-action":

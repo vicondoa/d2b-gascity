@@ -146,6 +146,16 @@ def _body_id(body: Any) -> str:
     return hashlib.sha256(str(body or "").encode("utf-8")).hexdigest()[:16]
 
 
+def _stable_item_id(value: Any, field: str) -> str:
+    if (
+        not isinstance(value, str)
+        or len(value) > 128
+        or not SAFE_COMPONENT.fullmatch(value)
+    ):
+        _error(f"{field} is not a stable identifier")
+    return value
+
+
 def _repo_parts(repo: str | None) -> tuple[str, str, str | None]:
     if not repo:
         return "", "", None
@@ -1111,12 +1121,31 @@ def _merge_records(
         old = previous.get(key) if isinstance(previous.get(key), dict) else {}
         identity = [item.get(field) for field in identity_fields]
         old_identity = old.get("identity")
+        content_identity = _sha(
+            {
+                "identity": identity,
+                "body": item.get("body") or "",
+            }
+        )
+        old_content_identity = _sha(
+            {
+                "identity": old_identity,
+                "body": old.get("body") or "",
+            }
+        ) if old else None
         disposition = old.get("disposition", OPEN)
-        if old_identity is not None and old_identity != identity:
+        if (
+            old_identity is not None
+            and (
+                old_identity != identity
+                or old_content_identity != content_identity
+            )
+        ):
             disposition = OPEN
         records[key] = {
             **item,
             "identity": identity,
+            "content_identity": content_identity,
             "disposition": disposition,
         }
     return records
@@ -1343,6 +1372,139 @@ def cmd_snapshot(args: argparse.Namespace) -> None:
     _print_json(_run_snapshot(args))
 
 
+def _disposition_collection(
+    state: dict[str, Any],
+    kind: str,
+) -> dict[str, dict[str, Any]]:
+    if kind == "thread":
+        collection = state.get("threads")
+    elif kind in {"comment", "review"}:
+        collection = state.get("feedback")
+    else:
+        _error("item kind must be thread, comment, or review")
+    if not isinstance(collection, dict):
+        _error("snapshot state has no feedback records")
+    return collection
+
+
+def _content_identity(item: dict[str, Any]) -> str:
+    value = item.get("content_identity")
+    if isinstance(value, str) and re.fullmatch(r"[0-9a-f]{16}", value):
+        return value
+    identity = item.get("identity")
+    if not isinstance(identity, list):
+        _error("snapshot feedback identity is missing")
+    return _sha(
+        {
+            "identity": identity,
+            "body": item.get("body") or "",
+        }
+    )
+
+
+def _content_identity_full(item: dict[str, Any]) -> str:
+    identity = item.get("identity")
+    if not isinstance(identity, list):
+        _error("snapshot feedback identity is missing")
+    return hashlib.sha256(
+        json.dumps(
+            {
+                "identity": identity,
+                "body": item.get("body") or "",
+            },
+            sort_keys=True,
+            ensure_ascii=False,
+        ).encode("utf-8")
+    ).hexdigest()
+
+
+def _disposition(
+    state: dict[str, Any],
+    args: argparse.Namespace,
+    *,
+    action: str = "disposition",
+) -> dict[str, Any]:
+    if not _valid_sha(args.head_sha):
+        _error("head SHA is invalid")
+    recorded_pr = state.get("pr") or {}
+    if (
+        recorded_pr.get("number") != args.pr
+        or recorded_pr.get("repo") != args.repo
+        or state.get("head_sha") != args.head_sha
+    ):
+        _error("snapshot identity is stale")
+    invocation = (
+        getattr(args, "invocation_id", None),
+        getattr(args, "session_started_at", None),
+        getattr(args, "invocation_budget_seconds", None),
+    )
+    if any(value is not None for value in invocation):
+        if any(value in (None, "") for value in invocation):
+            _error("mark invocation values are incomplete")
+        if (
+            state.get("invocation_id") != invocation[0]
+            or state.get("started_at") != invocation[1]
+            or float(state.get("invocation_budget_seconds", 0))
+            != float(invocation[2])
+        ):
+            _error("mark invocation values are stale")
+    kind = str(getattr(args, "kind", "") or "").lower()
+    item_id = getattr(args, "item_id", None)
+    marked = [
+        ("thread", getattr(args, "thread", None)),
+        ("comment", getattr(args, "comment", None)),
+        ("review", getattr(args, "review", None)),
+    ]
+    marked = [(marked_kind, value) for marked_kind, value in marked if value]
+    if marked:
+        if kind or item_id or len(marked) != 1:
+            _error("mark requires exactly one feedback item")
+        kind, item_id = marked[0]
+    if not kind or item_id is None:
+        _error("feedback item is required")
+    item_id = _stable_item_id(item_id, "item ID")
+    content_identity = str(args.content_identity or "").lower()
+    if not re.fullmatch(r"[0-9a-f]{16}|[0-9a-f]{64}", content_identity):
+        _error("content identity must be a 16- or 64-hex hash")
+    item = _disposition_collection(state, kind).get(item_id)
+    if not isinstance(item, dict):
+        _error("feedback item is unknown")
+    item_kind = item.get("kind")
+    if kind in {"comment", "review"} and item_kind != kind:
+        _error("feedback item kind does not match")
+    current_identity = _content_identity(item)
+    current_identity_full = _content_identity_full(item)
+    if content_identity not in {current_identity, current_identity_full}:
+        _error("feedback item identity is stale")
+    disposition = str(args.disposition or "").lower()
+    if disposition not in {"handled", "ignored"}:
+        _error("disposition must be handled or ignored")
+    item["disposition"] = disposition
+    item["disposition_head_sha"] = args.head_sha
+    state["last_action"] = action
+    return {
+        "action": action,
+        "disposition": disposition,
+        "head_sha": args.head_sha,
+        "item_id": item_id,
+        "item_kind": kind,
+        "content_identity": content_identity,
+        "watch_id": args.watch_id,
+    }
+
+
+def cmd_disposition(args: argparse.Namespace) -> None:
+    state_dir = _state_dir(args)
+    with _locked_state(state_dir, args.pr, args.repo) as state:
+        _print_json(_disposition(state, args))
+
+
+def cmd_mark(args: argparse.Namespace) -> None:
+    state_dir = _state_dir(args)
+    with _locked_state(state_dir, args.pr, args.repo) as state:
+        _print_json(_disposition(state, args, action="mark"))
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="pr-snapshot")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -1373,6 +1535,74 @@ def _parser() -> argparse.ArgumentParser:
     snapshot = sub.add_parser("snapshot")
     add_snapshot_options(snapshot)
     snapshot.set_defaults(handler=cmd_snapshot)
+
+    disposition = sub.add_parser("disposition")
+    disposition.add_argument("--pr", type=int, required=True)
+    disposition.add_argument("--repo", required=True)
+    disposition.add_argument(
+        "--head-sha",
+        "--current-head-sha",
+        dest="head_sha",
+        required=True,
+    )
+    disposition.add_argument("--watch-id")
+    disposition.add_argument("--state-dir")
+    disposition.add_argument("--invocation-id")
+    disposition.add_argument("--session-started-at")
+    disposition.add_argument("--invocation-budget-seconds", type=float)
+    disposition.add_argument(
+        "--kind",
+        "--item-kind",
+        dest="kind",
+        required=True,
+    )
+    disposition.add_argument(
+        "--id",
+        "--item-id",
+        dest="item_id",
+        required=True,
+    )
+    disposition.add_argument(
+        "--identity",
+        "--content-hash",
+        "--content-identity",
+        dest="content_identity",
+        required=True,
+    )
+    disposition.add_argument(
+        "--disposition",
+        required=True,
+    )
+    disposition.set_defaults(handler=cmd_disposition)
+
+    mark = sub.add_parser("mark")
+    mark.add_argument("--pr", type=int, required=True)
+    mark.add_argument("--repo", required=True)
+    mark.add_argument(
+        "--head-sha",
+        "--current-head-sha",
+        dest="head_sha",
+        required=True,
+    )
+    mark.add_argument("--watch-id")
+    mark.add_argument("--state-dir")
+    mark.add_argument("--invocation-id")
+    mark.add_argument("--session-started-at")
+    mark.add_argument("--invocation-budget-seconds", type=float)
+    marked = mark.add_mutually_exclusive_group(required=True)
+    marked.add_argument("--thread", "--thread-id")
+    marked.add_argument("--comment", "--comment-id")
+    marked.add_argument("--review", "--review-id")
+    mark.add_argument(
+        "--identity",
+        "--content-hash",
+        "--content-identity",
+        "--content-id",
+        dest="content_identity",
+        required=True,
+    )
+    mark.add_argument("--disposition", required=True)
+    mark.set_defaults(handler=cmd_mark)
     return parser
 
 

@@ -14,7 +14,8 @@
     {
       "local": "skills/pr-babysit/SKILL.md",
       "source": "skills/ce-babysit-pr/SKILL.md",
-      "sha256": "a611e493ae6979063d71f4990c2f6cda9c9f1a4b114a83717c26c66c4cf4bd90"
+      "sha256": "a611e493ae6979063d71f4990c2f6cda9c9f1a4b114a83717c26c66c4cf4bd90",
+      "local_sha256": "8922231e0f85a889895397d8472a35484a96373ecb2efc5d513767319545e511"
     },
     {
       "local": "skills/pr-babysit/references/branch-currency.md",
@@ -24,7 +25,8 @@
     {
       "local": "skills/pr-babysit/references/envelope.md",
       "source": "skills/ce-babysit-pr/references/envelope.md",
-      "sha256": "74ffa9b65afccbb8add39cd9cc4b76af1a4cc9532eabde3523d78ae28e62e59a"
+      "sha256": "74ffa9b65afccbb8add39cd9cc4b76af1a4cc9532eabde3523d78ae28e62e59a",
+      "local_sha256": "180ff7b0d7da65b126d584d12af769d9837b4464584b1eefa3a7764622f05499"
     },
     {
       "local": "skills/pr-babysit/references/pipeline.md",
@@ -45,12 +47,14 @@
     {
       "local": "skills/pr-babysit/references/setup.md",
       "source": "skills/ce-babysit-pr/references/setup.md",
-      "sha256": "0465242d6116c3f958f76cc332c1af34896f48d8e8cc4c9716b0f089d1809954"
+      "sha256": "0465242d6116c3f958f76cc332c1af34896f48d8e8cc4c9716b0f089d1809954",
+      "local_sha256": "c026058ecccf8bc97ea4de8edcd380e5652b7011469bee55b449a76f2a7e9141"
     },
     {
       "local": "skills/pr-babysit/references/tick.md",
       "source": "skills/ce-babysit-pr/references/tick.md",
-      "sha256": "cf1fc87e87a3520c9446d997ff09ba2cccacb4a5e0a33f33fb9752325ede820c"
+      "sha256": "cf1fc87e87a3520c9446d997ff09ba2cccacb4a5e0a33f33fb9752325ede820c",
+      "local_sha256": "74fe9650e6d5904ecb60a85ac0513f8b53899c5a7b4a2e673fb23a949ffc8d91"
     },
     {
       "local": "skills/pr-babysit/references/watch-loop.md",
@@ -61,7 +65,7 @@
       "local": "skills/pr-babysit/scripts/pr-snapshot",
       "source": "skills/ce-babysit-pr/scripts/pr-snapshot",
       "sha256": "fd8a0b403703714a1257530e7053461e437b662b0ef381f780b8850439d980e7",
-      "local_sha256": "98fd2ae7a7215968fe1c85f821338f8b568e3afb8b2b234cdf1ae97635d419dc"
+      "local_sha256": "b8aaff26d9542181446b86b11280f5330fd7d532fdfd2027a2afabdfd9e4bb97"
     }
   ],
   "excluded_surfaces": [
@@ -81,6 +85,8 @@
     "Add native bounded repair dispatch, least-privilege credential fencing, and safe SHA/thread result handling.",
     "Treat every branch-currency item as a human decision, never an automatic claim.",
     "Adapt report status examples from Unicode symbols and em dashes to ASCII text and hyphen punctuation while retaining the upstream source hash.",
-    "Retain only the deployed snapshot command and canonical identity flags while preserving all normalization helpers."
+    "Retain only the deployed snapshot command and canonical identity flags while preserving all normalization helpers.",
+    "Add bounded local feedback disposition by stable item identity and reopen changed content.",
+    "Bind repair validation to a persisted candidate head and independent reviewer verdict."
   ]
 }

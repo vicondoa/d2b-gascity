@@ -148,8 +148,9 @@ gateway remains private.
 Keep Copilot Requests, d2b publication authorization, and Discord app
 credentials separate. Never put credentials, token paths, identifiers,
 allowlists, mappings, or live payloads in this repository. Publication must
-persist and re-read `metadata.merge_strategy=pr` plus
-`metadata.target=v3` for d2b or `metadata.target=main` for city-source,
+persist and re-read `metadata.merge_strategy=pr` plus a persisted target
+(`metadata.base_ref`, `metadata.target`, or `metadata.target_branch`) equal to
+`v3` for d2b or `main` for city-source,
 refuse direct merges, and never merge or force-push. The publication handoff
 result has `target=<rig>/pr-babysit.pr-babysitter` (stored as
 `handoff_target` in receipt metadata); that routing target is distinct from
@@ -184,8 +185,14 @@ gc skill list --agent city-source/pr-babysit.pr-babysitter --json
 
 Publication uses deterministic handoff and receipt commands. The handoff
 verifies the repository, PR number or URL, base, head, and current head SHA;
-it creates or reuses one durable watch record, routes it, and writes a safe
-receipt. Publication must verify that receipt before it closes:
+it requires persisted `merge_strategy=pr` plus `base_ref`, `target`, or
+`target_branch`, creates or reuses one durable watch record, routes it without
+waking, writes matching verified identity receipts, and then nudges the
+binding-qualified babysitter. A complete receipt contains
+`handoff_verified=true`, the self watch ID, the binding-qualified target, and
+the publication bead. `pending` or `route-failed` receipts cannot act, and a
+repeated complete receipt does not wake again. Publication must verify that
+receipt before it closes:
 
 ```text
 gc pr-babysit pr-babysit publication-handoff \
@@ -216,14 +223,17 @@ Watch `claim_status` values written by state code are `none`, `claimed`,
 `ambiguous` and `stale`. `closed` is the Beads issue status written when a
 confirmed action child closes, or when a watch reaches terminal; it is not a
 `claim_status` value. Watch exhaustion is recorded on the watch. Only a
-confirmed passed result closes the action child.
+confirmed passed result closes the action child. Waiting watches may become
+`merge-ready` or `blocked`, but must first become `watching` before a repair
+claim.
 
 Each checkpoint takes one fresh snapshot, then handles terminal state, head
 reconciliation, review feedback, current-head CI, exact branch currency, and
 one state write in that order. `mol-pr-babysit-repair` is a bounded Formula v2
 with prepare, repair, review, validate-and-report, and close-action steps.
 It runs `make check` before a normal push to the existing PR head and records
-the resulting SHA. CI repairs get three attempts per head and fingerprint;
+an independently recorded reviewer verdict and candidate SHA before pushing.
+CI repairs get three attempts per head and fingerprint;
 review repairs get two attempts. The active budget is eight active hours and
 the hard backstop is a three-day backstop.
 
@@ -244,6 +254,10 @@ provide `PR_BABYSIT_VALIDATOR` as an absolute, non-symlink, executable file and 
 `make check` in a credential- and network-isolated environment. A missing
 validator blocks repair, as do an invalid or failed validator. There is no
 direct-make fallback.
+
+The reviewer never resolves GitHub threads. After a confirmed review repair,
+the babysitter records `handled` or `ignored` feedback disposition locally
+with the current snapshot content identity; changed content reopens the item.
 
 The non-network credential check is
 `gc pr-babysit pr-babysit check-credentials --json` with the operator
