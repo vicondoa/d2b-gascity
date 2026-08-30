@@ -1453,7 +1453,7 @@ class RootPortableCityTests(unittest.TestCase):
             "validator timeout",
             "credential-isolated-v1",
             "absolute, non-symlink, executable",
-            "credential- and network-isolated",
+            "credential-isolated",
             "missing, mismatched, timed-out, or failed validator blocks repair",
             "same-repository-only",
             "fork or cross-repository prs are human blockers",

@@ -10,8 +10,9 @@ The operator must supply an absolute, non-symlink, executable
 `PR_BABYSIT_VALIDATOR_SHA256`, and attest
 `PR_BABYSIT_VALIDATOR_ATTESTED=credential-isolated-v1`. The validator hash is
 checked with `sha256sum` immediately before execution. That validator owns the
-credential- and network-isolated repository `make check`; this workflow has no
-direct-make fallback.
+credential-isolated repository `make check`; public dependency access is
+allowed, but no GitHub, Copilot, BuildBuddy, publication, or Discord
+credential may enter it. This workflow has no direct-make fallback.
 
 ```sh
 set -eu
@@ -476,8 +477,8 @@ BEFORE_REMOTE_REFS="$(
 )"
 
 # The operator-supplied validator must run this repository's `make check` in
-# a credential- and network-isolated environment. The clean environment also
-# removes all ambient credentials and push configuration.
+# a credential-isolated environment. The clean environment removes all ambient
+# credentials and push configuration while allowing public dependency access.
 VALIDATOR_STATUS=0
 if (
     cd "$WORKTREE" &&

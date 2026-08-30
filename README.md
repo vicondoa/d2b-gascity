@@ -267,9 +267,11 @@ its 64-character lowercase hexadecimal `PR_BABYSIT_VALIDATOR_SHA256`, and
 that exact executable with `sha256sum` before running it through
 `timeout --foreground --kill-after=5s` with
 `PR_BABYSIT_VALIDATOR_TIMEOUT_SECONDS` from 1 through 900 seconds (default
-900). It must run `make check` in a credential- and network-isolated
-environment. A missing, mismatched, timed-out, or failed validator blocks
-repair and does not push. There is no direct-make fallback.
+900). It must run `make check` in a credential-isolated environment. Public
+dependency access is allowed, but GitHub, Copilot, BuildBuddy, publication,
+and Discord credentials must be absent. A missing, mismatched, timed-out, or
+failed validator blocks repair and does not push. There is no direct-make
+fallback.
 
 The reviewer never resolves GitHub threads. After a confirmed review repair,
 the watch preserves the action kind and addressed IDs until the next fresh

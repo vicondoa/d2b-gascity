@@ -182,10 +182,11 @@ hexadecimal sha256sum, and set
 the selected executable with `sha256sum` before running it through
 `timeout --foreground --kill-after=5s`;
 `PR_BABYSIT_VALIDATOR_TIMEOUT_SECONDS` must be 1 through 900 seconds (default
-900). It must run `make check` in a credential- and network-isolated
-environment. A missing, mismatched, timed-out, or failed validator records a
-failed result, blocks repair, and does not push. Fork or cross-repository PRs
-are human blockers in v1.
+900). It must run `make check` in a credential-isolated environment. Public
+dependency access is allowed, but GitHub, Copilot, BuildBuddy, publication,
+and Discord credentials must be absent. A missing, mismatched, timed-out, or
+failed validator records a failed result, blocks repair, and does not push.
+Fork or cross-repository PRs are human blockers in v1.
 Before credentialed fetch or push, the repair workflow verifies that `origin`
 and any configured push URL map exactly to the recorded GitHub
 host/owner/repository, disables Git hooks with

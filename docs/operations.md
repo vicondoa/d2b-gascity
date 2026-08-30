@@ -480,10 +480,11 @@ sha256sum, and set `PR_BABYSIT_VALIDATOR_ATTESTED=credential-isolated-v1`.
 The workflow hashes that exact executable with `sha256sum` immediately before
 running it through `timeout --foreground --kill-after=5s`, using
 `PR_BABYSIT_VALIDATOR_TIMEOUT_SECONDS` from 1 through 900 seconds (default
-900). It must run `make check` in a credential- and network-isolated
-environment. A missing, mismatched, timed-out, or failed validator blocks
-repair and records a failed result; no branch update is attempted. There is
-no direct-make fallback.
+900). It must run `make check` in a credential-isolated environment. Public
+dependency access is allowed, but GitHub, Copilot, BuildBuddy, publication,
+and Discord credentials must be absent. A missing, mismatched, timed-out, or
+failed validator blocks repair and records a failed result; no branch update
+is attempted. There is no direct-make fallback.
 
 The reviewer is read-only with respect to GitHub and never resolves review
 threads. After a confirmed review repair, record each addressed thread,
