@@ -516,11 +516,12 @@ ownership.
 
 The host may load the dedicated repair token into the native supervisor as
 `GH_TOKEN`, but the city pins both GitHub token variables empty for every
-managed session. Only the d2b `gc.run-operator` agent rehydrates `GH_TOKEN`
-from the controller environment. The babysitter remains read-only, the
-implementation worker commits locally without pushing, the independent
-reviewer does not mutate GitHub, and the run operator owns the single
-validated normal push.
+managed session. The d2b babysitter receives only the non-secret capability
+and validator attestations required to dispatch a repair; it never receives a
+GitHub token. Only the d2b `gc.run-operator` agent rehydrates `GH_TOKEN` from
+the controller environment. The implementation worker commits locally without
+pushing, the independent reviewer does not mutate GitHub, and the run operator
+owns the single validated normal push.
 
 ### Rollout and evidence
 
