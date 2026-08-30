@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import importlib.util
 import json
 import os
 import pathlib
@@ -13,6 +14,7 @@ import time
 import tomllib
 import unittest
 from concurrent.futures import ThreadPoolExecutor
+from unittest import mock
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -2924,6 +2926,42 @@ def value(flag, default=""):
     return default
 
 
+def fail_once(kind):
+    if os.environ.get("FAKE_BEADS_FAIL_ON") != kind:
+        return
+    marker = root / ("failure-" + kind)
+    if marker.exists():
+        return
+    marker.write_text("failed\n", encoding="utf-8")
+    print(kind + " failed", file=sys.stderr)
+    raise SystemExit(1)
+
+
+if command == "create" and value("--id").find("-action-") >= 0:
+    fail_once("action-create")
+if command == "dep":
+    fail_once("dependency")
+if command == "close" and args and "-action-" in args[0]:
+    fail_once("close-action")
+if command == "update":
+    update_id = next((item for item in args if not item.startswith("-")), "")
+    metadata_values = {
+        args[index + 1].split("=", 1)[0]:
+        args[index + 1].split("=", 1)[1]
+        for index, item in enumerate(args)
+        if item == "--set-metadata"
+        and index + 1 < len(args)
+        and "=" in args[index + 1]
+    }
+    if metadata_values.get("state") == "repairing":
+        fail_once("watch-repairing")
+    if (
+        metadata_values.get("state") == "watching"
+        and "-action-" not in update_id
+    ):
+        fail_once("watch-confirm")
+
+
 def record_for(issue_id):
     for record in records:
         if record["id"] == issue_id:
@@ -3114,6 +3152,96 @@ if command == "close":
     def _json(self, result: subprocess.CompletedProcess[str]) -> dict:
         self.assertTrue(result.stdout, result.stderr)
         return json.loads(result.stdout)
+
+    @staticmethod
+    def _state_module():
+        spec = importlib.util.spec_from_file_location(
+            "pr_babysit_state_for_tests",
+            PR_BABYSIT_ROOT
+            / "assets"
+            / "scripts"
+            / "pr-babysit-state.py",
+        )
+        if spec is None or spec.loader is None:
+            raise AssertionError("could not load PR babysit state helper")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+    def test_subprocess_timeouts_fail_closed_with_existing_error_codes(self):
+        module = self._state_module()
+        timeout = subprocess.TimeoutExpired(["command"], 1)
+        with mock.patch.dict(
+            os.environ,
+            {
+                "PR_BABYSIT_BEADS_BIN": "bd",
+                "PR_BABYSIT_BEADS_CWD": str(ROOT),
+            },
+            clear=False,
+        ), mock.patch.object(module.subprocess, "run", side_effect=timeout):
+            with self.assertRaises(module.StateError) as raised:
+                module.run_beads(["show", "watch", "--json"])
+        self.assertEqual(raised.exception.code, "beads-exec")
+
+        context = {
+            "github_host": "github.com",
+            "owner": "octo",
+            "repository": "example",
+            "pr_number": 7,
+            "input_url": "https://github.com/octo/example/pull/7",
+        }
+        with mock.patch.dict(
+            os.environ,
+            {
+                "PR_BABYSIT_GH_BIN": "gh",
+                "PR_BABYSIT_BEADS_CWD": str(ROOT),
+                "PR_BABYSIT_ALLOWED_HOSTS": "github.com",
+            },
+            clear=False,
+        ), mock.patch.object(module.subprocess, "run", side_effect=timeout):
+            with self.assertRaises(module.StateError) as raised:
+                module.query_github_publication(context)
+        self.assertEqual(raised.exception.code, "github-query")
+
+        with mock.patch.dict(
+            os.environ,
+            {
+                "PR_BABYSIT_GC_BIN": "gc",
+                "PR_BABYSIT_BEADS_CWD": str(ROOT),
+            },
+            clear=False,
+        ), mock.patch.object(module.subprocess, "run", side_effect=timeout):
+            with self.assertRaises(module.StateError) as raised:
+                module.route_watch("d2b/pr-babysit.pr-babysitter", "d2b-watch")
+        self.assertEqual(raised.exception.code, "route-failed")
+
+        with mock.patch.dict(
+            os.environ,
+            {
+                "PR_BABYSIT_GC_BIN": "gc",
+                "PR_BABYSIT_BEADS_CWD": str(ROOT),
+            },
+            clear=False,
+        ), mock.patch.object(
+            module,
+            "repair_formula_vars",
+            return_value=[("watch_id", "d2b-watch")],
+        ), mock.patch.object(module.subprocess, "run", side_effect=timeout):
+            with self.assertRaises(module.StateError) as raised:
+                module.attach_repair_formula(
+                    {},
+                    {"watch_id": "d2b-watch"},
+                    "d2b-watch-action",
+                    1,
+                    "ci",
+                    "",
+                )
+        self.assertEqual(raised.exception.code, "formula-exec")
+
+        with mock.patch.object(module.subprocess, "run", side_effect=timeout):
+            with self.assertRaises(module.StateError) as raised:
+                module.validate_git_ref("v3", "base_ref")
+        self.assertEqual(raised.exception.code, "configuration")
 
     def test_handoff_is_idempotent_and_preserves_existing_state(self) -> None:
         root, env = self._fixture("handoff")
@@ -4925,6 +5053,153 @@ print(json.dumps({"ok": True}))
                 self.assertNotIn("handoff_verified", record["metadata"])
                 self.assertNotIn("handoff_watch_id", record["metadata"])
                 self.assertNotIn("handoff_target", record["metadata"])
+
+            verify = self._run(
+                env,
+                "verify-handoff",
+                self._payload(),
+            )
+            self.assertNotEqual(verify.returncode, 0)
+            self.assertEqual(
+                self._json(verify)["error"]["code"],
+                "route-failed",
+            )
+
+            retry = self._run(
+                env,
+                "publication-handoff",
+                self._payload(),
+            )
+            self.assertEqual(retry.returncode, 0, retry.stderr)
+            self.assertEqual(self._json(retry)["watch_id"], watch["id"])
+            state = self._run(
+                env,
+                "verify-handoff",
+                self._payload(),
+            )
+            self.assertEqual(state.returncode, 0, state.stderr)
+            records = json.loads((root / "beads.json").read_text(encoding="utf-8"))
+            watch = next(
+                record
+                for record in records
+                if record["id"] != "publication-1"
+            )
+            self.assertEqual(watch["metadata"]["state"], "watching")
+            self.assertEqual(watch["metadata"]["claim_status"], "none")
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
+
+    def test_publication_rearm_recovers_blocked_exhausted_and_merge_ready(self):
+        for state in ("blocked", "exhausted", "merge-ready"):
+            with self.subTest(state=state):
+                root, env = self._fixture("rearm-" + state)
+                try:
+                    result = self._run(
+                        env,
+                        "publication-handoff",
+                        self._payload(),
+                    )
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    watch_id = self._json(result)["watch_id"]
+                    if state == "exhausted":
+                        stopped = self._run(
+                            env,
+                            "checkpoint",
+                            {
+                                "watch_id": watch_id,
+                                "expected_generation": 1,
+                                "expected_head_sha": "b" * 40,
+                                "observed_head_sha": "b" * 40,
+                                "observed_at": "2026-09-02T00:00:00Z",
+                                "next_snapshot_at": "2026-09-02T00:05:00Z",
+                            },
+                        )
+                    else:
+                        stopped = self._run(
+                            env,
+                            "transition",
+                            {
+                                "watch_id": watch_id,
+                                "to": state,
+                                **(
+                                    {"reason": "later-blocker"}
+                                    if state == "blocked"
+                                    else {}
+                                ),
+                            },
+                        )
+                    self.assertEqual(stopped.returncode, 0, stopped.stderr)
+                    rearmed = self._run(
+                        env,
+                        "publication-handoff",
+                        self._payload() | {"rearm": True},
+                    )
+                    self.assertEqual(rearmed.returncode, 0, rearmed.stderr)
+                    metadata = self._json(
+                        self._run(
+                            env,
+                            "show",
+                            {"watch_id": watch_id},
+                        )
+                    )["metadata"]
+                    self.assertEqual(metadata["state"], "watching")
+                    self.assertEqual(metadata["attempts"], "0")
+                    self.assertEqual(metadata["attempt_history"], "")
+                    self.assertEqual(metadata["blocker_emitted"], "false")
+                finally:
+                    shutil.rmtree(root, ignore_errors=True)
+
+    def test_publication_retry_does_not_auto_rearm_completed_receipt_blocker(self):
+        root, env = self._fixture("completed-receipt-blocker")
+        try:
+            result = self._run(
+                env,
+                "publication-handoff",
+                self._payload(),
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            watch_id = self._json(result)["watch_id"]
+            blocked = self._run(
+                env,
+                "transition",
+                {
+                    "watch_id": watch_id,
+                    "to": "blocked",
+                    "reason": "later-blocker",
+                },
+            )
+            self.assertEqual(blocked.returncode, 0, blocked.stderr)
+            before = self._json(
+                self._run(env, "show", {"watch_id": watch_id})
+            )
+            retry = self._run(
+                env,
+                "publication-handoff",
+                self._payload(),
+            )
+            self.assertEqual(retry.returncode, 0, retry.stderr)
+            after = self._json(
+                self._run(env, "show", {"watch_id": watch_id})
+            )
+            self.assertEqual(after["metadata"]["state"], "blocked")
+            self.assertEqual(
+                after["metadata"]["generation"],
+                before["metadata"]["generation"],
+            )
+            self.assertEqual(
+                after["metadata"]["terminal_reason"],
+                "later-blocker",
+            )
+            verify = self._run(
+                env,
+                "verify-handoff",
+                self._payload(),
+            )
+            self.assertNotEqual(verify.returncode, 0)
+            self.assertEqual(
+                self._json(verify)["error"]["code"],
+                "not-routable",
+            )
         finally:
             shutil.rmtree(root, ignore_errors=True)
 
@@ -5450,7 +5725,7 @@ print(json.dumps({"ok": True, "root_id": "repair-root"}))
                 calls[0][:4],
                 ["formula", "cook", "mol-pr-babysit-repair", "--attach"],
             )
-            self.assertEqual(calls[0][4], action_id)
+            self.assertEqual(calls[0][4], watch_id)
             dep_calls = [
                 call["argv"]
                 for call in json.loads((root / "calls.json").read_text())
@@ -5478,6 +5753,66 @@ print(json.dumps({"ok": True, "root_id": "repair-root"}))
             )
         finally:
             shutil.rmtree(root, ignore_errors=True)
+
+    def test_claim_setup_failures_block_watch_without_advancing_attempts(self):
+        for failure_kind in ("action-create", "dependency", "watch-repairing"):
+            root, env = self._repair_fixture("claim-failure-" + failure_kind)
+            try:
+                handoff = self._run(env, "handoff", self._HANDOFF)
+                self.assertEqual(handoff.returncode, 0, handoff.stderr)
+                watch_id = self._json(handoff)["watch_id"]
+                failed = self._run(
+                    env | {"FAKE_BEADS_FAIL_ON": failure_kind},
+                    "claim-action",
+                    {
+                        "watch_id": watch_id,
+                        "generation": 1,
+                        "head_sha": "a" * 40,
+                        "action_kind": "ci",
+                        "fingerprint": "claim setup failure",
+                    },
+                )
+                self.assertNotEqual(failed.returncode, 0)
+                state = self._json(
+                    self._run(env, "show", {"watch_id": watch_id})
+                )
+                metadata = state["metadata"]
+                self.assertEqual(metadata["state"], "blocked")
+                self.assertEqual(
+                    metadata["terminal_reason"],
+                    "claim-setup-failed",
+                )
+                self.assertEqual(metadata["claim_status"], "blocked")
+                self.assertEqual(metadata["attempts"], "0")
+                self.assertEqual(metadata["attempt_key"], "")
+                self.assertEqual(metadata["attempt_history"], "")
+                records = json.loads(
+                    (root / "beads.json").read_text(encoding="utf-8")
+                )
+                watch = next(record for record in records if record["id"] == watch_id)
+                self.assertEqual(watch["assignee"], "")
+                actions = [
+                    record
+                    for record in records
+                    if record["id"] != watch_id
+                ]
+                if failure_kind == "action-create":
+                    self.assertEqual(actions, [])
+                else:
+                    self.assertEqual(len(actions), 1)
+                    action = actions[0]
+                    self.assertEqual(action["status"], "blocked")
+                    self.assertEqual(action["assignee"], "")
+                    self.assertEqual(
+                        action["metadata"]["claim_status"],
+                        "blocked",
+                    )
+                    self.assertEqual(
+                        action["metadata"]["terminal_reason"],
+                        "claim-setup-failed",
+                    )
+            finally:
+                shutil.rmtree(root, ignore_errors=True)
 
     def test_result_records_sha_check_and_threads_then_closes_action(self):
         root, env = self._repair_fixture("result")
@@ -5507,6 +5842,147 @@ print(json.dumps({"ok": True, "root_id": "repair-root"}))
             )
             self.assertEqual(watch["metadata"]["head_sha"], "b" * 40)
             self.assertEqual(watch["metadata"]["state"], "watching")
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
+
+    def test_confirm_close_failure_leaves_repairing_and_retry_reconciles(self):
+        root, env = self._repair_fixture("close-failure")
+        try:
+            handoff = self._run(env, "handoff", self._HANDOFF)
+            self.assertEqual(handoff.returncode, 0, handoff.stderr)
+            watch_id = self._json(handoff)["watch_id"]
+            dispatched = self._dispatch(
+                env,
+                watch_id,
+                generation=1,
+                head_sha="a" * 40,
+                action_kind="ci",
+                fingerprint="close failure",
+            )
+            self.assertEqual(dispatched.returncode, 0, dispatched.stderr)
+            action_id = self._json(dispatched)["action_id"]
+            recorded = self._run(
+                env,
+                "record-repair-result",
+                {
+                    "watch_id": watch_id,
+                    "action_id": action_id,
+                    "generation": 1,
+                    "expected_old_sha": "a" * 40,
+                    "pushed_sha": "b" * 40,
+                    "validation_status": "passed",
+                    "make_check_result": "passed",
+                },
+            )
+            self.assertEqual(recorded.returncode, 0, recorded.stderr)
+            failed = self._run(
+                env | {"FAKE_BEADS_FAIL_ON": "close-action"},
+                "confirm-action",
+                {
+                    "watch_id": watch_id,
+                    "action_id": action_id,
+                    "generation": 1,
+                    "current_sha": "b" * 40,
+                },
+            )
+            self.assertNotEqual(failed.returncode, 0)
+            state = self._json(
+                self._run(env, "show", {"watch_id": watch_id})
+            )
+            self.assertEqual(state["metadata"]["state"], "repairing")
+            self.assertEqual(
+                state["metadata"]["claim_status"],
+                "result-recorded",
+            )
+            retried = self._run(
+                env,
+                "confirm-action",
+                {
+                    "watch_id": watch_id,
+                    "action_id": action_id,
+                    "generation": 1,
+                    "current_sha": "b" * 40,
+                },
+            )
+            self.assertEqual(retried.returncode, 0, retried.stderr)
+            records = json.loads((root / "beads.json").read_text(encoding="utf-8"))
+            action = next(record for record in records if record["id"] == action_id)
+            watch = next(record for record in records if record["id"] == watch_id)
+            self.assertEqual(action["status"], "closed")
+            self.assertEqual(watch["metadata"]["state"], "watching")
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
+
+    def test_confirm_retries_closed_action_after_watch_update_failure(self):
+        root, env = self._repair_fixture("watch-update-failure")
+        try:
+            handoff = self._run(env, "handoff", self._HANDOFF)
+            self.assertEqual(handoff.returncode, 0, handoff.stderr)
+            watch_id = self._json(handoff)["watch_id"]
+            dispatched = self._dispatch(
+                env,
+                watch_id,
+                generation=1,
+                head_sha="a" * 40,
+                action_kind="ci",
+                fingerprint="watch update failure",
+            )
+            self.assertEqual(dispatched.returncode, 0, dispatched.stderr)
+            action_id = self._json(dispatched)["action_id"]
+            recorded = self._run(
+                env,
+                "record-repair-result",
+                {
+                    "watch_id": watch_id,
+                    "action_id": action_id,
+                    "generation": 1,
+                    "expected_old_sha": "a" * 40,
+                    "pushed_sha": "b" * 40,
+                    "validation_status": "passed",
+                    "make_check_result": "passed",
+                },
+            )
+            self.assertEqual(recorded.returncode, 0, recorded.stderr)
+            failed = self._run(
+                env | {"FAKE_BEADS_FAIL_ON": "watch-confirm"},
+                "confirm-action",
+                {
+                    "watch_id": watch_id,
+                    "action_id": action_id,
+                    "generation": 1,
+                    "current_sha": "b" * 40,
+                },
+            )
+            self.assertNotEqual(failed.returncode, 0)
+            records = json.loads((root / "beads.json").read_text(encoding="utf-8"))
+            action = next(record for record in records if record["id"] == action_id)
+            watch = next(record for record in records if record["id"] == watch_id)
+            self.assertEqual(action["status"], "closed")
+            self.assertEqual(watch["metadata"]["state"], "repairing")
+            self.assertEqual(
+                watch["metadata"]["claim_status"],
+                "result-recorded",
+            )
+            retried = self._run(
+                env,
+                "confirm-action",
+                {
+                    "watch_id": watch_id,
+                    "action_id": action_id,
+                    "generation": 1,
+                    "current_sha": "b" * 40,
+                },
+            )
+            self.assertEqual(retried.returncode, 0, retried.stderr)
+            records = json.loads((root / "beads.json").read_text(encoding="utf-8"))
+            watch = next(record for record in records if record["id"] == watch_id)
+            self.assertEqual(watch["metadata"]["state"], "watching")
+            close_calls = [
+                call
+                for call in json.loads((root / "calls.json").read_text())
+                if call["argv"] and call["argv"][0] == "close"
+            ]
+            self.assertEqual(len(close_calls), 1)
         finally:
             shutil.rmtree(root, ignore_errors=True)
 
@@ -5620,6 +6096,122 @@ print(json.dumps({"ok": True, "root_id": "repair-root"}))
                 self.assertEqual(state["metadata"]["attempts"], "1")
             finally:
                 shutil.rmtree(reset_root, ignore_errors=True)
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
+
+    def test_explicit_rearm_starts_a_fresh_budget_epoch(self):
+        root, env = self._repair_fixture("rearm-attempt")
+        try:
+            handoff = self._run(
+                env,
+                "handoff",
+                dict(
+                    self._HANDOFF,
+                    active_since="2026-08-29T00:00:00Z",
+                    backstop_at="2026-09-01T00:00:00Z",
+                ),
+            )
+            self.assertEqual(handoff.returncode, 0, handoff.stderr)
+            watch_id = self._json(handoff)["watch_id"]
+            old_sha = "a" * 40
+            for generation, new_sha in (
+                (1, "b" * 40),
+                (2, "c" * 40),
+                (3, "d" * 40),
+            ):
+                self._complete(
+                    env,
+                    watch_id,
+                    generation=generation,
+                    old_sha=old_sha,
+                    new_sha=new_sha,
+                    action_kind="ci",
+                    fingerprint="same failing check",
+                )
+                old_sha = new_sha
+            exhausted = self._dispatch(
+                env,
+                watch_id,
+                generation=4,
+                head_sha=old_sha,
+                action_kind="ci",
+                fingerprint="same failing check",
+            )
+            self.assertNotEqual(exhausted.returncode, 0)
+            self.assertEqual(
+                self._json(exhausted)["error"]["code"],
+                "attempt-budget-exhausted",
+            )
+            rearmed = self._run(
+                env,
+                "handoff",
+                dict(
+                    self._HANDOFF,
+                    head_sha=old_sha,
+                    current_sha=old_sha,
+                    observed_at="2026-09-02T00:00:00Z",
+                    backstop_at="2026-09-05T00:00:00Z",
+                    rearm=True,
+                ),
+            )
+            self.assertEqual(rearmed.returncode, 0, rearmed.stderr)
+            metadata = self._json(rearmed)["metadata"]
+            self.assertEqual(metadata["state"], "watching")
+            self.assertEqual(metadata["attempts"], "0")
+            self.assertEqual(metadata["attempt_key"], "")
+            self.assertEqual(metadata["attempt_limit"], "")
+            self.assertEqual(metadata["attempt_history"], "")
+            self.assertEqual(metadata["blocker_emitted"], "false")
+            self.assertEqual(metadata["active_since"], "2026-09-02T00:00:00Z")
+            self.assertEqual(metadata["backstop_at"], "2026-09-05T00:00:00Z")
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
+
+    def test_explicit_rearm_resets_time_exhaustion_and_defaults_backstop(self):
+        root, env = self._repair_fixture("rearm-time")
+        try:
+            handoff = self._run(
+                env,
+                "handoff",
+                dict(
+                    self._HANDOFF,
+                    active_since="2026-08-20T00:00:00Z",
+                    backstop_at="2026-08-30T00:00:00Z",
+                ),
+            )
+            self.assertEqual(handoff.returncode, 0, handoff.stderr)
+            watch_id = self._json(handoff)["watch_id"]
+            exhausted = self._run(
+                env,
+                "checkpoint",
+                {
+                    "watch_id": watch_id,
+                    "expected_generation": 1,
+                    "expected_head_sha": "a" * 40,
+                    "observed_head_sha": "a" * 40,
+                    "observed_at": "2026-08-20T08:00:00Z",
+                    "next_snapshot_at": "2026-08-20T08:05:00Z",
+                },
+            )
+            self.assertEqual(exhausted.returncode, 0, exhausted.stderr)
+            self.assertEqual(self._json(exhausted)["state"], "exhausted")
+            rearm_payload = dict(
+                self._HANDOFF,
+                observed_at="2026-08-21T00:00:00Z",
+                active_since="2026-08-21T00:00:00Z",
+                rearm=True,
+            )
+            rearm_payload.pop("backstop_at")
+            rearmed = self._run(env, "handoff", rearm_payload)
+            self.assertEqual(rearmed.returncode, 0, rearmed.stderr)
+            metadata = self._json(rearmed)["metadata"]
+            self.assertEqual(metadata["state"], "watching")
+            self.assertEqual(metadata["attempts"], "0")
+            self.assertEqual(metadata["attempt_history"], "")
+            self.assertEqual(
+                metadata["backstop_at"],
+                "2026-08-24T00:00:00Z",
+            )
         finally:
             shutil.rmtree(root, ignore_errors=True)
 

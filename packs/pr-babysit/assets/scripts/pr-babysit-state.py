@@ -52,6 +52,12 @@ ATTEMPT_LIMITS = {"ci": 3, "review": 2}
 REPAIR_FORMULA = "mol-pr-babysit-repair"
 ACTIVE_BUDGET = timedelta(hours=8)
 BACKSTOP_BUDGET = timedelta(days=3)
+ORDER_TIMEOUT_SECONDS = 30
+BEADS_TIMEOUT_SECONDS = ORDER_TIMEOUT_SECONDS
+GAS_CITY_TIMEOUT_SECONDS = ORDER_TIMEOUT_SECONDS
+FORMULA_TIMEOUT_SECONDS = ORDER_TIMEOUT_SECONDS
+GIT_VALIDATION_TIMEOUT_SECONDS = ORDER_TIMEOUT_SECONDS
+GITHUB_TIMEOUT_SECONDS = 60
 DEFAULT_DUE_LIMIT = 32
 MAX_DUE_LIMIT = 100
 SHA_RE = re.compile(r"^[0-9a-fA-F]{40}$")
@@ -380,6 +386,12 @@ def validate_git_ref(value: Any, field: str) -> str:
             capture_output=True,
             text=True,
             check=False,
+            timeout=GIT_VALIDATION_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired:
+        fail(
+            f"{field} could not be validated as a git ref",
+            "configuration",
         )
     except OSError:
         fail(f"{field} cannot be validated as a git ref", "configuration")
@@ -875,7 +887,10 @@ def run_beads(args: list[str], *, actor: str | None = None) -> BeadsResult:
             capture_output=True,
             text=True,
             check=False,
+            timeout=BEADS_TIMEOUT_SECONDS,
         )
+    except subprocess.TimeoutExpired:
+        fail("Beads executable timed out", "beads-exec")
     except OSError as exc:
         fail(f"could not execute Beads executable: {exc.__class__.__name__}", "beads-exec")
     output = result.stdout.strip()
@@ -1040,6 +1055,13 @@ def metadata_updates(
 def close_issue(issue_id: str, reason: str) -> dict[str, Any]:
     result = run_beads(["close", issue_id, "--reason", reason, "--json"])
     return require_beads(result, "close")
+
+
+def close_action(action_id: str, reason: str) -> dict[str, Any]:
+    issue, _ = show_bead(action_id, operation="action close check")
+    if issue.get("status") == "closed":
+        return issue
+    return close_issue(action_id, reason)
 
 
 def initial_watch_metadata(
@@ -1398,6 +1420,98 @@ def invalidate_action_claim(
     )
 
 
+def block_claim_setup_failure(
+    watch_id: str,
+    action_id: str,
+    prior_metadata: dict[str, str],
+) -> None:
+    action_updates = {
+        "claim_status": "blocked",
+        "blocker_emitted": "true",
+        "terminal_reason": "claim-setup-failed",
+    }
+    try:
+        existing = show_issue_if_present(
+            action_id,
+            operation="claim setup action show",
+        )
+        if (
+            existing is not None
+            and existing[0].get("status") != "closed"
+            and existing[1].get("watch_id") == watch_id
+        ):
+            try:
+                metadata_updates(
+                    action_id,
+                    action_updates,
+                    status="blocked",
+                    assignee="",
+                )
+            except StateError:
+                try:
+                    metadata_updates(
+                        action_id,
+                        action_updates,
+                        status="blocked",
+                        assignee="",
+                    )
+                except StateError:
+                    pass
+    except StateError:
+        pass
+
+    watch_updates = {
+        "state": "blocked",
+        "generation": prior_metadata.get("generation", ""),
+        "head_sha": prior_metadata.get("head_sha", ""),
+        "observed_head_sha": prior_metadata.get(
+            "observed_head_sha",
+            prior_metadata.get("head_sha", ""),
+        ),
+        "last_snapshot_at": prior_metadata.get("last_snapshot_at", ""),
+        "next_snapshot_at": prior_metadata.get("next_snapshot_at", ""),
+        "active_since": prior_metadata.get("active_since", ""),
+        "backstop_at": prior_metadata.get("backstop_at", ""),
+        "action_kind": "",
+        "action_fingerprint": "",
+        "action_id": "",
+        "attempt_key": prior_metadata.get("attempt_key", ""),
+        "attempt_limit": prior_metadata.get("attempt_limit", ""),
+        "attempt_history": prior_metadata.get("attempt_history", ""),
+        "attempts": prior_metadata.get("attempts", "0"),
+        "claim_status": "blocked",
+        "expected_old_head": "",
+        "expected_new_head": "",
+        "expected_old_sha": "",
+        "expected_new_sha": "",
+        "pushed_sha": "",
+        "validation_status": "",
+        "make_check_result": "",
+        "addressed_thread_ids": "",
+        "formula_attached": "",
+        "formula_root": "",
+        "blocker_emitted": "true",
+        "terminal_reason": "claim-setup-failed",
+    }
+    try:
+        metadata_updates(
+            watch_id,
+            watch_updates,
+            status="blocked",
+            assignee="",
+        )
+    except StateError:
+        try:
+            metadata_updates(
+                watch_id,
+                watch_updates,
+                status="blocked",
+                assignee="",
+            )
+        except StateError:
+            pass
+
+
 def handoff(payload: dict[str, Any]) -> dict[str, Any]:
     identity = parse_identity(payload)
     rearm = bool_value(payload_value(payload, "rearm", "allow_rearm"), "rearm")
@@ -1460,6 +1574,7 @@ def _handoff_locked(
     if not SHA_RE.fullmatch(current_head):
         fail("existing watch has an invalid head SHA", "corrupt-state")
     generation = generation_from_metadata(metadata)
+    should_rearm = current_state in REARMABLE_STATES and rearm
     observed_at = text_value(
         payload_value(payload, "observed_at", "last_snapshot_at") or iso_now(),
         "observed_at",
@@ -1472,20 +1587,35 @@ def _handoff_locked(
         payload_value(payload, "active_since") or observed_at,
         "active_since",
     )
-    backstop_at = text_value(
-        payload_value(payload, "backstop_at")
-        if payload_value(payload, "backstop_at") is not None
-        else metadata.get("backstop_at", ""),
-        "backstop_at",
-        required=False,
-    )
     parse_time(observed_at, "observed_at")
     parse_time(next_snapshot_at, "next_snapshot_at")
-    parse_time(active_since, "active_since")
-    if backstop_at:
-        parse_time(backstop_at, "backstop_at")
+    if should_rearm:
+        active_since = observed_at
+    active_since_time = parse_time(active_since, "active_since")
+    supplied_backstop = payload_value(payload, "backstop_at")
+    if should_rearm:
+        backstop_at = text_value(
+            supplied_backstop or "",
+            "backstop_at",
+            required=False,
+        )
+        if backstop_at:
+            backstop_time = parse_time(backstop_at, "backstop_at")
+            if backstop_time < active_since_time:
+                fail("backstop_at must not precede active_since")
+        else:
+            backstop_at = format_time(active_since_time + BACKSTOP_BUDGET)
+    else:
+        backstop_at = text_value(
+            supplied_backstop
+            if supplied_backstop is not None
+            else metadata.get("backstop_at", ""),
+            "backstop_at",
+            required=False,
+        )
+        if backstop_at:
+            parse_time(backstop_at, "backstop_at")
     head_changed = current_head != incoming_head
-    should_rearm = current_state in REARMABLE_STATES and rearm
     if identity["pr_state"] != "OPEN":
         invalidate_action_claim(watch_id, metadata, "terminal")
         updates = clear_claim_updates(
@@ -1534,10 +1664,14 @@ def _handoff_locked(
             active_since=active_since,
             last_pushed_sha=metadata.get("last_pushed_sha", ""),
             backstop_at=backstop_at,
-            attempt_key=metadata.get("attempt_key", ""),
-            attempts=attempts_from_metadata(metadata),
-            attempt_limit=metadata.get("attempt_limit", ""),
-            attempt_history=metadata.get("attempt_history", ""),
+            attempt_key="" if should_rearm else metadata.get("attempt_key", ""),
+            attempts=0 if should_rearm else attempts_from_metadata(metadata),
+            attempt_limit="" if should_rearm else metadata.get("attempt_limit", ""),
+            attempt_history=(
+                ""
+                if should_rearm
+                else metadata.get("attempt_history", "")
+            ),
         )
         metadata_updates(
             watch_id,
@@ -1712,7 +1846,10 @@ def query_github_publication(context: dict[str, Any]) -> dict[str, Any]:
             capture_output=True,
             text=True,
             check=False,
+            timeout=GITHUB_TIMEOUT_SECONDS,
         )
+    except subprocess.TimeoutExpired:
+        fail("GitHub pull-request query timed out", "github-query")
     except OSError:
         fail("could not execute GitHub executable", "github-exec")
     if result.returncode:
@@ -1858,6 +1995,13 @@ def existing_receipt_matches(
             )
 
 
+def has_complete_receipt(
+    metadata: dict[str, str],
+    receipt: dict[str, str],
+) -> bool:
+    return all(metadata.get(key) == value for key, value in receipt.items())
+
+
 def block_route_failure(watch_id: str) -> None:
     _, metadata = show_issue(watch_id)
     state = state_from_metadata(metadata)
@@ -1905,7 +2049,10 @@ def route_watch(target: str, watch_id: str) -> None:
             capture_output=True,
             text=True,
             check=False,
+            timeout=GAS_CITY_TIMEOUT_SECONDS,
         )
+    except subprocess.TimeoutExpired:
+        fail("Gas City babysitter route timed out", "route-failed")
     except OSError:
         fail("could not execute Gas City executable", "route-exec")
     if result.returncode:
@@ -1922,6 +2069,10 @@ def publication_handoff(payload: dict[str, Any]) -> dict[str, Any]:
             "workflow",
         ),
         "publication_bead_id",
+    )
+    rearm = bool_value(
+        payload_value(payload, "rearm", "allow_rearm"),
+        "rearm",
     )
     _, publication_metadata = show_bead(publication_bead_id)
     context = publication_context(
@@ -1940,14 +2091,21 @@ def publication_handoff(payload: dict[str, Any]) -> dict[str, Any]:
     receipt = receipt_updates(publication_bead_id, watch_id, target)
     existing_receipt_matches(publication_metadata, receipt)
     existing_watch = show_issue_if_present(watch_id)
+    route_failed_rearm = False
     if existing_watch is not None:
         _, existing_watch_metadata = existing_watch
         immutable_matches(existing_watch_metadata, identity)
         existing_receipt_matches(existing_watch_metadata, receipt)
+        route_failed_rearm = (
+            state_from_metadata(existing_watch_metadata) == "blocked"
+            and existing_watch_metadata.get("terminal_reason") == "route-failed"
+            and not has_complete_receipt(existing_watch_metadata, receipt)
+        )
 
     handoff_payload = {
         **identity,
         "verified": True,
+        "rearm": rearm or route_failed_rearm,
         "observed_at": payload_value(payload, "observed_at") or iso_now(),
         "next_snapshot_at": payload_value(payload, "next_snapshot_at")
         or payload_value(payload, "observed_at")
@@ -1956,6 +2114,11 @@ def publication_handoff(payload: dict[str, Any]) -> dict[str, Any]:
         or payload_value(payload, "observed_at")
         or iso_now(),
     }
+    if payload_value(payload, "backstop_at") is not None:
+        handoff_payload["backstop_at"] = payload_value(
+            payload,
+            "backstop_at",
+        )
     handoff_result = handoff(handoff_payload)
     try:
         route_watch(target, watch_id)
@@ -2044,14 +2207,46 @@ def verify_handoff(payload: dict[str, Any]) -> dict[str, Any]:
         publication_metadata,
         require_reference=False,
     )
-    watch_id = validate_watch_id(
-        publication_metadata.get("handoff_watch_id"),
-    )
+    recorded_watch_id = publication_metadata.get("handoff_watch_id")
+    if recorded_watch_id:
+        watch_id = validate_watch_id(recorded_watch_id)
+    else:
+        if context.get("pr_number") is None:
+            fail("publication handoff receipt is missing", "not-routable")
+        watch_id = watch_id_for(
+            {
+                "rig": context["rig"],
+                "rig_prefix": context["rig_prefix"],
+                "github_host": context["github_host"],
+                "owner": context["owner"],
+                "repository": context["repository"],
+                "pr_number": context["pr_number"],
+            }
+        )
     target = handoff_target(context["rig"])
     expected_receipt = receipt_updates(publication_bead_id, watch_id, target)
     existing_receipt_matches(publication_metadata, expected_receipt)
     _, watch_metadata = show_issue(watch_id)
     existing_receipt_matches(watch_metadata, expected_receipt)
+    watch_state = state_from_metadata(watch_metadata)
+    if (
+        watch_state == "blocked"
+        and watch_metadata.get("terminal_reason") == "route-failed"
+    ):
+        fail(
+            "publication handoff route previously failed",
+            "route-failed",
+        )
+    if watch_state not in CHECKPOINT_STATES:
+        fail(
+            "publication handoff target is not routable",
+            "not-routable",
+        )
+    if (
+        not has_complete_receipt(publication_metadata, expected_receipt)
+        or not has_complete_receipt(watch_metadata, expected_receipt)
+    ):
+        fail("publication handoff receipt is missing", "not-routable")
     identity = watch_identity_from_metadata(watch_metadata, context)
     if watch_id_for(identity) != watch_id:
         fail("watch ID does not match watch identity", "identity-mismatch")
@@ -2276,60 +2471,64 @@ def _claim_action_locked(
             fail("watch is already claimed by another action", "already-claimed")
         raise error
 
-    action_initial = action_metadata(
-        watch_id,
-        {
-            "rig": metadata.get("rig", ""),
-            "rig_prefix": metadata.get("rig_prefix", ""),
-            "github_host": metadata.get("github_host", ""),
-            "owner": metadata.get("owner", ""),
-            "repository": metadata.get("repository", ""),
-            "pr_number": metadata.get("pr_number", ""),
-            "url": metadata.get("url", ""),
-            "base_ref": metadata.get("base_ref", ""),
-            "head_ref": metadata.get("head_ref", ""),
-        },
-        generation,
-        action_kind,
-        fingerprint,
-        head_sha,
-        action_id,
-    )
-    created, _, _ = create_action(
-        action_id,
-        watch_id,
-        action_initial,
-        action_kind,
-        generation,
-        fingerprint,
-    )
-    updates = {
-        "state": "repairing",
-        "action_kind": action_kind,
-        "action_fingerprint": fingerprint,
-        "action_id": action_id,
-        "attempt_key": attempt_key,
-        "attempt_limit": str(attempt_limit),
-        "attempt_history": format_attempt_history(
-            {**history, attempt_key: attempts + 1}
-        ),
-        "claim_status": "claimed",
-        "attempts": str(attempts + 1),
-        "observed_head_sha": head_sha,
-        "expected_old_head": head_sha,
-        "expected_new_head": "",
-        "expected_old_sha": head_sha,
-        "expected_new_sha": "",
-        "pushed_sha": "",
-        "validation_status": "",
-        "make_check_result": "",
-        "addressed_thread_ids": "",
-        "formula_attached": "false",
-        "formula_root": "",
-        "blocker_emitted": "false",
-        "terminal_reason": "",
-    }
-    metadata_updates(watch_id, updates)
+    try:
+        action_initial = action_metadata(
+            watch_id,
+            {
+                "rig": metadata.get("rig", ""),
+                "rig_prefix": metadata.get("rig_prefix", ""),
+                "github_host": metadata.get("github_host", ""),
+                "owner": metadata.get("owner", ""),
+                "repository": metadata.get("repository", ""),
+                "pr_number": metadata.get("pr_number", ""),
+                "url": metadata.get("url", ""),
+                "base_ref": metadata.get("base_ref", ""),
+                "head_ref": metadata.get("head_ref", ""),
+            },
+            generation,
+            action_kind,
+            fingerprint,
+            head_sha,
+            action_id,
+        )
+        created, _, _ = create_action(
+            action_id,
+            watch_id,
+            action_initial,
+            action_kind,
+            generation,
+            fingerprint,
+        )
+        updates = {
+            "state": "repairing",
+            "action_kind": action_kind,
+            "action_fingerprint": fingerprint,
+            "action_id": action_id,
+            "attempt_key": attempt_key,
+            "attempt_limit": str(attempt_limit),
+            "attempt_history": format_attempt_history(
+                {**history, attempt_key: attempts + 1}
+            ),
+            "claim_status": "claimed",
+            "attempts": str(attempts + 1),
+            "observed_head_sha": head_sha,
+            "expected_old_head": head_sha,
+            "expected_new_head": "",
+            "expected_old_sha": head_sha,
+            "expected_new_sha": "",
+            "pushed_sha": "",
+            "validation_status": "",
+            "make_check_result": "",
+            "addressed_thread_ids": "",
+            "formula_attached": "false",
+            "formula_root": "",
+            "blocker_emitted": "false",
+            "terminal_reason": "",
+        }
+        metadata_updates(watch_id, updates)
+    except StateError:
+        block_claim_setup_failure(watch_id, action_id, metadata)
+        raise
     _, metadata = show_issue(watch_id)
     return {
         "ok": True,
@@ -2423,12 +2622,13 @@ def attach_repair_formula(
     action_kind: str,
     addressed_thread_ids: str,
 ) -> str:
+    watch_id = validate_watch_id(action_metadata_value.get("watch_id"))
     command = gc_command() + [
         "formula",
         "cook",
         REPAIR_FORMULA,
         "--attach",
-        action_id,
+        watch_id,
     ]
     for key, value in repair_formula_vars(
         watch_metadata,
@@ -2448,7 +2648,10 @@ def attach_repair_formula(
             capture_output=True,
             text=True,
             check=False,
+            timeout=FORMULA_TIMEOUT_SECONDS,
         )
+    except subprocess.TimeoutExpired:
+        fail("repair formula attachment timed out", "formula-exec")
     except OSError:
         fail("could not execute repair formula", "formula-exec")
     if result.returncode:
@@ -2911,6 +3114,7 @@ def _confirm_action_locked(payload: dict[str, Any]) -> dict[str, Any]:
     parse_time(observed_at, "observed_at")
     parse_time(next_snapshot_at, "next_snapshot_at")
     next_generation = generation + 1
+    close_action(action_id, "confirmed")
     metadata_updates(
         watch_id,
         clear_claim_updates(
@@ -2929,7 +3133,6 @@ def _confirm_action_locked(payload: dict[str, Any]) -> dict[str, Any]:
         status="open",
         assignee="",
     )
-    close_issue(action_id, "confirmed")
     _, metadata = show_issue(watch_id)
     return metadata_response(
         "confirm-action",
