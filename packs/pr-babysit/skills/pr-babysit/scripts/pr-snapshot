@@ -1163,12 +1163,7 @@ def _currency(
         prior.get("disposition", OPEN) if isinstance(prior, dict) else OPEN
     )
     if item["disposition"] == OPEN:
-        capability = item.get("host_branch_update_capability")
-        item["attention"] = (
-            "claim"
-            if item.get("status") == "BEHIND" and capability is True
-            else "decide"
-        )
+        item["attention"] = "decide"
     else:
         item["attention"] = None
     state["branch_currency_state"] = {

@@ -76,6 +76,7 @@
     "Keep snapshot-first ordering, current-head invalidation, and exact branch-currency evidence.",
     "Replace host skill calls and user questions with native-session handoff language.",
     "Use only the caller-supplied state directory and one checkpoint per turn.",
-    "Add native bounded repair dispatch, least-privilege credential fencing, and safe SHA/thread result handling."
+    "Add native bounded repair dispatch, least-privilege credential fencing, and safe SHA/thread result handling.",
+    "Treat every branch-currency item as a human decision, never an automatic claim."
   ]
 }

@@ -18,6 +18,16 @@ from unittest import mock
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
+SCRATCH_ROOT = ROOT / ".scratch"
+
+
+def _temporary_root(prefix: str) -> pathlib.Path:
+    SCRATCH_ROOT.mkdir(parents=True, exist_ok=True)
+    return pathlib.Path(
+        tempfile.mkdtemp(prefix=prefix, dir=SCRATCH_ROOT)
+    )
+
+
 CITY_RELATIVE = pathlib.Path("cities") / "d2b-gascity"
 CITY_ROOT = ROOT / CITY_RELATIVE
 CORE_PACK_RELATIVE = pathlib.Path("packs") / "core-city"
@@ -1589,6 +1599,22 @@ class RootPortableCityTests(unittest.TestCase):
             self.skipTest("GC_BIN is not set; static checks remain runnable")
         if not os.path.isabs(gc_bin):
             gc_bin = shutil.which(gc_bin) or str((ROOT / gc_bin).resolve())
+        bd_bin = shutil.which("bd")
+        self.assertIsNotNone(
+            bd_bin,
+            "native smoke requires Beads v1.2.2",
+        )
+        bd_version = subprocess.run(
+            [bd_bin, "--version"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(bd_version.returncode, 0, bd_version.stderr)
+        self.assertRegex(
+            bd_version.stdout,
+            rf"^bd version {re.escape(BEADS_VERSION)} \(",
+        )
 
         before = {
             relative: (ROOT / relative).read_bytes()
@@ -1603,11 +1629,10 @@ class RootPortableCityTests(unittest.TestCase):
             "tracked or staged runtime state is present",
         )
 
-        scratch = ROOT / ".tmp"
-        scratch.mkdir(exist_ok=True)
+        SCRATCH_ROOT.mkdir(parents=True, exist_ok=True)
         with tempfile.TemporaryDirectory(
             prefix="native-city-",
-            dir=scratch,
+            dir=SCRATCH_ROOT,
         ) as raw_root:
             root = pathlib.Path(raw_root)
             try:
@@ -1664,6 +1689,7 @@ class RootPortableCityTests(unittest.TestCase):
                         "GIT_COMMITTER_EMAIL": "gas-city-test@example.invalid",
                     }
                 )
+                env["GC_BIN"] = gc_bin
                 _git(["init", "--quiet", "-b", "main"], cwd=source, env=env)
                 _git(
                     ["init", "--quiet", "-b", "main"],
@@ -1910,10 +1936,117 @@ class RootPortableCityTests(unittest.TestCase):
                     "--city",
                     str(city),
                 )
+                rig_beads = rig / ".beads"
+                if not (rig_beads / "config.yaml").is_file():
+                    rig_beads.mkdir(parents=True, exist_ok=True)
+                    (rig_beads / "config.yaml").write_text(
+                        "dolt.local-only: true\n",
+                        encoding="utf-8",
+                    )
+                beads_initialized = subprocess.run(
+                    [
+                        bd_bin,
+                        "init",
+                        "--init-if-missing",
+                        "--non-interactive",
+                        "--skip-hooks",
+                        "--skip-agents",
+                        "--prefix",
+                        "d2b",
+                    ],
+                    cwd=rig,
+                    env=env | {"CI": "1"},
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                self.assertEqual(
+                    beads_initialized.returncode,
+                    0,
+                    beads_initialized.stderr,
+                )
+                native_watch_id = "d2b-native-smoke-watch"
+                native_watch_metadata = {
+                    "record_kind": "watch",
+                    "state": "watching",
+                    "generation": "1",
+                    "head_sha": "a" * 40,
+                }
+                native_watch = subprocess.run(
+                    [
+                        bd_bin,
+                        "create",
+                        "--id",
+                        native_watch_id,
+                        "--title",
+                        "native smoke watch",
+                        "--description",
+                        "credential-free native command smoke",
+                        "--type",
+                        "task",
+                        "--metadata",
+                        json.dumps(native_watch_metadata),
+                        "--silent",
+                        "--json",
+                    ],
+                    cwd=rig,
+                    env=env | {"CI": "1"},
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                self.assertEqual(native_watch.returncode, 0, native_watch.stderr)
                 (city / "city.toml").write_bytes(
                     city_before[str(CITY_RELATIVE / "city.toml")]
                 )
                 run_gc("config", "show", "--city", str(city))
+
+                original_city_toml = (city / "city.toml").read_bytes()
+                city_text = original_city_toml.decode("utf-8")
+                # Gas City v1.4.1 exposes Pack CLI commands from city imports;
+                # keep the production rig imports intact while exercising the
+                # local command against the temporary rig store.
+                city_text = city_text.replace(
+                    "\n[[rigs]]",
+                    "\n\n[imports.pr-babysit]\n"
+                    'source = "../../packs/pr-babysit"\n'
+                    "transitive = false\n\n[[rigs]]",
+                    1,
+                )
+                (city / "city.toml").write_text(
+                    city_text,
+                    encoding="utf-8",
+                )
+                env["GC_RIG_ROOT"] = str(rig)
+                env["PR_BABYSIT_BEADS_BIN"] = bd_bin
+                try:
+                    native_show = run_gc(
+                        "pr-babysit",
+                        "pr-babysit",
+                        "show",
+                        "--rig",
+                        "d2b",
+                        "--watch-id",
+                        native_watch_id,
+                        "--json",
+                    )
+                    native_show_payload = json.loads(native_show.stdout)
+                    self.assertTrue(native_show_payload["ok"])
+                    self.assertEqual(native_show_payload["action"], "show")
+                    self.assertEqual(
+                        native_show_payload["watch_id"],
+                        native_watch_id,
+                    )
+                    self.assertEqual(
+                        native_show_payload["metadata"]["record_kind"],
+                        "watch",
+                    )
+                    self.assertEqual(
+                        native_show_payload["metadata"]["state"],
+                        "watching",
+                    )
+                finally:
+                    (city / "city.toml").write_bytes(original_city_toml)
 
                 def show_formula(name: str, *extra: str) -> dict:
                     result = run_gc(
@@ -1942,6 +2075,80 @@ class RootPortableCityTests(unittest.TestCase):
                     ]
                     self.assertEqual(len(matches), 1, suffix)
                     return matches[0]
+
+                for rig_name in ("d2b", "city-source"):
+                    formula = show_formula(
+                        "mol-pr-babysit-repair",
+                        "--rig",
+                        rig_name,
+                    )
+                    self.assertTrue(
+                        {
+                            "prepare-worktree",
+                            "repair",
+                            "review",
+                            "validate-and-report",
+                            "close-action",
+                        }
+                        <= {
+                            step["id"].rsplit(".", 1)[-1]
+                            for step in formula["steps"]
+                        }
+                    )
+                    self.assertEqual(
+                        {
+                            (dep["step_id"], dep["depends_on_id"])
+                            for dep in formula["deps"]
+                            if dep["step_id"].startswith(
+                                "mol-pr-babysit-repair."
+                            )
+                            and dep["depends_on_id"].startswith(
+                                "mol-pr-babysit-repair."
+                            )
+                        },
+                        {
+                            (
+                                "mol-pr-babysit-repair.repair",
+                                "mol-pr-babysit-repair.prepare-worktree",
+                            ),
+                            (
+                                "mol-pr-babysit-repair.review",
+                                "mol-pr-babysit-repair.repair",
+                            ),
+                            (
+                                "mol-pr-babysit-repair.validate-and-report",
+                                "mol-pr-babysit-repair.repair",
+                            ),
+                            (
+                                "mol-pr-babysit-repair.validate-and-report",
+                                "mol-pr-babysit-repair.review",
+                            ),
+                            (
+                                "mol-pr-babysit-repair.close-action",
+                                "mol-pr-babysit-repair.validate-and-report",
+                            ),
+                            (
+                                "mol-pr-babysit-repair.workflow-finalize",
+                                "mol-pr-babysit-repair.close-action",
+                            ),
+                        },
+                    )
+                    order_result = run_gc(
+                        "order",
+                        "show",
+                        "pr-babysit-sweep",
+                        "--rig",
+                        rig_name,
+                        "--json",
+                    )
+                    order_payload = json.loads(order_result.stdout)
+                    order_text = json.dumps(order_payload, sort_keys=True)
+                    self.assertIn("cooldown", order_text)
+                    self.assertIn('"1m"', order_text)
+                    self.assertIn(
+                        "$PACK_DIR/assets/scripts/pr-babysit-sweep.sh",
+                        order_text,
+                    )
 
                 d2b_formula = show_formula("mol-d2b-discord-fix-issue")
                 d2b_steps = {
@@ -2459,9 +2666,7 @@ class VendoredPrBabysitTests(unittest.TestCase):
 
     def test_pr_snapshot_keeps_review_text_as_data(self) -> None:
         script = PR_BABYSIT_SKILL_ROOT / "scripts" / "pr-snapshot"
-        root = ROOT / ".u1-pr-babysit-test"
-        shutil.rmtree(root, ignore_errors=True)
-        root.mkdir()
+        root = _temporary_root("pr-snapshot-review-data-")
         try:
             marker = root / "review-command-ran"
             planted = f"$(touch {marker})"
@@ -2629,9 +2834,7 @@ class VendoredPrBabysitTests(unittest.TestCase):
         )
         for identity, base in cases:
             with self.subTest(identity=identity):
-                root = ROOT / ".scratch" / f"snapshot-base-{identity}"
-                shutil.rmtree(root, ignore_errors=True)
-                root.mkdir(parents=True)
+                root = _temporary_root(f"snapshot-base-{identity}-")
                 try:
                     result, _ = self._snapshot_fixture(root, base=base)
                     self.assertEqual(result.returncode, 0, result.stderr)
@@ -2668,9 +2871,7 @@ class VendoredPrBabysitTests(unittest.TestCase):
         )
         for identity, base, succeeds in cases:
             with self.subTest(identity=identity):
-                root = ROOT / ".scratch" / f"snapshot-live-base-{identity}"
-                shutil.rmtree(root, ignore_errors=True)
-                root.mkdir(parents=True)
+                root = _temporary_root(f"snapshot-live-base-{identity}-")
                 try:
                     result, calls = self._run_live_snapshot(
                         root,
@@ -2699,9 +2900,7 @@ class VendoredPrBabysitTests(unittest.TestCase):
                     shutil.rmtree(root, ignore_errors=True)
 
     def test_pr_snapshot_wake_payload_is_the_stable_watch_id(self):
-        root = ROOT / ".scratch" / "snapshot-wake"
-        shutil.rmtree(root, ignore_errors=True)
-        root.mkdir(parents=True)
+        root = _temporary_root("snapshot-wake-")
         try:
             result, gc_dir = self._snapshot_fixture(
                 root,
@@ -2881,9 +3080,7 @@ else:
         return result, json.loads(calls_path.read_text(encoding="utf-8"))
 
     def test_pr_snapshot_fetches_paginated_inline_threads_as_data(self):
-        root = ROOT / ".scratch" / "snapshot-graphql"
-        shutil.rmtree(root, ignore_errors=True)
-        root.mkdir(parents=True)
+        root = _temporary_root("snapshot-graphql-")
         marker = root / "review-command-ran"
         planted = f"$(touch {marker})"
         page_one = {
@@ -3040,9 +3237,7 @@ else:
             shutil.rmtree(root, ignore_errors=True)
 
     def test_pr_snapshot_surfaces_fork_identity_without_mapping_head(self):
-        root = ROOT / ".scratch" / "snapshot-fork"
-        shutil.rmtree(root, ignore_errors=True)
-        root.mkdir(parents=True)
+        root = _temporary_root("snapshot-fork-")
         try:
             result, _ = self._run_live_snapshot(
                 root,
@@ -3095,9 +3290,7 @@ else:
             shutil.rmtree(root, ignore_errors=True)
 
     def test_pr_snapshot_github_timeout_fails_closed(self):
-        root = ROOT / ".scratch" / "snapshot-timeout"
-        shutil.rmtree(root, ignore_errors=True)
-        root.mkdir(parents=True)
+        root = _temporary_root("snapshot-timeout-")
         try:
             result, _ = self._run_live_snapshot(
                 root,
@@ -3110,10 +3303,208 @@ else:
         finally:
             shutil.rmtree(root, ignore_errors=True)
 
+    def test_u5_decision_contract_uses_normalized_snapshot_fields(self):
+        skill = (
+            PR_BABYSIT_SKILL_ROOT / "SKILL.md"
+        ).read_text(encoding="utf-8")
+        tick = (
+            PR_BABYSIT_SKILL_ROOT / "references" / "tick.md"
+        ).read_text(encoding="utf-8")
+        branch_currency = (
+            PR_BABYSIT_SKILL_ROOT / "references" / "branch-currency.md"
+        ).read_text(encoding="utf-8")
+        self.assertLess(
+            tick.index("Review feedback."),
+            tick.index("Current-head CI."),
+        )
+        self.assertIn(
+            "Running checks are waiting evidence, not repair work.",
+            tick,
+        )
+        self.assertIn("`BEHIND` is a human blocker", branch_currency)
+        self.assertIn("`DIRTY` and `CONFLICTING`", branch_currency)
+        self.assertIn("feedback before CI", skill)
+
+        def decision(snapshot: dict[str, object]) -> str:
+            actionable = snapshot["actionable"]
+            if (
+                actionable["threads"]
+                or actionable["comments"]
+            ):
+                return "feedback"
+            if actionable["ci"]:
+                return "ci"
+            if snapshot["branch_currency"] is not None:
+                return "blocked"
+            if (
+                snapshot["review_in_progress"]
+                or not snapshot["checks_terminal"]
+            ):
+                return "waiting"
+            return "merge-ready"
+
+        cases = (
+            (
+                "in-progress-check",
+                {
+                    "checks": [
+                        {
+                            "key": "required-ci",
+                            "name": "required-ci",
+                            "status": "IN_PROGRESS",
+                            "conclusion": None,
+                        }
+                    ]
+                },
+                "waiting",
+            ),
+            (
+                "feedback-before-ci",
+                {
+                    "checks": [
+                        {
+                            "key": "required-ci",
+                            "name": "required-ci",
+                            "status": "COMPLETED",
+                            "conclusion": "FAILURE",
+                        }
+                    ],
+                    "feedback": None,
+                    "reviews": [
+                        {
+                            "id": "review-1",
+                            "body": "please fix the assertion",
+                        }
+                    ],
+                },
+                "feedback",
+            ),
+            (
+                "behind",
+                {
+                    "merge_state_status": "BEHIND",
+                    "branch_currency": {
+                        "status": "BEHIND",
+                        "route": "normal-base",
+                        "head_sha": "a" * 40,
+                        "base_oid": "b" * 40,
+                        "expected_head_sha": "a" * 40,
+                        "host_branch_update_capability": True,
+                    },
+                },
+                "blocked",
+            ),
+            (
+                "dirty",
+                {
+                    "merge_state_status": "DIRTY",
+                    "branch_currency": {
+                        "status": "DIRTY",
+                        "route": "normal-base",
+                        "head_sha": "a" * 40,
+                        "base_oid": "b" * 40,
+                        "expected_head_sha": "a" * 40,
+                        "host_branch_update_capability": False,
+                    },
+                },
+                "blocked",
+            ),
+            (
+                "conflicting",
+                {
+                    "merge_state_status": "CONFLICTING",
+                    "branch_currency": {
+                        "status": "CONFLICTING",
+                        "route": "normal-base",
+                        "head_sha": "a" * 40,
+                        "base_oid": "b" * 40,
+                        "expected_head_sha": "a" * 40,
+                        "host_branch_update_capability": False,
+                    },
+                },
+                "blocked",
+            ),
+        )
+        for name, extra, expected in cases:
+            with self.subTest(name=name):
+                root = _temporary_root(f"u5-decision-{name}-")
+                try:
+                    result, _ = self._snapshot_fixture(
+                        root,
+                        base={
+                            "ref": "main",
+                            "oid": "b" * 40,
+                            "current_oid": "b" * 40,
+                        },
+                        extra=extra,
+                    )
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    snapshot = json.loads(result.stdout)
+                    self.assertEqual(decision(snapshot), expected)
+                    if name == "in-progress-check":
+                        self.assertFalse(snapshot["checks_terminal"])
+                        self.assertFalse(snapshot["all_checks_ok"])
+                        self.assertEqual(snapshot["actionable"]["ci"], [])
+                    elif name == "feedback-before-ci":
+                        self.assertEqual(snapshot["counts"]["comments"], 1)
+                        self.assertEqual(snapshot["counts"]["ci"], 1)
+                        self.assertEqual(
+                            snapshot["feedback"][0]["kind"],
+                            "review",
+                        )
+                        self.assertEqual(
+                            snapshot["actionable"]["ci"][0]["head_sha"],
+                            snapshot["head_sha"],
+                        )
+                    else:
+                        self.assertEqual(
+                            snapshot["branch_currency"]["status"],
+                            name.upper(),
+                        )
+                        self.assertEqual(
+                            snapshot["branch_currency"]["attention"],
+                            "decide",
+                        )
+                        self.assertIsNotNone(
+                            snapshot["branch_currency_blocker"]
+                        )
+                finally:
+                    shutil.rmtree(root, ignore_errors=True)
+
+        marker_root = _temporary_root("u5-decision-command-data-")
+        try:
+            marker = marker_root / "review-command-ran"
+            planted = f"$(touch {marker})"
+            result, _ = self._snapshot_fixture(
+                marker_root,
+                base={
+                    "ref": "main",
+                    "oid": "b" * 40,
+                    "current_oid": "b" * 40,
+                },
+                extra={
+                    "checks": [
+                        {
+                            "key": "required-ci",
+                            "name": "required-ci",
+                            "status": "COMPLETED",
+                            "conclusion": "FAILURE",
+                        }
+                    ],
+                    "feedback": None,
+                    "reviews": [{"id": "review-1", "body": planted}],
+                },
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            snapshot = json.loads(result.stdout)
+            self.assertEqual(decision(snapshot), "feedback")
+            self.assertEqual(snapshot["feedback"][0]["body"], planted)
+            self.assertFalse(marker.exists())
+        finally:
+            shutil.rmtree(marker_root, ignore_errors=True)
+
     def test_pr_snapshot_rejects_symlinked_watch_state_path(self):
-        root = ROOT / ".scratch" / "snapshot-symlink"
-        shutil.rmtree(root, ignore_errors=True)
-        root.mkdir(parents=True)
+        root = _temporary_root("snapshot-symlink-")
         try:
             gc_dir = root / "gc"
             gc_dir.mkdir()
@@ -3351,9 +3742,7 @@ else:
 
     def test_pr_babysit_projection_is_idempotent_and_fail_closed(self) -> None:
         script = PR_BABYSIT_ROOT / "assets" / "scripts" / "project-copilot-skill.sh"
-        root = ROOT / ".u2-pr-babysit-test"
-        shutil.rmtree(root, ignore_errors=True)
-        root.mkdir()
+        root = _temporary_root("pr-babysit-projection-")
 
         def tree_bytes(path: pathlib.Path) -> dict[str, bytes]:
             return {
@@ -3565,13 +3954,67 @@ command = argv[command_index]
 args = argv[command_index + 1:]
 
 
+KNOWN_FLAGS = {
+    "create": {"--id", "--title", "--description", "--type", "--metadata", "--silent", "--json"},
+    "show": {"--json"},
+    "update": {"--claim", "--status", "--assignee", "--parent", "--set-metadata", "--json"},
+    "close": {"--reason", "--json"},
+    "list": {"--all", "--status", "--limit", "--sort", "--metadata-field", "--json"},
+    "dep": {"--blocks", "--json"},
+}
+VALUE_FLAGS = {
+    "--id",
+    "--title",
+    "--description",
+    "--type",
+    "--metadata",
+    "--status",
+    "--assignee",
+    "--parent",
+    "--set-metadata",
+    "--reason",
+    "--limit",
+    "--sort",
+    "--metadata-field",
+    "--blocks",
+}
+values = {}
+positionals = []
+index = 0
+while index < len(args):
+    item = args[index]
+    if not item.startswith("--"):
+        positionals.append(item)
+        index += 1
+        continue
+    flag, separator, inline_value = item.partition("=")
+    if flag not in KNOWN_FLAGS[command]:
+        print("Error: unknown flag: " + flag, file=sys.stderr)
+        raise SystemExit(2)
+    if flag in VALUE_FLAGS:
+        if separator:
+            value = inline_value
+        elif index + 1 < len(args) and not args[index + 1].startswith("--"):
+            value = args[index + 1]
+            index += 1
+        else:
+            print("Error: flag needs an argument: " + flag, file=sys.stderr)
+            raise SystemExit(2)
+        if flag in {"--set-metadata", "--metadata-field"}:
+            values.setdefault(flag, []).append(value)
+        else:
+            values[flag] = value
+    else:
+        values[flag] = True
+    index += 1
+
+
 def value(flag, default=""):
-    for index, item in enumerate(args):
-        if item == flag and index + 1 < len(args):
-            return args[index + 1]
-        if item.startswith(flag + "="):
-            return item.split("=", 1)[1]
-    return default
+    return values.get(flag, default)
+
+
+def positional(index=0, default=""):
+    return positionals[index] if index < len(positionals) else default
 
 
 def fail_once(kind):
@@ -3585,21 +4028,18 @@ def fail_once(kind):
     raise SystemExit(1)
 
 
-if command == "create" and value("--id").find("-action-") >= 0:
+if command == "create" and "-action-" in value("--id"):
     fail_once("action-create")
 if command == "dep":
     fail_once("dependency")
-if command == "close" and args and "-action-" in args[0]:
+if command == "close" and "-action-" in positional():
     fail_once("close-action")
 if command == "update":
-    update_id = next((item for item in args if not item.startswith("-")), "")
+    update_id = positional()
     metadata_values = {
-        args[index + 1].split("=", 1)[0]:
-        args[index + 1].split("=", 1)[1]
-        for index, item in enumerate(args)
-        if item == "--set-metadata"
-        and index + 1 < len(args)
-        and "=" in args[index + 1]
+        item.split("=", 1)[0]: item.split("=", 1)[1]
+        for item in values.get("--set-metadata", [])
+        if "=" in item
     }
     if metadata_values.get("state") == "repairing":
         fail_once("watch-repairing")
@@ -3624,7 +4064,7 @@ if command == "create":
     if existing is not None:
         existing["title"] = value(
             "--title",
-            args[0] if args and not args[0].startswith("-") else "",
+            positional(),
         )
         existing["description"] = value("--description")
         existing["metadata"] = metadata
@@ -3633,11 +4073,12 @@ if command == "create":
         raise SystemExit(0)
     record = {
         "id": issue_id,
-        "title": value("--title", args[0] if args and not args[0].startswith("-") else ""),
+        "title": value("--title", positional()),
         "description": value("--description"),
         "status": "open",
         "assignee": "",
         "metadata": metadata,
+        "issue_type": value("--type", "task"),
     }
     records.append(record)
     save(state_path, records)
@@ -3646,19 +4087,31 @@ if command == "create":
 
 
 if command == "show":
-    issue_id = next((item for item in args if not item.startswith("-")), "")
+    issue_id = positional()
     record = record_for(issue_id)
     if record is None:
         print("not found", file=sys.stderr)
         raise SystemExit(1)
-    print(json.dumps([record], sort_keys=True))
+    shown = dict(record)
+    dependencies = []
+    for dependency_id in record.get("blocked_by", []):
+        dependency = record_for(dependency_id)
+        if dependency is not None:
+            dependencies.append(
+                dict(dependency, dependency_type="blocks")
+            )
+    if dependencies:
+        shown["dependencies"] = dependencies
+    shown["dependency_count"] = len(dependencies)
+    shown["dependent_count"] = 0
+    print(json.dumps([shown], sort_keys=True))
     raise SystemExit(0)
 
 
 if command == "list":
     listed = records
     if "--all" not in args:
-        statuses = {value("--status")} if "--status" in args else {
+        statuses = {value("--status")} if "--status" in values else {
             "open",
             "in_progress",
             "blocked",
@@ -3669,12 +4122,7 @@ if command == "list":
             for record in listed
             if record.get("status") in statuses
         ]
-    metadata_fields = [
-        args[index + 1]
-        for index, item in enumerate(args)
-        if item == "--metadata-field" and index + 1 < len(args)
-    ]
-    for field in metadata_fields:
+    for field in values.get("--metadata-field", []):
         key, separator, expected = field.partition("=")
         if separator:
             listed = [
@@ -3696,7 +4144,7 @@ if command == "list":
 
 
 if command == "dep":
-    blocker = args[0] if args and not args[0].startswith("-") else ""
+    blocker = positional()
     blocked = value("--blocks")
     blocker_record = record_for(blocker)
     blocked_record = record_for(blocked)
@@ -3707,18 +4155,29 @@ if command == "dep":
     dependencies.add(blocker)
     blocked_record["blocked_by"] = sorted(dependencies)
     save(state_path, records)
-    print(json.dumps({"ok": True, "blocker": blocker, "blocked": blocked}))
+    print(
+        json.dumps(
+            {
+                "blocked_id": blocked,
+                "blocker_id": blocker,
+                "schema_version": 1,
+                "status": "added",
+                "type": "blocks",
+            },
+            sort_keys=True,
+        )
+    )
     raise SystemExit(0)
 
 
 if command == "update":
-    issue_id = next((item for item in args if not item.startswith("-")), "")
+    issue_id = positional()
     record = record_for(issue_id)
     if record is None:
         print("not found", file=sys.stderr)
         raise SystemExit(1)
     actor = os.environ.get("BEADS_ACTOR", "fake")
-    if "--claim" in args:
+    if "--claim" in values:
         if record["assignee"] and record["assignee"] != actor:
             print("issue already claimed by " + record["assignee"], file=sys.stderr)
             raise SystemExit(1)
@@ -3727,46 +4186,53 @@ if command == "update":
             raise SystemExit(1)
         record["assignee"] = actor
         record["status"] = "in_progress"
-    if "--status" in args or any(item.startswith("--status=") for item in args):
+    if "--status" in values:
         record["status"] = value("--status")
-    if "--assignee" in args or any(item.startswith("--assignee=") for item in args):
+    if "--assignee" in values:
         record["assignee"] = value("--assignee")
-    if "--parent" in args or any(item.startswith("--parent=") for item in args):
+    if "--parent" in values:
         record["parent"] = value("--parent")
     metadata = dict(record.get("metadata") or {})
-    index = 0
-    while index < len(args):
-        if args[index] == "--set-metadata" and index + 1 < len(args):
-            item = args[index + 1]
-            key, separator, item_value = item.partition("=")
-            if separator:
-                metadata[key] = item_value
-            index += 2
-            continue
-        index += 1
+    for item in values.get("--set-metadata", []):
+        key, separator, item_value = item.partition("=")
+        if separator:
+            metadata[key] = item_value
     record["metadata"] = metadata
     save(state_path, records)
-    print(json.dumps(record, sort_keys=True))
+    print(json.dumps([record], sort_keys=True))
     raise SystemExit(0)
 
 
 if command == "close":
-    issue_id = next((item for item in args if not item.startswith("-")), "")
+    issue_id = positional()
     record = record_for(issue_id)
     if record is None:
         print("not found", file=sys.stderr)
         raise SystemExit(1)
+    blockers = [
+        dependency_id
+        for dependency_id in record.get("blocked_by", [])
+        if (
+            record_for(dependency_id) is not None
+            and record_for(dependency_id).get("status") != "closed"
+        )
+    ]
+    if blockers:
+        print(
+            f"cannot close {issue_id}: blocked by open issues "
+            f"[{', '.join(blockers)}] (use --force to override)",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
     record["status"] = "closed"
     record["assignee"] = ""
     save(state_path, records)
-    print(json.dumps(record, sort_keys=True))
+    print(json.dumps([record], sort_keys=True))
     raise SystemExit(0)
 """
 
     def _fixture(self, name: str) -> tuple[pathlib.Path, dict[str, str]]:
-        root = ROOT / ".scratch" / f"u3-state-{name}"
-        shutil.rmtree(root, ignore_errors=True)
-        root.mkdir(parents=True)
+        root = _temporary_root(f"u3-state-{name}-")
         fake = root / "fake-beads"
         fake.write_text(self._fake_beads_script(), encoding="utf-8")
         fake.chmod(0o755)
@@ -4144,6 +4610,182 @@ if command == "close":
         finally:
             shutil.rmtree(root, ignore_errors=True)
 
+    def test_fake_beads_matches_real_contract_and_rejects_unknown_flags(self):
+        root, env = self._fixture("beads-contract")
+        fake = pathlib.Path(env["PR_BABYSIT_BEADS_BIN"])
+
+        def run(*args: str) -> subprocess.CompletedProcess[str]:
+            return subprocess.run(
+                [str(fake), *args],
+                cwd=root,
+                env=os.environ | env | {"BEADS_ACTOR": "contract-test"},
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+        try:
+            created = run(
+                "create",
+                "--id",
+                "d2b-watch",
+                "--title",
+                "watch",
+                "--description",
+                "watch description",
+                "--type",
+                "task",
+                "--metadata",
+                '{"record_kind":"watch","state":"watching"}',
+                "--silent",
+                "--json",
+            )
+            self.assertEqual(created.returncode, 0, created.stderr)
+            self.assertIsInstance(json.loads(created.stdout), dict)
+
+            overwritten = run(
+                "create",
+                "--id",
+                "d2b-watch",
+                "--title",
+                "overwritten",
+                "--description",
+                "new description",
+                "--type",
+                "task",
+                "--metadata",
+                '{"record_kind":"watch","state":"waiting"}',
+                "--silent",
+                "--json",
+            )
+            self.assertEqual(overwritten.returncode, 0, overwritten.stderr)
+            self.assertEqual(
+                json.loads(overwritten.stdout)["title"],
+                "overwritten",
+            )
+
+            shown = run("show", "d2b-watch", "--json")
+            self.assertEqual(shown.returncode, 0, shown.stderr)
+            shown_payload = json.loads(shown.stdout)
+            self.assertIsInstance(shown_payload, list)
+            self.assertEqual(shown_payload[0]["title"], "overwritten")
+
+            updated = run(
+                "update",
+                "d2b-watch",
+                "--claim",
+                "--set-metadata",
+                "state=repairing",
+                "--json",
+            )
+            self.assertEqual(updated.returncode, 0, updated.stderr)
+            updated_payload = json.loads(updated.stdout)
+            self.assertIsInstance(updated_payload, list)
+            self.assertEqual(updated_payload[0]["status"], "in_progress")
+            self.assertEqual(
+                updated_payload[0]["metadata"]["state"],
+                "repairing",
+            )
+
+            action = run(
+                "create",
+                "--id",
+                "d2b-action",
+                "--title",
+                "action",
+                "--description",
+                "action description",
+                "--type",
+                "task",
+                "--metadata",
+                '{"record_kind":"action","state":"open"}',
+                "--silent",
+                "--json",
+            )
+            self.assertEqual(action.returncode, 0, action.stderr)
+            dependency = run(
+                "dep",
+                "d2b-action",
+                "--blocks",
+                "d2b-watch",
+                "--json",
+            )
+            self.assertEqual(dependency.returncode, 0, dependency.stderr)
+            self.assertEqual(
+                json.loads(dependency.stdout),
+                {
+                    "blocked_id": "d2b-watch",
+                    "blocker_id": "d2b-action",
+                    "schema_version": 1,
+                    "status": "added",
+                    "type": "blocks",
+                },
+            )
+
+            listed = run(
+                "list",
+                "--all",
+                "--metadata-field",
+                "state=repairing",
+                "--json",
+            )
+            self.assertEqual(listed.returncode, 0, listed.stderr)
+            listed_payload = json.loads(listed.stdout)
+            self.assertIsInstance(listed_payload, list)
+            self.assertEqual([item["id"] for item in listed_payload], ["d2b-watch"])
+
+            blocked_close = run(
+                "close",
+                "d2b-watch",
+                "--reason",
+                "blocked",
+                "--json",
+            )
+            self.assertNotEqual(blocked_close.returncode, 0)
+            self.assertIn("blocked by open issues", blocked_close.stderr)
+
+            close_action = run(
+                "close",
+                "d2b-action",
+                "--reason",
+                "done",
+                "--json",
+            )
+            self.assertEqual(close_action.returncode, 0, close_action.stderr)
+            self.assertIsInstance(json.loads(close_action.stdout), list)
+            close_watch = run(
+                "close",
+                "d2b-watch",
+                "--reason",
+                "done",
+                "--json",
+            )
+            self.assertEqual(close_watch.returncode, 0, close_watch.stderr)
+            self.assertIsInstance(json.loads(close_watch.stdout), list)
+
+            unknown_commands = (
+                (
+                    "create",
+                    "--id",
+                    "d2b-unknown",
+                    "--title",
+                    "unknown",
+                    "--unknown",
+                    "flag",
+                ),
+                ("show", "d2b-watch", "--unknown"),
+                ("update", "d2b-watch", "--unknown", "flag"),
+                ("list", "--unknown"),
+                ("dep", "d2b-action", "--blocks", "d2b-watch", "--unknown"),
+                ("close", "d2b-action", "--unknown"),
+            )
+            for command in unknown_commands:
+                result = run(*command)
+                self.assertNotEqual(result.returncode, 0, command)
+                self.assertIn("unknown flag", result.stderr.lower(), command)
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
+
     def test_lock_override_rejects_relative_symlink_and_non_directory(
         self,
     ) -> None:
@@ -4183,13 +4825,22 @@ if command == "close":
             finally:
                 shutil.rmtree(root, ignore_errors=True)
 
-    def test_optional_real_bd_handoff_smoke(self) -> None:
+    def test_optional_real_bd_contract(self) -> None:
         bd = shutil.which("bd")
         if bd is None:
             self.skipTest("bd unavailable")
-        root = ROOT / ".scratch" / "u3-real-bd"
-        shutil.rmtree(root, ignore_errors=True)
-        root.mkdir(parents=True)
+        version = subprocess.run(
+            [bd, "--version"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(version.returncode, 0, version.stderr)
+        self.assertRegex(
+            version.stdout,
+            rf"^bd version {re.escape(BEADS_VERSION)} \(",
+        )
+        root = _temporary_root("u3-real-bd-")
         try:
             self.assertEqual(
                 subprocess.run(
@@ -4224,28 +4875,143 @@ if command == "close":
                 check=False,
             )
             self.assertEqual(initialized.returncode, 0, initialized.stderr)
-            env = {
-                "PR_BABYSIT_BEADS_BIN": bd,
-                "PR_BABYSIT_BEADS_CWD": str(root),
-                "GC_RIG_ROOT": str(root),
-                "PR_BABYSIT_ALLOWED_HOSTS": "github.com",
-            }
-            first = self._run(env, "handoff", self._HANDOFF)
-            second = self._run(env, "handoff", self._HANDOFF)
-            self.assertEqual(first.returncode, 0, first.stderr)
-            self.assertEqual(second.returncode, 0, second.stderr)
-            self.assertTrue(self._json(first)["created"])
-            self.assertTrue(self._json(second)["reused"])
-            listed = subprocess.run(
-                [bd, "list", "--all", "--json"],
-                cwd=root,
-                env=os.environ | {"CI": "1"},
-                capture_output=True,
-                text=True,
-                check=False,
+
+            def run_bd(*args: str) -> subprocess.CompletedProcess[str]:
+                return subprocess.run(
+                    [bd, *args],
+                    cwd=root,
+                    env=os.environ
+                    | {
+                        "CI": "1",
+                        "BEADS_ACTOR": "contract-test",
+                    },
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+
+            def run_json(*args: str) -> object:
+                result = run_bd(*args, "--json")
+                self.assertEqual(result.returncode, 0, result.stderr)
+                return json.loads(result.stdout)
+
+            created = run_json(
+                "create",
+                "--id",
+                "d2b-watch",
+                "--title",
+                "watch",
+                "--description",
+                "watch description",
+                "--type",
+                "task",
+                "--metadata",
+                '{"record_kind":"watch","state":"watching"}',
+                "--silent",
             )
-            self.assertEqual(listed.returncode, 0, listed.stderr)
-            self.assertEqual(len(json.loads(listed.stdout)), 1)
+            self.assertEqual(created["id"], "d2b-watch")
+            overwritten = run_json(
+                "create",
+                "--id",
+                "d2b-watch",
+                "--title",
+                "overwritten",
+                "--description",
+                "new description",
+                "--type",
+                "task",
+                "--metadata",
+                '{"record_kind":"watch","state":"waiting"}',
+                "--silent",
+            )
+            self.assertEqual(overwritten["title"], "overwritten")
+            shown = run_json("show", "d2b-watch")
+            self.assertEqual(shown[0]["title"], "overwritten")
+
+            updated = run_json(
+                "update",
+                "d2b-watch",
+                "--claim",
+                "--set-metadata",
+                "state=repairing",
+                "--set-metadata",
+                "attempts=1",
+            )
+            self.assertEqual(updated[0]["status"], "in_progress")
+            self.assertEqual(updated[0]["assignee"], "contract-test")
+            self.assertEqual(updated[0]["metadata"]["state"], "repairing")
+            self.assertEqual(updated[0]["metadata"]["attempts"], 1)
+
+            run_json(
+                "create",
+                "--id",
+                "d2b-action",
+                "--title",
+                "action",
+                "--description",
+                "action description",
+                "--type",
+                "task",
+                "--metadata",
+                '{"record_kind":"action","state":"open"}',
+                "--silent",
+            )
+            dependency = run_json(
+                "dep",
+                "d2b-action",
+                "--blocks",
+                "d2b-watch",
+            )
+            self.assertEqual(
+                dependency,
+                {
+                    "blocked_id": "d2b-watch",
+                    "blocker_id": "d2b-action",
+                    "schema_version": 1,
+                    "status": "added",
+                    "type": "blocks",
+                },
+            )
+            listed = run_json(
+                "list",
+                "--all",
+                "--metadata-field",
+                "state=repairing",
+            )
+            self.assertEqual([item["id"] for item in listed], ["d2b-watch"])
+
+            blocked_close = run_bd(
+                "close",
+                "d2b-watch",
+                "--reason",
+                "blocked",
+                "--json",
+            )
+            self.assertNotEqual(blocked_close.returncode, 0)
+            self.assertIn("blocked by open issues", blocked_close.stderr)
+            self.assertEqual(run_json("close", "d2b-action")[0]["status"], "closed")
+            self.assertEqual(run_json("close", "d2b-watch")[0]["status"], "closed")
+
+            unknown_commands = (
+                (
+                    "create",
+                    "--id",
+                    "d2b-unknown",
+                    "--title",
+                    "unknown",
+                    "--unknown",
+                    "flag",
+                ),
+                ("show", "d2b-watch", "--unknown"),
+                ("update", "d2b-watch", "--unknown", "flag"),
+                ("list", "--unknown"),
+                ("dep", "d2b-action", "--blocks", "d2b-watch", "--unknown"),
+                ("close", "d2b-action", "--unknown"),
+            )
+            for command in unknown_commands:
+                result = run_bd(*command)
+                self.assertNotEqual(result.returncode, 0, command)
+                self.assertIn("unknown flag", result.stderr.lower(), command)
         finally:
             shutil.rmtree(root, ignore_errors=True)
 
@@ -4783,9 +5549,7 @@ class PrBabysitCheckpointTests(unittest.TestCase):
     _HANDOFF = dict(PrBabysitStateTests._HANDOFF)
 
     def _fixture(self, name: str) -> tuple[pathlib.Path, dict[str, str]]:
-        root = ROOT / ".scratch" / f"u5-checkpoint-{name}"
-        shutil.rmtree(root, ignore_errors=True)
-        root.mkdir(parents=True)
+        root = _temporary_root(f"u5-checkpoint-{name}-")
         fake = root / "fake-beads"
         fake.write_text(
             PrBabysitStateTests._fake_beads_script(),
@@ -5062,9 +5826,7 @@ if os.environ.get("FAKE_GC_FAIL") == "1":
 """
 
     def _fixture(self, name: str) -> tuple[pathlib.Path, dict[str, str]]:
-        root = ROOT / ".scratch" / f"u5-sweep-{name}"
-        shutil.rmtree(root, ignore_errors=True)
-        root.mkdir(parents=True)
+        root = _temporary_root(f"u5-sweep-{name}-")
         beads = root / "fake-beads"
         beads.write_text(
             PrBabysitStateTests._fake_beads_script(),
@@ -5433,9 +6195,7 @@ print(json.dumps({"ok": True}))
         publication: dict | None = None,
         github: dict | None = None,
     ) -> tuple[pathlib.Path, dict[str, str]]:
-        root = ROOT / ".scratch" / f"u4-publication-{name}"
-        shutil.rmtree(root, ignore_errors=True)
-        root.mkdir(parents=True)
+        root = _temporary_root(f"u4-publication-{name}-")
         fake_beads = root / "fake-beads"
         fake_beads.write_text(
             PrBabysitStateTests._fake_beads_script(),
@@ -6065,9 +6825,7 @@ class PrBabysitRepairTests(unittest.TestCase):
     _HANDOFF = dict(PrBabysitStateTests._HANDOFF)
 
     def _fixture(self, name: str) -> tuple[pathlib.Path, dict[str, str]]:
-        root = ROOT / ".scratch" / f"u6-repair-{name}"
-        shutil.rmtree(root, ignore_errors=True)
-        root.mkdir(parents=True)
+        root = _temporary_root(f"u6-repair-{name}-")
         fake = root / "fake-beads"
         fake.write_text(
             PrBabysitStateTests._fake_beads_script(),
@@ -6229,10 +6987,9 @@ print(json.dumps({"ok": True, "root_id": "repair-root"}))
         *,
         validator_mode: str = "ok",
         push_mode: str = "success",
+        make_check_failure: bool = False,
     ) -> tuple[pathlib.Path, dict[str, str], str, str, str]:
-        root = ROOT / ".scratch" / f"u6-validation-{name}"
-        shutil.rmtree(root, ignore_errors=True)
-        root.mkdir(parents=True)
+        root = _temporary_root(f"u6-validation-{name}-")
         repository = root / "repository"
         remote = root / "remote.git"
         worktree = (
@@ -6259,7 +7016,9 @@ print(json.dumps({"ok": True, "root_id": "repair-root"}))
         )
         (repository / ".gitignore").write_text(".gc/\n", encoding="utf-8")
         (repository / "Makefile").write_text(
-            ".PHONY: check\ncheck:\n\t@:\n",
+            ".PHONY: check\ncheck:\n\t@"
+            + ("false" if make_check_failure else ":")
+            + "\n",
             encoding="utf-8",
         )
         (repository / "tracked.txt").write_text("old\n", encoding="utf-8")
@@ -6434,6 +7193,7 @@ else:
         }[push_mode]
         git_script.write_text(
             f"""#!{shutil.which("python3")}
+import json
 import os
 import subprocess
 import sys
@@ -6444,6 +7204,7 @@ root = Path({str(root)!r})
 args = sys.argv[1:]
 if "push" in args:
     (root / "push-called").write_text("1\\n")
+    (root / "push-args.json").write_text(json.dumps(args) + "\\n")
     if {push_mode!r} != "success":
         subprocess.run(
             [
@@ -6482,7 +7243,21 @@ names = (
     "PR_BABYSIT_GITHUB_CAPABILITY_ATTESTED",
     "PR_BABYSIT_VALIDATOR_ATTESTED",
     "GIT_ASKPASS",
+    "GIT_TERMINAL_PROMPT",
+    "GIT_SSH",
     "GIT_SSH_COMMAND",
+    "GIT_SSH_VARIANT",
+    "GIT_USERNAME",
+    "GIT_PASSWORD",
+    "GIT_AUTH_TOKEN",
+    "GIT_HTTP_EXTRAHEADER",
+    "GIT_CREDENTIAL_HELPER",
+    "GIT_CONFIG_PARAMETERS",
+    "GIT_CONFIG_COUNT",
+    "GIT_CONFIG_KEY_0",
+    "GIT_CONFIG_VALUE_0",
+    "GH_ENTERPRISE_TOKEN",
+    "GITHUB_ENTERPRISE_TOKEN",
     "GIT_PUSH_OPTION_COUNT",
     "SSH_AUTH_SOCK",
 )
@@ -6543,21 +7318,378 @@ elif mode == "fail":
         return root, env, old_sha, new_sha, other_sha
 
     @staticmethod
+    def _render_workflow_script(
+        source: pathlib.Path,
+        root: pathlib.Path,
+        values: dict[str, str],
+        name: str,
+    ) -> pathlib.Path:
+        text = source.read_text(encoding="utf-8")
+        for key, value in values.items():
+            text = text.replace("{{" + key + "}}", value)
+        matches = re.findall(
+            r"```(?:bash|sh)\n(.*?)\n```",
+            text,
+            flags=re.DOTALL,
+        )
+        if len(matches) != 1:
+            raise AssertionError(
+                f"{source} must contain one fenced shell workflow"
+            )
+        script = root / name
+        script.write_text("#!/usr/bin/env bash\n" + matches[0], encoding="utf-8")
+        script.chmod(0o755)
+        return script
+
+    @staticmethod
     def _render_validate_script(
         root: pathlib.Path,
         values: dict[str, str],
     ) -> pathlib.Path:
-        text = PR_BABYSIT_REPAIR_VALIDATE.read_text(encoding="utf-8")
-        for key, value in values.items():
-            text = text.replace("{{" + key + "}}", value)
-        script = root / "validate.sh"
-        script.write_text(
-            "#!/usr/bin/env bash\n"
-            + text.split("```sh\n", 1)[1].split("\n```", 1)[0],
+        return PrBabysitRepairTests._render_workflow_script(
+            PR_BABYSIT_REPAIR_VALIDATE,
+            root,
+            values,
+            "validate.sh",
+        )
+
+    def _prepare_fixture(
+        self,
+        name: str,
+        *,
+        worktree_mode: str = "none",
+        stale_remote: bool = False,
+    ) -> tuple[pathlib.Path, dict[str, str], str, str, pathlib.Path]:
+        root = _temporary_root(f"u6-prepare-{name}-")
+        repository = root / "repository"
+        remote = root / "remote.git"
+        worktree = (
+            repository
+            / ".gc"
+            / "agents"
+            / "pr-babysitter"
+            / "worktrees"
+            / "action-1"
+        )
+        bin_dir = root / "bin"
+        bin_dir.mkdir()
+        subprocess.run(
+            ["git", "init", "-q", "-b", "v3", str(repository)],
+            check=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(repository), "config", "user.name", "Test"],
+            check=True,
+        )
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(repository),
+                "config",
+                "user.email",
+                "test@example.invalid",
+            ],
+            check=True,
+        )
+        (repository / ".gitignore").write_text(".gc/\n", encoding="utf-8")
+        (repository / "tracked.txt").write_text("old\n", encoding="utf-8")
+        subprocess.run(
+            ["git", "-C", str(repository), "add", "."],
+            check=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(repository), "commit", "-qm", "old"],
+            check=True,
+        )
+        old_sha = subprocess.check_output(
+            ["git", "-C", str(repository), "rev-parse", "HEAD"],
+            text=True,
+        ).strip()
+        subprocess.run(
+            ["git", "init", "--bare", "-q", str(remote)],
+            check=True,
+        )
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(repository),
+                "remote",
+                "add",
+                "origin",
+                str(remote),
+            ],
+            check=True,
+        )
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(repository),
+                "push",
+                "-q",
+                "origin",
+                f"HEAD:refs/heads/feature/u4",
+            ],
+            check=True,
+        )
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(repository),
+                "commit",
+                "--allow-empty",
+                "-qm",
+                "new",
+            ],
+            check=True,
+        )
+        new_sha = subprocess.check_output(
+            ["git", "-C", str(repository), "rev-parse", "HEAD"],
+            text=True,
+        ).strip()
+        if stale_remote:
+            subprocess.run(
+                [
+                    "git",
+                    "-C",
+                    str(repository),
+                    "push",
+                    "-q",
+                    "origin",
+                    "HEAD:refs/heads/stale-seed",
+                ],
+                check=True,
+            )
+        subprocess.run(
+            ["git", "-C", str(repository), "reset", "--hard", old_sha],
+            check=True,
+            stdout=subprocess.DEVNULL,
+        )
+        if stale_remote:
+            subprocess.run(
+                [
+                    "git",
+                    "--git-dir",
+                    str(remote),
+                    "update-ref",
+                    "refs/heads/feature/u4",
+                    new_sha,
+                ],
+                check=True,
+            )
+
+        metadata = {
+            "record_kind": "action",
+            "provenance_version": "pr-repair-v1",
+            "action_id": "action-1",
+            "watch_id": "d2b-watch",
+            "rig": "d2b",
+            "github_host": "github.com",
+            "owner": "octo",
+            "repository": "example",
+            "head_repository": "octo/example",
+            "pr_number": "7",
+            "url": "https://github.com/octo/example/pull/7",
+            "base_ref": "v3",
+            "head_ref": "feature/u4",
+            "head_sha": old_sha,
+            "observed_head_sha": old_sha,
+            "expected_old_head": old_sha,
+            "generation": "1",
+            "action_kind": "ci",
+            "action_fingerprint": "f" * 64,
+            "claim_status": "claimed",
+        }
+        if worktree_mode in {"clean", "dirty"}:
+            subprocess.run(
+                [
+                    "git",
+                    "-C",
+                    str(repository),
+                    "worktree",
+                    "add",
+                    "--detach",
+                    "-q",
+                    str(worktree),
+                    old_sha,
+                ],
+                check=True,
+            )
+            metadata.update(
+                {
+                    "worktree_provenance": "pr-repair-v1",
+                    "worktree_head_sha": old_sha,
+                    "worktree_head_ref": "feature/u4",
+                    "worktree_base_ref": "v3",
+                    "worktree_generation": "1",
+                    "worktree_action_id": "action-1",
+                }
+            )
+            if worktree_mode == "dirty":
+                (worktree / "tracked.txt").write_text(
+                    "dirty\n",
+                    encoding="utf-8",
+                )
+        elif worktree_mode == "collision":
+            worktree.parent.mkdir(parents=True, exist_ok=True)
+            worktree.write_text("collision\n", encoding="utf-8")
+
+        action = {
+            "id": "action-1",
+            "status": "open",
+            "assignee": "",
+            "metadata": metadata,
+        }
+        gc_script = bin_dir / "gc"
+        gc_script.write_text(
+            f"""#!{shutil.which("python3")}
+import json
+import sys
+from pathlib import Path
+
+root = Path({str(root)!r})
+calls_path = root / "gc-calls.json"
+calls = json.loads(calls_path.read_text()) if calls_path.exists() else []
+args = sys.argv[1:]
+calls.append(args)
+calls_path.write_text(json.dumps(calls, sort_keys=True) + "\\n")
+if args[:2] == ["bd", "show"]:
+    print(json.dumps([{json.dumps(action, sort_keys=True)}]))
+elif args[:2] == ["bd", "update"]:
+    print(json.dumps({{"ok": True}}))
+else:
+    print("unexpected gc command", file=sys.stderr)
+    raise SystemExit(2)
+""",
             encoding="utf-8",
         )
-        script.chmod(0o755)
-        return script
+        gc_script.chmod(0o755)
+        (root / "gc-calls.json").write_text("[]\n", encoding="utf-8")
+        values = {
+            "rig": "d2b",
+            "github_host": "github.com",
+            "owner": "octo",
+            "repository": "example",
+            "head_repository": "octo/example",
+            "url": "https://github.com/octo/example/pull/7",
+            "pr_number": "7",
+            "base_ref": "v3",
+            "head_ref": "feature/u4",
+            "observed_head_sha": old_sha,
+            "watch_id": "d2b-watch",
+            "action_id": "action-1",
+            "generation": "1",
+            "action_kind": "ci",
+            "fingerprint": "f" * 64,
+        }
+        script = self._render_workflow_script(
+            PR_BABYSIT_REPAIR_PREPARE,
+            root,
+            values,
+            "prepare.sh",
+        )
+        env = {
+            "GC_BIN": str(gc_script),
+            "GC_RIG": "d2b",
+            "GC_RIG_ROOT": str(repository),
+            "PATH": f"{bin_dir}:{os.environ['PATH']}",
+            "PR_BABYSIT_GITHUB_CAPABILITY_ATTESTED": (
+                "contents-write,pull-requests-read"
+            ),
+        }
+        return root, env, old_sha, new_sha, worktree
+
+    def test_prepare_workflow_executes_exact_head_and_rejects_reuse_failures(
+        self,
+    ):
+        root, env, old_sha, _, worktree = self._prepare_fixture("exact-head")
+        try:
+            prepared = subprocess.run(
+                [str(root / "prepare.sh")],
+                cwd=ROOT,
+                env=os.environ | env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(prepared.returncode, 0, prepared.stderr)
+            self.assertIn("prepared action-scoped worktree", prepared.stdout)
+            self.assertTrue(worktree.is_dir())
+            self.assertEqual(
+                subprocess.check_output(
+                    ["git", "-C", str(worktree), "rev-parse", "HEAD"],
+                    text=True,
+                ).strip(),
+                old_sha,
+            )
+            self.assertEqual(
+                subprocess.check_output(
+                    ["git", "-C", str(worktree), "branch", "--show-current"],
+                    text=True,
+                ).strip(),
+                "",
+            )
+            self.assertEqual(
+                subprocess.check_output(
+                    ["git", "-C", str(worktree), "status", "--porcelain"],
+                    text=True,
+                ),
+                "",
+            )
+            calls = json.loads((root / "gc-calls.json").read_text())
+            self.assertEqual(calls[0][:3], ["bd", "show", "action-1"])
+            self.assertEqual(calls[1][:3], ["bd", "update", "action-1"])
+            metadata_args = calls[1]
+            self.assertIn("worktree_provenance=pr-repair-v1", metadata_args)
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
+
+        for name, kwargs, message in (
+            (
+                "stale",
+                {"stale_remote": True},
+                "remote pull-request head changed after observation",
+            ),
+            (
+                "dirty",
+                {"worktree_mode": "dirty"},
+                "recorded action worktree is dirty",
+            ),
+            (
+                "collision",
+                {"worktree_mode": "collision"},
+                "action-scoped worktree path collision",
+            ),
+        ):
+            with self.subTest(name=name):
+                root, env, _, _, worktree = self._prepare_fixture(
+                    "failure-" + name,
+                    **kwargs,
+                )
+                try:
+                    failed = subprocess.run(
+                        [str(root / "prepare.sh")],
+                        cwd=ROOT,
+                        env=os.environ | env,
+                        capture_output=True,
+                        text=True,
+                        check=False,
+                    )
+                    self.assertNotEqual(failed.returncode, 0)
+                    self.assertIn(message, failed.stderr)
+                    calls = json.loads(
+                        (root / "gc-calls.json").read_text()
+                    )
+                    self.assertFalse(
+                        any(call[:2] == ["bd", "update"] for call in calls)
+                    )
+                    if name == "stale":
+                        self.assertFalse(worktree.exists())
+                finally:
+                    shutil.rmtree(root, ignore_errors=True)
 
     def _run_validation(
         self,
@@ -6594,7 +7726,20 @@ elif mode == "fail":
                     ),
                     "PR_BABYSIT_VALIDATOR_ATTESTED": "credential-isolated-v1",
                     "GIT_ASKPASS": "/secret/askpass",
+                    "GIT_TERMINAL_PROMPT": "1",
+                    "GIT_SSH": "/secret/ssh",
                     "GIT_SSH_COMMAND": "ssh -i /secret/key",
+                    "GIT_SSH_VARIANT": "ssh",
+                    "GIT_USERNAME": "secret-user",
+                    "GIT_PASSWORD": "secret-password",
+                    "GIT_AUTH_TOKEN": "secret-auth",
+                    "GIT_HTTP_EXTRAHEADER": "Authorization: secret",
+                    "GIT_CREDENTIAL_HELPER": "secret-helper",
+                    "GIT_CONFIG_COUNT": "1",
+                    "GIT_CONFIG_KEY_0": "credential.helper",
+                    "GIT_CONFIG_VALUE_0": "secret-helper",
+                    "GH_ENTERPRISE_TOKEN": "secret-enterprise",
+                    "GITHUB_ENTERPRISE_TOKEN": "secret-enterprise-2",
                     "GIT_PUSH_OPTION_COUNT": "1",
                     "SSH_AUTH_SOCK": "/secret/agent.sock",
                 },
@@ -6697,6 +7842,32 @@ elif mode == "fail":
         finally:
             shutil.rmtree(root, ignore_errors=True)
 
+    def test_make_check_failure_records_failed_without_push(self):
+        root, env, _, _, _ = self._validation_fixture(
+            "make-check-failure",
+            make_check_failure=True,
+        )
+        try:
+            result = self._run_validation(root, env)
+            self.assertNotEqual(result.returncode, 0, result.stderr)
+            self.assertFalse((root / "push-called").exists())
+            calls = json.loads((root / "gc-calls.json").read_text())
+            result_call = calls[-1]
+            self.assertEqual(
+                result_call[result_call.index("--validation-status") + 1],
+                "failed",
+            )
+            self.assertEqual(
+                result_call[result_call.index("--make-check-result") + 1],
+                "failed",
+            )
+            self.assertEqual(
+                result_call[result_call.index("--reason") + 1],
+                "validator-failed",
+            )
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
+
     def test_push_failure_is_classified_from_remote_observation(self):
         for mode, expected_status, expected_returncode in (
             ("new", "passed", 0),
@@ -6760,6 +7931,13 @@ elif mode == "fail":
                             other_sha,
                         )
                     self.assertTrue((root / "push-called").is_file())
+                    push_args = json.loads(
+                        (root / "push-args.json").read_text()
+                    )
+                    self.assertEqual(
+                        push_args[-3:],
+                        ["push", "origin", "HEAD:refs/heads/feature/u4"],
+                    )
                 finally:
                     shutil.rmtree(root, ignore_errors=True)
 
