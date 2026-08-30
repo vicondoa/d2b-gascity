@@ -9,6 +9,8 @@ the claim and blocks the watch until confirmation.
 identifiers; `record-review-verdict` binds an independent reviewer decision to
 the action, generation, and exact candidate head; `confirm-action` closes the
 action child after the pushed SHA and verdict are verified. Repair dispatch
+preserves confirmed review IDs until `acknowledge-dispositions` clears them
+after the next snapshot marks every matching content identity.
 requires operator-attested least-privilege GitHub
 capability and rejects coupled Copilot credentials. `check-credentials` only
 checks the operator capability and credential-isolated validator attestations

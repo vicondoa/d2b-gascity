@@ -13,8 +13,8 @@ the publication bead. Pending or route-failed receipts are not authority.
   `dispatch-repair` command when the caller's workflow supplies that repair;
 - report the exact branch-currency item emitted by the snapshot;
 - record one read-only checkpoint for the verified watch.
-- record a candidate head and passed reviewer verdict before validation or
-  push;
+- acknowledge local review dispositions after every current-snapshot mark
+  succeeds;
 
 The first version does not require pull-request write permission. A `BEHIND`
 item, dirty or conflicting state, unknown branch capability, missing authority,

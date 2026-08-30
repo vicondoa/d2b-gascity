@@ -216,7 +216,7 @@ resumes the watch only after confirmation. The `pr-babysit-sweep` cooldown
 order runs every `1m` through the canonical state-helper action:
 
 ```text
-gc core-city pr-babysit sweep --rig d2b --limit 32 --json
+gc core-city pr-babysit sweep --rig d2b --limit 4 --json
 ```
 
 It lists due records, rechecks their routability, and routes
@@ -238,10 +238,13 @@ with prepare, repair, review, validate-and-report, and close-action steps.
 The Formula workflow attaches to the durable watch bead, not the action
 child; the action child carries the claim and blocks the watch until
 confirmation.
+Formula attachment persists `false -> pending -> true`; pending attachment
+is retried through native idempotent cooking, while a cook failure blocks.
 It runs `make check` before a normal push to the existing PR head and records
 an independently recorded reviewer verdict and candidate SHA before pushing.
-CI repairs get three attempts per head and fingerprint;
-review repairs get two attempts. The active budget is eight active hours and
+CI repairs get three attempts per action kind, fingerprint, and head;
+review repairs get two attempts per action kind, fingerprint, and head. A new
+head starts a fresh counter. The active budget is eight active hours and
 the hard backstop is a three-day backstop.
 
 The first version does not use `update-branch`: the repair identity is
@@ -263,8 +266,11 @@ validator blocks repair, as do an invalid or failed validator. There is no
 direct-make fallback.
 
 The reviewer never resolves GitHub threads. After a confirmed review repair,
-the babysitter records `handled` or `ignored` feedback disposition locally
-with the current snapshot content identity; changed content reopens the item.
+the watch preserves the action kind and addressed IDs until the next fresh
+snapshot matches each current content identity. The babysitter then records
+`handled` or `ignored` locally and calls
+`acknowledge-dispositions` only after every mark succeeds; changed or missing
+content remains actionable.
 
 The non-network credential check is
 `gc core-city pr-babysit check-credentials --json` with the operator

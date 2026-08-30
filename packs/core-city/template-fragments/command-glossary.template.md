@@ -11,13 +11,18 @@ The city-scoped PR babysitter command is
 `gc core-city pr-babysit checkpoint --watch-id <watch-id>
 --expected-generation <generation> --expected-head-sha <head-sha>
 --observed-head-sha <observed-head-sha> --observed-at <RFC3339>
---next-snapshot-at <RFC3339> --to <state> --json`, and
+--next-snapshot-at <RFC3339> --to <watching|waiting|merge-ready|blocked|terminal>
+--merge-ready-evidence '<JSON>' --json`, and
 `gc core-city pr-babysit dispatch-repair --watch-id <watch-id>
 --action-kind <ci|review> --fingerprint <fingerprint>
 --generation <generation> --head-sha <head-sha>
 --addressed-thread-ids <ids> --json`. A checkpoint requires all listed
-identity and timing flags; `dispatch-repair` is the only action-scoped repair
-dispatch and requires a complete handoff receipt:
+identity and timing flags; `dispatch-repair` is the mutating action-scoped
+repair dispatch and requires a complete handoff receipt:
 `handoff_verified=true`, the self watch ID, the binding-qualified target, and
 the publication bead.
+After a confirmed review repair, use
+`gc core-city pr-babysit acknowledge-dispositions` only after every
+current-snapshot `pr-snapshot mark` succeeds. A caller does not request
+`exhausted`; budget expiry transitions to it automatically.
 {{- end }}

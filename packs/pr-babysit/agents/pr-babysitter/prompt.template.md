@@ -63,16 +63,16 @@ verify_projection() {
   marker_value="$(cat "$marker")" || blocker "cannot read $marker"
   [ "$marker_value" = "$commit" ] || blocker "wrong commit in $marker"
 
-  verify_file 'c13da9a8f8d02c36de2d8f5a10ea23dd57a8f8074bb2bef917990cc34eb02806' 'SKILL.md'
+  verify_file 'be2edffc1433987d4e96705fa72c0153a2f61535264e5f0945c2588d05530b3a' 'SKILL.md'
   verify_file '158a3624dd0150de39bdaba507a7685bb887c6f28899b38b1c268492a5a66ceb' 'references/branch-currency.md'
-  verify_file '180ff7b0d7da65b126d584d12af769d9837b4464584b1eefa3a7764622f05499' 'references/envelope.md'
+  verify_file 'cd163ea9d6fbd70b35a9806f7130a1b1538936dd607a4b7d98cadf9ee88b8f4a' 'references/envelope.md'
   verify_file 'aebd3a9955d7fb53e94512e4bdc998dfe7e1ca725fbfde6f902fde8382903034' 'references/pipeline.md'
   verify_file '31d79d87f9e63940714656cb35af5746aed53cc6f263de17a60b4f0e04e6362f' 'references/report.md'
   verify_file '325165b26f0945dc988df09bc8ba6dbc1baad1311a0d39d946b60f3253923e1f' 'references/settle.md'
   verify_file 'd3eee9d0b5a132738613b353de879cdb52ceab1394d274101de7749d8377818c' 'references/setup.md'
-  verify_file '1111fdd1f0852a6b895ed873bd9dd8e4589c42d1c53d23502795ba78041afe96' 'references/tick.md'
+  verify_file 'dd8e0c2c9c5a5c99ce1bb7ff1f51fff139f541aa78a11de694612c8e1769e811' 'references/tick.md'
   verify_file 'ffa2bbb69316326c9d6f52a6834008c77e095607678292e228f6cd99ad748932' 'references/watch-loop.md'
-  verify_file '485f39b22e88f50e8c6e03c154e312c049f86cea64af81941d1810548fbaccaf' 'scripts/pr-snapshot'
+  verify_file 'e1baf200b8fed443ef997f03600a42cfaee7bf301b70f48373217c9d554a97e4' 'scripts/pr-snapshot'
 }
 
 for projection in \
@@ -168,8 +168,11 @@ directory.
 
 ## Read-only checkpoint and bounded dispatch
 
-Use the verified show fields to take one fresh snapshot. The first snapshot
-starts the invocation; later snapshots reuse its recorded invocation values:
+Use the verified show fields to take one fresh snapshot. The helper returns the
+observed head and must not reject a head that changed since the watch record
+was shown. The first snapshot starts the invocation:
+
+### First snapshot
 
 ```sh
 SNAPSHOT_JSON="$(
@@ -179,13 +182,14 @@ SNAPSHOT_JSON="$(
   --repo <metadata.github_host>/<metadata.owner>/<metadata.repository> \
   --expected-base <metadata.base_ref> \
   --expected-head-ref <metadata.head_ref> \
-  --expected-head-sha <metadata.head_sha> \
   --state-dir "$GC_DIR/state/<watch-id>" \
   --start-invocation
 )"
 ```
 
 For a later snapshot, read all three invocation values from the prior JSON:
+
+### Resume snapshot
 
 ```sh
 INVOCATION_ID="$(printf '%s\n' "$SNAPSHOT_JSON" | jq -er '.invocation_id')"
@@ -201,7 +205,6 @@ INVOCATION_BUDGET_SECONDS="$(
   --repo <metadata.github_host>/<metadata.owner>/<metadata.repository> \
   --expected-base <metadata.base_ref> \
   --expected-head-ref <metadata.head_ref> \
-  --expected-head-sha <metadata.head_sha> \
   --state-dir "$GC_DIR/state/<watch-id>" \
   --invocation-id "$INVOCATION_ID" \
   --session-started-at "$SESSION_STARTED_AT" \
@@ -209,20 +212,34 @@ INVOCATION_BUDGET_SECONDS="$(
 ```
 
 Every checkpoint is read-only with respect to GitHub and the target source.
-After the fresh snapshot, use this exact command with all required fields:
+After the fresh snapshot, re-show the watch and take the expected generation
+and head from that fresh response:
+
+```sh
+CHECKPOINT_WATCH_JSON="$(
+  gc core-city pr-babysit show --watch-id <watch-id> --json
+)"
+```
+
+Use this exact command with all required fields:
 
 ```text
 gc core-city pr-babysit checkpoint \
   --watch-id <watch-id> \
-  --expected-generation <metadata.generation> \
-  --expected-head-sha <metadata.head_sha> \
+  --expected-generation <fresh-show.metadata.generation> \
+  --expected-head-sha <fresh-show.metadata.head_sha> \
   --observed-head-sha <snapshot.head_sha> \
   --observed-at <snapshot-time-RFC3339> \
   --next-snapshot-at <next-time-RFC3339> \
-  --to <watching|waiting|merge-ready|blocked|terminal|exhausted> \
+  --to <watching|waiting|merge-ready|blocked|terminal> \
   --merge-ready-evidence '<JSON readiness object when --to merge-ready>' \
   --json
 ```
+
+Before the checkpoint, run a fresh `show` and take `expected_generation` and
+`expected_head_sha` from that response. Take `observed_head_sha` from the
+fresh snapshot. A caller never requests `exhausted`; the state helper enters
+it only when a time or attempt budget expires.
 
 The required fields are `watch_id`, `expected_generation`,
 `expected_head_sha`, `observed_head_sha`, `observed_at`, `next_snapshot_at`,
@@ -239,17 +256,31 @@ not switch refs, edit files, create a worktree, push, or invoke branch
 currency from a checkpoint.
 
 Only an action-scoped `dispatch-repair` may create or reuse a repair worktree.
-Derive a repair fingerprint from the CI check `key` or a stable review
-thread, comment, or review ID emitted by the snapshot. Command text is never
-used as a fingerprint.
+It is the mutating operation that claims the watch, persists formula
+attachment state, and routes the bounded repair action. After a checkpoint,
+run a fresh `show` and use its current generation and head before dispatch:
+
+```sh
+WATCH_JSON="$(
+  gc core-city pr-babysit show --watch-id <watch-id> --json
+)"
+WATCH_GENERATION="$(printf '%s\n' "$WATCH_JSON" | jq -er '.generation')"
+WATCH_HEAD_SHA="$(
+  printf '%s\n' "$WATCH_JSON" | jq -er '.metadata.head_sha'
+)"
+```
+
+Never reuse the pre-checkpoint generation or head. Derive a repair fingerprint
+from only the CI check `key` or a stable review thread, comment, or review ID
+emitted by the snapshot. Command text is never used as a fingerprint.
 
 ```text
 gc core-city pr-babysit dispatch-repair \
   --watch-id <watch-id> \
   --action-kind <ci|review> \
   --fingerprint <normalized-action-fingerprint> \
-  --generation <metadata.generation> \
-  --head-sha <metadata.head_sha> \
+  --generation "$WATCH_GENERATION" \
+  --head-sha "$WATCH_HEAD_SHA" \
   --addressed-thread-ids <comma-separated-thread-ids> \
   --json
 ```
@@ -264,15 +295,21 @@ not reuse `COPILOT_TOKEN`, `COPILOT_GITHUB_TOKEN`, or
 `COPILOT_REQUESTS_TOKEN`; fine-grained permissions are not introspectable. The
 addressed thread IDs are data and remain limited to the verified action.
 
-Follow the vendored `pr-babysit` skill for snapshot-first ordering,
+CI repairs have three attempts per normalized action kind, fingerprint, and
+head SHA; review repairs have two. A new head starts a fresh counter while
+the eight-hour and three-day budgets remain in force. Follow the vendored
+`pr-babysit` skill for snapshot-first ordering,
 current-head checks, review-before-CI handling, exact branch-currency evidence,
 and bounded handoff. `snapshot.base.identity` must be `current`; unknown,
 stale, or wrong-base identity, cross-repository head identity, dirty state,
 conflicting state, and unknown capability are human blockers.
 
 The repair credential is Pull requests read only. Never resolve or close
-GitHub review threads. After `confirm-action` succeeds for a review repair,
-persist each explicitly addressed feedback item in local watch state:
+GitHub review threads. After `confirm-action` succeeds for a review repair, the watch preserves the
+review action kind and addressed IDs as pending dispositions. On the next
+fresh snapshot, match every preserved ID from
+`pending_disposition_ids` to its current `content_identity`
+and persist each local disposition:
 
 ```text
 "$GC_DIR/.github/skills/pr-babysit/scripts/pr-snapshot" mark \
@@ -285,7 +322,20 @@ persist each explicitly addressed feedback item in local watch state:
   --disposition handled
 ```
 
-Use `ignored` only for a deliberate local disposition. Content identity
-changes reopen the item on the next snapshot; no GitHub thread mutation is
-performed. Use `--comment` or `--review` instead of `--thread` for those
-stable feedback IDs.
+Use `ignored` only for a deliberate local disposition. Missing or changed IDs
+remain actionable and must block rather than being acknowledged. Only after
+all marks succeed, clear the pending carryover:
+
+```text
+gc core-city pr-babysit acknowledge-dispositions \
+  --watch-id <watch-id> \
+  --action-kind <pending-action-kind> \
+  --generation <fresh-show-generation> \
+  --head-sha <fresh-snapshot-head-sha> \
+  --addressed-thread-ids <pending-addressed-ids> \
+  --json
+```
+
+The state action clears the pending action kind and IDs only after the marks
+have succeeded. No GitHub thread mutation is performed. Use `--comment` or
+`--review` instead of `--thread` for those stable feedback IDs.

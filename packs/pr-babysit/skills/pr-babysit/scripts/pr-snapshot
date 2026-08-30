@@ -50,6 +50,12 @@ MAX_GRAPHQL_COMMENTS = 2_000
 SAFE_COMPONENT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
 SAFE_REF = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]*$")
 BASE_IDENTITIES = {"current", "stale", "unknown", "wrong-base"}
+GITHUB_PR_VIEW_JSON_FIELDS = (
+    "state,isDraft,mergeable,mergeStateStatus,reviewDecision,"
+    "headRefName,headRefOid,baseRefName,baseRefOid,url,"
+    "statusCheckRollup,comments,reviews,isCrossRepository,"
+    "headRepository,headRepositoryOwner"
+)
 
 
 def _error(message: str) -> NoReturn:
@@ -582,8 +588,6 @@ def _fetch(args: argparse.Namespace) -> dict[str, Any]:
         _error("expected base ref is invalid")
     if args.expected_head_ref and not _valid_ref(args.expected_head_ref):
         _error("expected head ref is invalid")
-    if args.expected_head_sha and not _valid_sha(args.expected_head_sha):
-        _error("expected head SHA is invalid")
     if args.fetch_file:
         try:
             raw = json.loads(Path(args.fetch_file).read_text(encoding="utf-8"))
@@ -610,12 +614,7 @@ def _fetch(args: argparse.Namespace) -> dict[str, Any]:
     command.extend(
         [
             "--json",
-            (
-                "state,isDraft,mergeable,mergeStateStatus,reviewDecision,"
-                "headRefName,headRefOid,baseRefName,baseRefOid,url,"
-                "statusCheckRollup,comments,reviews,isCrossRepository,"
-                "headRepository,headRepositoryOwner"
-            ),
+            GITHUB_PR_VIEW_JSON_FIELDS,
         ]
     )
     raw = _parse_json_output(
@@ -903,8 +902,6 @@ def _verify_expected_identity(
 ) -> None:
     if args.expected_head_ref and current.get("head_ref") != args.expected_head_ref:
         _error("GitHub head ref does not match the watch receipt")
-    if args.expected_head_sha and current.get("head_sha") != args.expected_head_sha:
-        _error("GitHub head SHA does not match the watch receipt")
 
 
 def _empty_state(pr: int, repo: str | None) -> dict[str, Any]:
@@ -1362,6 +1359,7 @@ def _snapshot(
         **current,
         "watch_id": args.watch_id,
         "head_sha": head,
+        "observed_head_sha": head,
         "head_changed": head_changed,
         "base_ref_blocker": base_ref_blocker,
         "identity_blocker": identity_blocker,
@@ -1601,10 +1599,6 @@ def _parser() -> argparse.ArgumentParser:
         command.add_argument(
             "--expected-head-ref",
             dest="expected_head_ref",
-        )
-        command.add_argument(
-            "--expected-head-sha",
-            dest="expected_head_sha",
         )
         command.add_argument("--watch-id")
         command.add_argument("--state-dir")

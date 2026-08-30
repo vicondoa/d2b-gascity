@@ -139,7 +139,7 @@ The cooldown smoke invokes the canonical bounded state action and verifies
 that it lists, rechecks, and routes due watches in deterministic order:
 
 ```text
-gc core-city pr-babysit sweep --rig d2b --limit 32 --json
+gc core-city pr-babysit sweep --rig d2b --limit 4 --json
 ```
 
 Credential-free tests use fake GitHub, Beads, and Gas City commands to cover
@@ -154,8 +154,11 @@ verdict bound to its action ID, generation, and exact candidate SHA before the
 validator or normal push. Failed, missing, or stale verdicts block. Review
 credentials are Pull requests read only; tests must not auto-resolve GitHub
 threads. The bounded `pr-snapshot mark` command records local
-`handled` or `ignored` feedback by stable item ID and content identity, and a
-changed content identity reopens the item.
+`handled` or `ignored` feedback by stable item ID and content identity. A
+confirmed review repair carries its addressed IDs and action kind until the
+next snapshot marks every matching identity and
+`acknowledge-dispositions` clears the carryover; a changed or missing item
+remains actionable.
 
 The Formula v2 repair workflow attaches to the durable watch bead, not to the
 action child; the child carries the claim and blocks the watch until

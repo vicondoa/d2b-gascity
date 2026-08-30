@@ -385,7 +385,7 @@ rig and limit, lists due records, rechecks that each is still a routable
 target:
 
 ```text
-gc core-city pr-babysit sweep --rig d2b --limit 32 --json
+gc core-city pr-babysit sweep --rig d2b --limit 4 --json
 ```
 
 One checkpoint is one fresh snapshot, one ordered decision pass, and one
@@ -396,8 +396,11 @@ must be linked with `bd dep <action-id> --blocks <watch-id>`. Native
 dependency-close wake resumes the watch only after the action is confirmed.
 Due listing uses an unbounded metadata-filtered Beads listing, then sorts by
 due time and applies the requested limit, so a large watch set cannot starve
-older due records. The order is short-lived and owns no daemon, webhook,
-relay, or in-session watcher process.
+older due records. Each routed watch atomically advances its next snapshot
+time and takes a short wake lease under the watch lock; the lease is settled
+after routing so concurrent sweeps issue one nudge. The route timeout is
+shorter than the native 30-second order budget. The order is short-lived and
+owns no daemon, webhook, relay, or in-session watcher process.
 
 ### Bounded repair and stop behavior
 
@@ -410,17 +413,20 @@ action. The Formula workflow is attached to the durable watch bead; the
 action child carries the claim and blocks that watch until confirmation. Git
 fetch, push, and `ls-remote` calls use a bounded timeout and reconcile the
 remote after failures. It never creates a replacement PR or remote branch.
+The action persists `formula_attached=false`, then `pending` before native
+idempotent cooking, and `true` with the returned root afterward. A cook
+failure blocks; a metadata-update failure leaves `pending` for a safe retry.
 If a crash leaves an action `claim_status=result-recorded`, replay verifies the
 persisted candidate, verdict, validation, pushed SHA, and remote head, then
 returns successfully without rerunning validation or pushing; `close-action`
 performs the final confirmation.
 
-CI repairs have three attempts per normalized head and failure fingerprint;
-review repairs have two. The active budget is eight active hours and the hard
-backstop is three days. A new fingerprint has its own bounded counter. A
-failed validation, stale remote, missing branch, or uncertain result is a
-blocker. An ambiguous push records `ambiguous-outcome`, blocks the watch, and
-is never retried.
+CI repairs have three attempts per normalized action kind, failure fingerprint,
+and head SHA; review repairs have two for that same triple. A new head starts
+a fresh counter. The active budget is eight active hours and the hard backstop
+is three days. A failed validation, stale remote, missing branch, or uncertain
+result is a blocker. An ambiguous push records `ambiguous-outcome`, blocks the
+watch, and is never retried.
 
 `merge-ready` requires a structured current-snapshot evidence object with
 `current_head_sha`, certain mergeability, a clean branch, terminal and
@@ -428,11 +434,22 @@ successful required checks, no actionable feedback, no pending human
 interaction, no currency item, and a satisfied quiet window. Missing or false
 evidence is rejected.
 
+After a confirmed review repair, the watch retains
+`pending_disposition_action_kind` and `pending_disposition_ids` (plus the
+head and generation fence). The next fresh snapshot must match each ID to its
+current content identity and run the local
+`pr-snapshot mark` command for every item before
+`acknowledge-dispositions` clears the carryover. Missing or edited IDs remain
+actionable and block honestly.
+
 `MERGED` and `CLOSED` are absorbing `terminal` outcomes. An open
 `blocked`, `exhausted`, or `merge-ready` watch may be explicitly rearmed with
-`rearm=true`; rearming advances the generation and clears stale claims. A
-terminal watch cannot be rearmed. `merge-ready` is an evidence handoff only,
-never permission for an automatic merge. Repairs are same-repository-only:
+`rearm=true`; rearming advances the generation and clears stale claims. If a
+persisted formula root is still open, rearm fails with a human blocker and
+does not detach it. Closed or missing roots have their action and dependency
+edges cleaned before rearm proceeds. A terminal watch cannot be rearmed.
+`merge-ready` is an evidence handoff only, never permission for an automatic
+merge. Repairs are same-repository-only:
 `head_repository` must equal the verified `owner/repository`. Fork or
 cross-repository PRs are human blockers in v1 and receive no autonomous
 repair.

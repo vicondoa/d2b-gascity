@@ -70,7 +70,8 @@ state.
   `merge-ready`, `blocked`, `exhausted`, `terminal`) and the
   `claim -> act -> confirm` action protocol. Link repair children with
   `bd dep <action-id> --blocks <watch-id>`. Keep Formula v2 repair bounded to
-  three CI attempts, two review attempts, eight active hours, and three days.
+  three CI attempts and two review attempts per action kind, fingerprint, and
+  head SHA, plus eight active hours and three days.
 - The v1 repair identity is operator-attested Contents write plus Pull
   requests read only. The agent cannot introspect fine-grained permissions;
   refuse Pull requests write, merge/admin, workflow approval, and Copilot
@@ -78,8 +79,9 @@ state.
   conflicting, unknown, and ambiguous push outcomes block, and an ambiguous
   push is never retried. Keep `GH_TOKEN` and `GITHUB_TOKEN` separate from
   Copilot tokens. Never use `--force-with-lease` or a raw rebase. Rearm only
-  an open blocked, exhausted, or merge-ready watch with `rearm=true`; terminal
-  watches stay terminal. Repairs are same-repository-only:
+  an open blocked, exhausted, or merge-ready watch with `rearm=true`; an open
+  persisted formula root blocks rearm, while closed or missing roots are
+  cleaned first. Terminal watches stay terminal. Repairs are same-repository-only:
   `head_repository` must equal `owner/repository`; fork or cross-repository
   PRs are human blockers in v1. Before repair, require
   `PR_BABYSIT_VALIDATOR` as an absolute, non-symlink, executable file and

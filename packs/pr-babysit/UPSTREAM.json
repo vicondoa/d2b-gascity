@@ -15,7 +15,7 @@
       "local": "skills/pr-babysit/SKILL.md",
       "source": "skills/ce-babysit-pr/SKILL.md",
       "sha256": "a611e493ae6979063d71f4990c2f6cda9c9f1a4b114a83717c26c66c4cf4bd90",
-      "local_sha256": "c13da9a8f8d02c36de2d8f5a10ea23dd57a8f8074bb2bef917990cc34eb02806"
+      "local_sha256": "be2edffc1433987d4e96705fa72c0153a2f61535264e5f0945c2588d05530b3a"
     },
     {
       "local": "skills/pr-babysit/references/branch-currency.md",
@@ -26,7 +26,7 @@
       "local": "skills/pr-babysit/references/envelope.md",
       "source": "skills/ce-babysit-pr/references/envelope.md",
       "sha256": "74ffa9b65afccbb8add39cd9cc4b76af1a4cc9532eabde3523d78ae28e62e59a",
-      "local_sha256": "180ff7b0d7da65b126d584d12af769d9837b4464584b1eefa3a7764622f05499"
+      "local_sha256": "cd163ea9d6fbd70b35a9806f7130a1b1538936dd607a4b7d98cadf9ee88b8f4a"
     },
     {
       "local": "skills/pr-babysit/references/pipeline.md",
@@ -55,7 +55,7 @@
       "local": "skills/pr-babysit/references/tick.md",
       "source": "skills/ce-babysit-pr/references/tick.md",
       "sha256": "cf1fc87e87a3520c9446d997ff09ba2cccacb4a5e0a33f33fb9752325ede820c",
-      "local_sha256": "1111fdd1f0852a6b895ed873bd9dd8e4589c42d1c53d23502795ba78041afe96"
+      "local_sha256": "dd8e0c2c9c5a5c99ce1bb7ff1f51fff139f541aa78a11de694612c8e1769e811"
     },
     {
       "local": "skills/pr-babysit/references/watch-loop.md",
@@ -66,7 +66,7 @@
       "local": "skills/pr-babysit/scripts/pr-snapshot",
       "source": "skills/ce-babysit-pr/scripts/pr-snapshot",
       "sha256": "fd8a0b403703714a1257530e7053461e437b662b0ef381f780b8850439d980e7",
-      "local_sha256": "485f39b22e88f50e8c6e03c154e312c049f86cea64af81941d1810548fbaccaf"
+      "local_sha256": "e1baf200b8fed443ef997f03600a42cfaee7bf301b70f48373217c9d554a97e4"
     }
   ],
   "excluded_surfaces": [
@@ -87,7 +87,10 @@
     "Treat every branch-currency item as a human decision, never an automatic claim.",
     "Adapt report status examples from Unicode symbols and em dashes to ASCII text and hyphen punctuation while retaining the upstream source hash.",
     "Retain only the deployed snapshot command and canonical identity flags while preserving all normalization helpers.",
+    "Return the observed head from snapshots and reconcile it through the durable checkpoint fence instead of rejecting head drift.",
     "Add bounded local feedback disposition by stable item identity and reopen changed content.",
+    "Carry confirmed review IDs until the next snapshot marks their current identities.",
+    "Key repair attempt budgets by action kind, fingerprint, and observed head SHA.",
     "Bind repair validation to a persisted candidate head and independent reviewer verdict.",
     "Require structured current-snapshot merge-ready evidence and use crash-safe same-directory state writes.",
     "Expose the deterministic state CLI through the city-scoped core-city pack and keep the rig-imported pack command-free."

@@ -1,7 +1,8 @@
 description = """
 Bounded repair of one existing pull-request head. The workflow is attached to
 the durable watch bead; its action child carries the claim and blocks the
-watch until confirmation. It never creates a pull request or remote branch.
+watch until confirmation. Formula attachment is native and idempotent, and it
+never creates a pull request or remote branch.
 """
 formula = "mol-pr-babysit-repair"
 version = 2

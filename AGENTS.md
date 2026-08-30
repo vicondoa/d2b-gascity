@@ -77,12 +77,17 @@ Watch states are `watching`, `waiting`, `repairing`, `merge-ready`, `blocked`,
 action child with `bd dep <action-id> --blocks <watch-id>`; native dependency
 closure wakes the watch. The `pr-babysit-sweep` cooldown order runs every
 `1m` and performs one short checkpoint, not a daemon or resident watcher.
+Under the watch lock it rechecks due time and a short `wake_lease_until`,
+advances the next snapshot, and settles the lease after routing so concurrent
+sweeps issue one nudge.
 Checkpoint order is snapshot, terminal, head, review, current-head CI, exact
 branch currency, then one state write.
 
 `mol-pr-babysit-repair` is Formula v2. It validates `make check`, pushes only
 the existing PR head, and records the resulting SHA. Budgets are three CI
-attempts, two review attempts, eight active hours, and a three-day backstop.
+attempts and two review attempts per action kind, fingerprint, and head SHA,
+plus eight active hours and a three-day backstop. A new head starts a fresh
+attempt counter.
 The first version does not use `update-branch`: repair is operator-attested
 with Contents write and Pull requests read only, while the agent cannot
 introspect fine-grained permissions. Pull requests write, merge/admin,
@@ -90,8 +95,9 @@ workflow approval, and Copilot Requests authority are refused. `GH_TOKEN` and
 `GITHUB_TOKEN` must never reuse Copilot tokens. Stale, dirty, conflicting,
 unknown, or ambiguous push evidence blocks; an ambiguous push is never
 retried. Never use `--force-with-lease` or a raw rebase. `rearm=true` may
-rearm an open blocked, exhausted, or merge-ready watch, but never a terminal
-watch.
+rearm an open blocked, exhausted, or merge-ready watch, but fails with a human
+blocker while its persisted formula root is open. Closed or missing roots are
+cleaned before rearm proceeds; a terminal watch is never rearmed.
 
 Watch `claim_status` values written by state code are `none`, `claimed`,
 `result-recorded`, `blocked`, and `exhausted`. Action records may also use
