@@ -193,10 +193,12 @@ it requires persisted `merge_strategy=pr` plus `base_ref`, `target`, or
 `target_branch`, creates or reuses one durable watch record, routes it without
 waking, writes matching verified identity receipts, and then nudges the
 binding-qualified babysitter. A complete receipt contains
-`handoff_verified=true`, the self watch ID, the binding-qualified target, and
-the publication bead. `pending` or `route-failed` receipts cannot act, and a
-repeated complete receipt does not wake again. Publication must verify that
-receipt before it closes:
+`handoff_verified=true`, the self watch ID, the binding-qualified target, the
+publication bead, `handoff_route_status=complete`, and
+`handoff_wake_status=delivered`. `pending`, `ready`, or `route-failed`
+receipts cannot act; `ready` is only a recoverable publication-handoff
+wake-replay intermediate. A repeated complete receipt does not wake again.
+Publication must verify that receipt before it closes:
 
 ```text
 gc core-city pr-babysit publication-handoff \
@@ -259,18 +261,24 @@ and `CLOSED` are absorbing `terminal` outcomes. An open `blocked`,
 Repairs are same-repository-only: `head_repository` must equal the verified
 `owner/repository`. Fork or cross-repository PRs are human blockers in v1;
 they receive no autonomous repair. Before any repair, the operator must
-provide `PR_BABYSIT_VALIDATOR` as an absolute, non-symlink, executable file and set
-`PR_BABYSIT_VALIDATOR_ATTESTED=credential-isolated-v1`. It must run
-`make check` in a credential- and network-isolated environment. A missing
-validator blocks repair, as do an invalid or failed validator. There is no
-direct-make fallback.
+provide `PR_BABYSIT_VALIDATOR` as an absolute, non-symlink, executable file,
+its 64-character lowercase hexadecimal `PR_BABYSIT_VALIDATOR_SHA256`, and
+`PR_BABYSIT_VALIDATOR_ATTESTED=credential-isolated-v1`. The workflow hashes
+that exact executable with `sha256sum` before running it through
+`timeout --foreground --kill-after=5s` with
+`PR_BABYSIT_VALIDATOR_TIMEOUT_SECONDS` from 1 through 900 seconds (default
+900). It must run `make check` in a credential- and network-isolated
+environment. A missing, mismatched, timed-out, or failed validator blocks
+repair and does not push. There is no direct-make fallback.
 
 The reviewer never resolves GitHub threads. After a confirmed review repair,
 the watch preserves the action kind and addressed IDs until the next fresh
 snapshot matches each current content identity. The babysitter then records
 `handled` or `ignored` locally and calls
 `acknowledge-dispositions` only after every mark succeeds; changed or missing
-content remains actionable.
+content remains actionable. A claim-free `watching` or `waiting` watch with
+pending dispositions remains eligible for the next sweep, while checkpoints
+still require acknowledgement before another transition.
 
 The non-network credential check is
 `gc core-city pr-babysit check-credentials --json` with the operator

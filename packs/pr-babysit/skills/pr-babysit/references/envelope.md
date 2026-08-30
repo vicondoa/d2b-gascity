@@ -4,7 +4,10 @@ This capability has one target: the pull request named by the invocation.
 Every action must be authorized by a fresh snapshot of that target.
 The watch must first have a complete publication receipt:
 `handoff_verified=true`, the self watch ID, the binding-qualified target, and
-the publication bead. Pending or route-failed receipts are not authority.
+the publication bead, `handoff_route_status=complete`, and
+`handoff_wake_status=delivered`. Pending, ready, or route-failed receipts are
+not authority; `ready` is only a recoverable publication-handoff wake replay
+intermediate.
 
 ## Permitted actions
 

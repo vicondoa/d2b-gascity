@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import fcntl
 import hashlib
 import importlib.machinery
 import importlib.util
@@ -129,7 +130,7 @@ PR_BABYSIT_FILES = {
             "7c26c66c4cf4bd90"
         ),
         "local_sha256": (
-            "be2edffc1433987d4e96705fa72c0153a2f61535264e5f0945c2588d05530b3a"
+            "50de66f88f3c8ae0f7f416b48af1b19322281fbeccfcdfa90682079c6b535be6"
         ),
     },
     "skills/pr-babysit/references/branch-currency.md": {
@@ -146,7 +147,7 @@ PR_BABYSIT_FILES = {
             "d78ae28e62e59a"
         ),
         "local_sha256": (
-            "cd163ea9d6fbd70b35a9806f7130a1b1538936dd607a4b7d98cadf9ee88b8f4a"
+            "ae949804f6491ac65bddb4cbacbcbc52f9877e8df6d782febb8fdb2bdfc4c241"
         ),
     },
     "skills/pr-babysit/references/pipeline.md": {
@@ -183,7 +184,7 @@ PR_BABYSIT_FILES = {
             "0f089d1809954"
         ),
         "local_sha256": (
-            "d3eee9d0b5a132738613b353de879cdb52ceab1394d274101de7749d8377818c"
+            "674b73e99093531d925b0ffe349a651e3ad4dc31ff029777c53175e4df730c3c"
         ),
     },
     "skills/pr-babysit/references/tick.md": {
@@ -193,7 +194,7 @@ PR_BABYSIT_FILES = {
             "9752325ede820c"
         ),
         "local_sha256": (
-            "dd8e0c2c9c5a5c99ce1bb7ff1f51fff139f541aa78a11de694612c8e1769e811"
+            "eaeb7899f2647c0e448d8a23657bab741d4a28aacbc693e44100b46862ceb9d9"
         ),
     },
     "skills/pr-babysit/references/watch-loop.md": {
@@ -432,6 +433,7 @@ def _complete_test_receipt(
             "handoff_target": target,
             "handoff_publication_bead": publication_bead_id,
             "handoff_route_status": "complete",
+            "handoff_wake_status": "delivered",
         }
     )
     records_path.write_text(
@@ -1429,13 +1431,17 @@ class RootPortableCityTests(unittest.TestCase):
             "metadata.merge_strategy=pr",
             "target=<rig>/pr-babysit.pr-babysitter",
             "handoff_target",
+            "handoff_route_status=complete",
+            "handoff_wake_status=delivered",
             "base_ref=v3",
             "base_ref=main",
             "pr_babysit_validator",
+            "pr_babysit_validator_sha256",
+            "validator timeout",
             "credential-isolated-v1",
             "absolute, non-symlink, executable",
             "credential- and network-isolated",
-            "missing validator blocks repair",
+            "missing, mismatched, timed-out, or failed validator blocks repair",
             "same-repository-only",
             "fork or cross-repository prs are human blockers",
             "no live u8 acceptance is claimed",
@@ -3000,6 +3006,20 @@ class VendoredPrBabysitTests(unittest.TestCase):
             self.assertNotIn("git checkout", text.lower())
             self.assertNotIn("git push", text.lower())
         self.assertIn("gc core-city pr-babysit", glossary)
+        self.assertIn("dispatch-repair", glossary)
+        self.assertIn("mutating action-scoped", glossary)
+        self.assertIn(
+            "acknowledge-dispositions --watch-id <watch-id>",
+            glossary,
+        )
+        for flag in (
+            "--action-kind <pending-action-kind>",
+            "--generation <fresh-show-generation>",
+            "--head-sha <fresh-snapshot-head-sha>",
+            "--addressed-thread-ids <pending-addressed-ids>",
+            "--json",
+        ):
+            self.assertIn(flag, glossary)
         gate_end = prompt.index("\ndone\n```")
         self.assertGreater(prompt.index(show), gate_end)
         self.assertIn("$GC_DIR/state/<watch-id>", prompt)
@@ -6187,6 +6207,113 @@ if command == "close":
             self.assertEqual(state["generation"], 2)
             self.assertEqual(state["metadata"]["head_sha"], "b" * 40)
             self.assertEqual(state["metadata"]["claim_status"], "none")
+            self.assertEqual(
+                state["metadata"]["next_snapshot_at"],
+                "2026-08-29T19:10:00Z",
+            )
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
+
+    def test_checkpoint_blocks_pending_dispositions_until_acknowledged(self):
+        root, env = self._fixture("pending-dispositions")
+        try:
+            handoff = self._run(env, "handoff", self._HANDOFF)
+            self.assertEqual(handoff.returncode, 0, handoff.stderr)
+            watch_id = self._json(handoff)["watch_id"]
+            claimed = self._run(
+                env,
+                "claim-action",
+                {
+                    "watch_id": watch_id,
+                    "generation": 1,
+                    "head_sha": "a" * 40,
+                    "action_kind": "review",
+                    "fingerprint": "pending-dispositions",
+                    "addressed_thread_ids": ["thread-1"],
+                },
+            )
+            self.assertEqual(claimed.returncode, 0, claimed.stderr)
+            action_id = self._json(claimed)["action_id"]
+            records = json.loads((root / "beads.json").read_text(encoding="utf-8"))
+            for record in records:
+                if record["id"] in {watch_id, action_id}:
+                    record["metadata"]["addressed_thread_ids"] = "thread-1"
+            (root / "beads.json").write_text(
+                json.dumps(records, sort_keys=True, separators=(",", ":")) + "\n",
+                encoding="utf-8",
+            )
+            candidate = self._run(
+                env,
+                "record-candidate-head",
+                {
+                    "watch_id": watch_id,
+                    "action_id": action_id,
+                    "generation": 1,
+                    "candidate_head_sha": "b" * 40,
+                },
+            )
+            self.assertEqual(candidate.returncode, 0, candidate.stderr)
+            self.assertEqual(
+                self._run(
+                    env,
+                    "record-review-verdict",
+                    {
+                        "watch_id": watch_id,
+                        "action_id": action_id,
+                        "generation": 1,
+                        "candidate_head_sha": "b" * 40,
+                        "verdict": "passed",
+                    },
+                ).returncode,
+                0,
+            )
+            self.assertEqual(
+                self._run(
+                    env,
+                    "record-repair-result",
+                    {
+                        "watch_id": watch_id,
+                        "action_id": action_id,
+                        "generation": 1,
+                        "expected_old_sha": "a" * 40,
+                        "pushed_sha": "b" * 40,
+                        "validation_status": "passed",
+                        "make_check_result": "passed",
+                        "addressed_thread_ids": ["thread-1"],
+                    },
+                ).returncode,
+                0,
+            )
+            confirmed = self._run(
+                env,
+                "confirm-action",
+                {
+                    "watch_id": watch_id,
+                    "action_id": action_id,
+                    "generation": 1,
+                    "current_sha": "b" * 40,
+                    "observed_at": "2026-08-29T19:10:00Z",
+                },
+            )
+            self.assertEqual(confirmed.returncode, 0, confirmed.stderr)
+            checkpoint = self._run(
+                env,
+                "checkpoint",
+                {
+                    "watch_id": watch_id,
+                    "expected_generation": 2,
+                    "expected_head_sha": "b" * 40,
+                    "observed_head_sha": "b" * 40,
+                    "observed_at": "2026-08-29T19:10:00Z",
+                    "next_snapshot_at": "2026-08-29T19:11:00Z",
+                    "to": "waiting",
+                },
+            )
+            self.assertNotEqual(checkpoint.returncode, 0)
+            self.assertEqual(
+                self._json(checkpoint)["error"]["code"],
+                "pending-dispositions",
+            )
         finally:
             shutil.rmtree(root, ignore_errors=True)
 
@@ -6972,6 +7099,54 @@ if os.environ.get("FAKE_GC_FAIL") == "1":
         finally:
             shutil.rmtree(root, ignore_errors=True)
 
+    def test_sweep_routes_due_pending_review_dispositions(self) -> None:
+        root, env = self._fixture("pending-dispositions")
+        try:
+            watch_id = self._handoff(
+                env,
+                dict(
+                    self._HANDOFF,
+                    next_snapshot_at="2026-08-29T18:00:00Z",
+                ),
+            )
+            records = json.loads((root / "beads.json").read_text(encoding="utf-8"))
+            watch = next(record for record in records if record["id"] == watch_id)
+            watch["metadata"].update(
+                {
+                    "action_kind": "review",
+                    "addressed_thread_ids": "thread-1",
+                    "pending_disposition_action_kind": "review",
+                    "pending_disposition_ids": "thread-1",
+                    "pending_disposition_head_sha": "a" * 40,
+                    "pending_disposition_generation": "1",
+                }
+            )
+            (root / "beads.json").write_text(
+                json.dumps(records, sort_keys=True, separators=(",", ":")) + "\n",
+                encoding="utf-8",
+            )
+            due = self._run_state(
+                env,
+                "list-due",
+                {
+                    "rig": "d2b",
+                    "now": "2026-08-29T19:00:00Z",
+                },
+            )
+            self.assertEqual(due.returncode, 0, due.stderr)
+            self.assertEqual(
+                [item["watch_id"] for item in self._json(due)["watches"]],
+                [watch_id],
+            )
+            swept = self._run_sweep(env)
+            self.assertEqual(swept.returncode, 0, swept.stderr)
+            self.assertEqual(self._json(swept)["routed"], 1)
+            calls = json.loads((root / "gc-calls.json").read_text(encoding="utf-8"))
+            self.assertEqual(len(calls), 1)
+            self.assertIn("--nudge", calls[0])
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
+
     def test_concurrent_sweeps_take_one_wake_lease(self) -> None:
         root, env = self._fixture("concurrent")
         try:
@@ -7018,6 +7193,52 @@ if os.environ.get("FAKE_GC_FAIL") == "1":
                 "2026-08-29T19:01:00Z",
             )
             self.assertEqual(watch["metadata"]["wake_lease_until"], "")
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
+
+    def test_sweep_skips_busy_watch_without_blocking(self) -> None:
+        root, env = self._fixture("busy-lock")
+        try:
+            watch_id = self._handoff(
+                env,
+                dict(
+                    self._HANDOFF,
+                    next_snapshot_at="2026-08-29T18:00:00Z",
+                ),
+            )
+            lock_path = (
+                root
+                / ".beads"
+                / "pr-babysit-locks"
+                / f"{watch_id}.lock"
+            )
+            with lock_path.open("a+", encoding="utf-8") as lock:
+                fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+                started = time.monotonic()
+                result = subprocess.run(
+                    [str(PR_BABYSIT_STATE_RUNNER), "sweep"],
+                    cwd=ROOT,
+                    env=os.environ | env,
+                    input=json.dumps({"rig": "d2b", "limit": 4}),
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    timeout=3,
+                )
+                elapsed = time.monotonic() - started
+                self.assertLess(elapsed, 2)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(self._json(result)["routed"], 0)
+            self.assertEqual(
+                json.loads((root / "gc-calls.json").read_text(encoding="utf-8")),
+                [],
+            )
+            records = json.loads((root / "beads.json").read_text(encoding="utf-8"))
+            watch = next(record for record in records if record["id"] == watch_id)
+            self.assertEqual(
+                watch["metadata"]["next_snapshot_at"],
+                "2026-08-29T18:00:00Z",
+            )
         finally:
             shutil.rmtree(root, ignore_errors=True)
 
@@ -7927,6 +8148,16 @@ print(json.dumps({"ok": True}))
                 json.dumps(records, sort_keys=True, separators=(",", ":")) + "\n",
                 encoding="utf-8",
             )
+            rejected = self._run(
+                env,
+                "verify-handoff",
+                self._payload(),
+            )
+            self.assertNotEqual(rejected.returncode, 0)
+            self.assertEqual(
+                self._json(rejected)["error"]["code"],
+                "not-routable",
+            )
             replay = self._run(
                 env,
                 "publication-handoff",
@@ -7936,8 +8167,10 @@ print(json.dumps({"ok": True}))
             self.assertTrue(self._json(replay)["wake"])
             self.assertEqual(
                 len(json.loads((root / "gc-calls.json").read_text())),
-                4,
+                3,
             )
+            calls = json.loads((root / "gc-calls.json").read_text())
+            self.assertEqual(calls[-1][0:2], ["sling", "--nudge"])
             records = json.loads((root / "beads.json").read_text())
             publication = next(
                 record for record in records if record["id"] == "publication-1"
@@ -8470,6 +8703,7 @@ print(json.dumps({"ok": True, "root_id": "repair-root"}))
                 "PR_BABYSIT_GITHUB_CAPABILITY_ATTESTED": (
                     "contents-write,pull-requests-read"
                 ),
+                "PR_BABYSIT_VALIDATOR_SHA256": "0" * 64,
                 "PR_BABYSIT_VALIDATOR_ATTESTED": "credential-isolated-v1",
             }
         )
@@ -8900,6 +9134,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 root = Path({str(root)!r})
@@ -8948,10 +9183,13 @@ elif mode == "status":
     Path(worktree, "tracked.txt").write_text("mutated\\n")
 elif mode == "fail":
     raise SystemExit(7)
+elif mode == "sleep":
+    time.sleep(2)
 """,
             encoding="utf-8",
         )
         validator.chmod(0o755)
+        validator_sha256 = hashlib.sha256(validator.read_bytes()).hexdigest()
         script = self._render_validate_script(
             root,
             {
@@ -8979,6 +9217,7 @@ elif mode == "fail":
             "GC_RIG_ROOT": str(repository),
             "PR_BABYSIT_WORKTREE": str(worktree),
             "PR_BABYSIT_VALIDATOR": str(validator),
+            "PR_BABYSIT_VALIDATOR_SHA256": validator_sha256,
             "PR_BABYSIT_VALIDATOR_ATTESTED": "credential-isolated-v1",
             "PR_BABYSIT_GITHUB_CAPABILITY_ATTESTED": (
                 "contents-write,pull-requests-read"
@@ -9675,6 +9914,86 @@ else:
                 finally:
                     shutil.rmtree(root, ignore_errors=True)
 
+    def test_validator_hash_must_be_lowercase_and_match_selected_executable(self):
+        for configured in ("", "A" * 64, "g" * 64, "f" * 63, "0" * 64):
+            with self.subTest(configured=configured):
+                root, env, _, _, _ = self._validation_fixture(
+                    "validator-hash-" + (configured or "missing"),
+                )
+                try:
+                    result = self._run_validation(
+                        root,
+                        env,
+                        extra_env={
+                            "PR_BABYSIT_VALIDATOR_SHA256": configured,
+                        },
+                    )
+                    self.assertNotEqual(result.returncode, 0, result.stderr)
+                    self.assertFalse((root / "validator-env.json").exists())
+                    self.assertFalse((root / "push-called").exists())
+                    calls = json.loads((root / "gc-calls.json").read_text())
+                    result_call = calls[-1]
+                    self.assertEqual(
+                        result_call[
+                            result_call.index("--validation-status") + 1
+                        ],
+                        "failed",
+                    )
+                    self.assertEqual(
+                        result_call[result_call.index("--reason") + 1],
+                        "validator-hash",
+                    )
+                finally:
+                    shutil.rmtree(root, ignore_errors=True)
+
+    def test_validator_timeout_records_failed_without_push(self):
+        root, env, _, _, _ = self._validation_fixture(
+            "validator-timeout",
+            validator_mode="sleep",
+        )
+        try:
+            result = self._run_validation(
+                root,
+                env,
+                extra_env={
+                    "PR_BABYSIT_VALIDATOR_TIMEOUT_SECONDS": "1",
+                },
+            )
+            self.assertNotEqual(result.returncode, 0, result.stderr)
+            self.assertFalse((root / "push-called").exists())
+            calls = json.loads((root / "gc-calls.json").read_text())
+            result_call = calls[-1]
+            self.assertEqual(
+                result_call[result_call.index("--validation-status") + 1],
+                "failed",
+            )
+            self.assertEqual(
+                result_call[result_call.index("--reason") + 1],
+                "validator-timeout",
+            )
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
+
+    def test_validator_timeout_must_be_positive_and_bounded(self):
+        for configured in ("0", "-1", "abc", "901"):
+            with self.subTest(configured=configured):
+                root, env, _, _, _ = self._validation_fixture(
+                    "validator-timeout-config-" + configured,
+                )
+                try:
+                    result = self._run_validation(
+                        root,
+                        env,
+                        extra_env={
+                            "PR_BABYSIT_VALIDATOR_TIMEOUT_SECONDS": configured,
+                        },
+                    )
+                    self.assertNotEqual(result.returncode, 0, result.stderr)
+                    self.assertFalse((root / "validator-env.json").exists())
+                    self.assertFalse((root / "push-called").exists())
+                finally:
+                    shutil.rmtree(root, ignore_errors=True)
+
     def test_validator_mutations_block_push(self):
         for mode in ("head", "config", "origin", "status"):
             with self.subTest(mode=mode):
@@ -10004,6 +10323,10 @@ else:
             "push outcome is ambiguous",
             "credential-isolated-v1",
             "pr_babysit_validator",
+            "pr_babysit_validator_sha256",
+            "pr_babysit_validator_timeout_seconds",
+            "sha256sum",
+            "timeout --foreground --kill-after=5s",
             "validator-invariant",
             "push-failed",
         ):
@@ -11286,6 +11609,15 @@ else:
             self.assertNotEqual(result.returncode, 0)
             error = self._json(result)["error"]
             self.assertEqual(error["code"], "credential-validator")
+            missing_hash = self._run(
+                env | {"PR_BABYSIT_VALIDATOR_SHA256": ""},
+                "check-credentials",
+            )
+            self.assertNotEqual(missing_hash.returncode, 0)
+            self.assertEqual(
+                self._json(missing_hash)["error"]["code"],
+                "credential-validator",
+            )
         finally:
             shutil.rmtree(root, ignore_errors=True)
 

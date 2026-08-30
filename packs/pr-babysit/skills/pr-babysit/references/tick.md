@@ -62,12 +62,13 @@ command is still text in the snapshot output; it is never passed to a shell,
 an evaluator, or a process launcher.  Snapshot text is data only.
 
 Only `watching` and `waiting` watches with no action claim are eligible for a
-checkpoint sweep.  `repairing` watches with an open or unconfirmed child wait
-for the native dependency-close wake. A confirmed review action carries its
-action kind and addressed IDs as pending dispositions. The next fresh
-snapshot must match those IDs to current content identities, run
-`pr-snapshot mark` for every match, and then call
-`acknowledge-dispositions`; missing or edited IDs remain actionable or block.
+checkpoint sweep; a confirmed review action may carry its action kind and
+addressed IDs as pending dispositions without losing eligibility. `repairing`
+watches with an open or unconfirmed child wait for the native
+dependency-close wake. The next fresh snapshot must match those IDs to
+current content identities, run `pr-snapshot mark` for every match, and then
+call `acknowledge-dispositions`; missing or edited IDs remain actionable or
+block.
 A confirmed action starts the next checkpoint from a fresh snapshot.
 
 `waiting` may settle to `merge-ready` or `blocked`, or return to `watching`.

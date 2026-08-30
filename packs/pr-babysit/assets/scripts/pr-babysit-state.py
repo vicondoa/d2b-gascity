@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+import errno
 import fcntl
 import hashlib
 import json
@@ -76,6 +77,7 @@ WAKE_LEASE = timedelta(seconds=10)
 DEFAULT_DUE_LIMIT = 4
 MAX_DUE_LIMIT = 100
 SHA_RE = re.compile(r"^[0-9a-fA-F]{40}$")
+VALIDATOR_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 SLUG_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9_.-]*[A-Za-z0-9])?$")
 WATCH_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 BEAD_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
@@ -411,6 +413,13 @@ def require_repair_credentials() -> None:
     if os.environ.get("PR_BABYSIT_VALIDATOR_ATTESTED", "") != VALIDATOR_ATTESTATION:
         fail(
             "repair requires an attested credential-isolated validator",
+            "credential-validator",
+        )
+    if not VALIDATOR_SHA256_RE.fullmatch(
+        os.environ.get("PR_BABYSIT_VALIDATOR_SHA256", ""),
+    ):
+        fail(
+            "repair requires a 64-character lowercase validator SHA-256",
             "credential-validator",
         )
 
@@ -927,7 +936,7 @@ def lock_directory() -> pathlib.Path:
 
 
 @contextmanager
-def watch_lock(watch_id: str):
+def watch_lock(watch_id: str, *, blocking: bool = True):
     validate_watch_id(watch_id)
     directory = lock_directory()
     lock_path = directory / f"{watch_id}.lock"
@@ -946,11 +955,21 @@ def watch_lock(watch_id: str):
         if info.st_size:
             fail("watch lock contains state", "unsafe-state")
         try:
-            fcntl.flock(descriptor, fcntl.LOCK_EX)
-        except OSError:
+            lock_flags = fcntl.LOCK_EX
+            if not blocking:
+                lock_flags |= fcntl.LOCK_NB
+            fcntl.flock(descriptor, lock_flags)
+        except OSError as error:
+            if (
+                not blocking
+                and error.errno
+                in {errno.EACCES, errno.EAGAIN, errno.EWOULDBLOCK}
+            ):
+                yield False
+                return
             fail("could not acquire watch lock", "configuration")
         locked = True
-        yield
+        yield True
     finally:
         if locked:
             try:
@@ -2880,11 +2899,10 @@ def has_complete_receipt(
     target = receipt.get("handoff_target", "")
     publication_bead_id = receipt.get("handoff_publication_bead", "")
     route_status = metadata.get("handoff_route_status", "")
-    if route_status in {"pending", "route-failed"}:
+    wake_status = metadata.get("handoff_wake_status", "")
+    if route_status != "complete":
         return False
-    if route_status and route_status != "complete":
-        return False
-    if metadata.get("handoff_wake_status") == "failed":
+    if wake_status != "delivered":
         return False
     return (
         metadata.get("handoff_verified") == "true"
@@ -3116,6 +3134,55 @@ def publication_handoff(payload: dict[str, Any]) -> dict[str, Any]:
             )
             if (
                 not rearm
+                and publication_metadata.get("handoff_route_status")
+                == "complete"
+                and publication_metadata.get("handoff_wake_status") == "ready"
+                and existing_watch_metadata.get("handoff_route_status")
+                == "complete"
+                and existing_watch_metadata.get("handoff_wake_status") == "ready"
+                and existing_watch_metadata.get("head_sha")
+                == identity["head_sha"]
+            ):
+                try:
+                    route_watch(target, watch_id, wake=True)
+                except StateError as error:
+                    if error.code in {"route-failed", "route-exec"}:
+                        block_route_failure(
+                            watch_id,
+                            publication_bead_id,
+                            target,
+                        )
+                    raise
+                try:
+                    metadata_updates(
+                        watch_id,
+                        {"handoff_wake_status": "delivered"},
+                    )
+                    metadata_updates(
+                        publication_bead_id,
+                        {"handoff_wake_status": "delivered"},
+                    )
+                except StateError:
+                    block_route_failure(
+                        watch_id,
+                        publication_bead_id,
+                        target,
+                    )
+                    raise
+                return {
+                    "ok": True,
+                    "action": "publication-handoff",
+                    "rig": context["rig"],
+                    "publication_bead_id": publication_bead_id,
+                    "watch_id": watch_id,
+                    "target": target,
+                    "verified": True,
+                    "created": False,
+                    "reused": True,
+                    "wake": True,
+                }
+            if (
+                not rearm
                 and has_complete_receipt(
                     publication_metadata,
                     complete_receipt,
@@ -3126,14 +3193,14 @@ def publication_handoff(payload: dict[str, Any]) -> dict[str, Any]:
                 )
                 and existing_watch_metadata.get(
                     "handoff_wake_status",
-                    "delivered",
+                    "",
                 )
-                in {"", "delivered"}
+                == "delivered"
                 and publication_metadata.get(
                     "handoff_wake_status",
-                    "delivered",
+                    "",
                 )
-                in {"", "delivered"}
+                == "delivered"
                 and existing_watch_metadata.get("head_sha")
                 == identity["head_sha"]
             ):
@@ -4533,13 +4600,8 @@ def _confirm_action_locked(payload: dict[str, Any]) -> dict[str, Any]:
         payload_value(payload, "observed_at", "last_snapshot_at") or iso_now(),
         "observed_at",
     )
-    next_snapshot_at = text_value(
-        payload_value(payload, "next_snapshot_at")
-        or watch_metadata.get("next_snapshot_at", observed_at),
-        "next_snapshot_at",
-    )
     parse_time(observed_at, "observed_at")
-    parse_time(next_snapshot_at, "next_snapshot_at")
+    next_snapshot_at = observed_at
     next_generation = generation + 1
     addressed_thread_ids = action_metadata_value.get(
         "addressed_thread_ids",
@@ -5093,13 +5155,15 @@ def list_due(payload: dict[str, Any]) -> dict[str, Any]:
             continue
         if state not in CHECKPOINT_STATES:
             continue
+        pending_dispositions = pending_disposition_details(metadata)
         if (
             metadata.get("claim_status", "none") != "none"
-            or metadata.get("action_kind", "")
             or metadata.get("action_fingerprint", "")
+            or (
+                pending_dispositions is None
+                and metadata.get("action_kind", "")
+            )
         ):
-            continue
-        if pending_disposition_details(metadata) is not None:
             continue
         if next_time <= now:
             due.append(
@@ -5164,20 +5228,26 @@ def sweep(payload: dict[str, Any]) -> dict[str, Any]:
         ):
             fail("list-due returned an unsafe watch", "beads-invalid-response")
         lease_until: str | None = None
-        with watch_lock(watch_id):
+        with watch_lock(watch_id, blocking=False) as acquired:
+            if not acquired:
+                continue
             _, current_metadata = show_issue(watch_id)
+            pending_dispositions = pending_disposition_details(
+                current_metadata,
+            )
             if (
                 current_metadata.get("state") not in CHECKPOINT_STATES
                 or current_metadata.get("claim_status", "none") != "none"
-                or current_metadata.get("action_kind", "")
                 or current_metadata.get("action_fingerprint", "")
                 or not watch_receipt_is_complete(
                     current_metadata,
                     watch_id,
                 )
+                or (
+                    pending_dispositions is None
+                    and current_metadata.get("action_kind", "")
+                )
             ):
-                continue
-            if pending_disposition_details(current_metadata) is not None:
                 continue
             next_time = parse_time(
                 current_metadata.get("next_snapshot_at", ""),
@@ -5204,25 +5274,27 @@ def sweep(payload: dict[str, Any]) -> dict[str, Any]:
         except StateError as error:
             if lease_until is not None:
                 try:
-                    with watch_lock(watch_id):
-                        _, current_metadata = show_issue(watch_id)
-                        if current_metadata.get("wake_lease_until") == lease_until:
-                            metadata_updates(
-                                watch_id,
-                                {"wake_lease_until": ""},
-                            )
+                    with watch_lock(watch_id, blocking=False) as acquired:
+                        if acquired:
+                            _, current_metadata = show_issue(watch_id)
+                            if current_metadata.get("wake_lease_until") == lease_until:
+                                metadata_updates(
+                                    watch_id,
+                                    {"wake_lease_until": ""},
+                                )
                 except StateError:
                     pass
             route_errors.append(error)
             continue
         if lease_until is not None:
-            with watch_lock(watch_id):
-                _, current_metadata = show_issue(watch_id)
-                if current_metadata.get("wake_lease_until") == lease_until:
-                    metadata_updates(
-                        watch_id,
-                        {"wake_lease_until": ""},
-                    )
+            with watch_lock(watch_id, blocking=False) as acquired:
+                if acquired:
+                    _, current_metadata = show_issue(watch_id)
+                    if current_metadata.get("wake_lease_until") == lease_until:
+                        metadata_updates(
+                            watch_id,
+                            {"wake_lease_until": ""},
+                        )
             routed += 1
 
     if route_errors:

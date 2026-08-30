@@ -30,8 +30,11 @@ the one durable checkpoint write.
 - A watch is actionable only with one complete publication receipt:
   `handoff_verified=true`, `handoff_watch_id` equal to the self watch ID,
   `handoff_target` equal to the binding-qualified babysitter, and
-  `handoff_publication_bead` present. Explicit `pending` or `route-failed`
-  handoff receipt states are never actionable.
+  `handoff_publication_bead` present,
+  `handoff_route_status=complete`, and
+  `handoff_wake_status=delivered`. Explicit `pending`, `ready`, or
+  `route-failed` handoff receipt states are never actionable. `ready` is only
+  a recoverable intermediate for publication-handoff wake replay.
 - Consume only the exact `branch_currency` item emitted by the snapshot.
   `BEHIND`, dirty, conflicting, and unknown evidence are human blockers.
 - Only `dispatch-repair` may create an action-scoped worktree. It creates or
@@ -80,7 +83,8 @@ metadata.handoff_verified=true
 metadata.handoff_watch_id=<watch-id>
 metadata.handoff_target=<rig>/pr-babysit.pr-babysitter
 metadata.handoff_publication_bead=<publication-bead-id>
-metadata.handoff_route_status=complete (or absent for legacy complete receipts)
+metadata.handoff_route_status=complete
+metadata.handoff_wake_status=delivered
 ```
 
 The head repository must equal `<metadata.owner>/<metadata.repository>`.
@@ -196,9 +200,11 @@ Use `reason` for `blocked` or
 with respect to the PR and writes only the durable watch record.
 
 Only `watching` and `waiting` records without an action claim are eligible for
-the cooldown sweep. A `repairing` record with an open or unconfirmed child
-waits for native dependency closure. A changed head invalidates stale claims
-and evidence. Confirmed repair actions resume from a fresh snapshot.
+the cooldown sweep; a confirmed review carryover may retain its action kind and
+addressed IDs while remaining eligible. A `repairing` record with an open or
+unconfirmed child waits for native dependency closure. A changed head
+invalidates stale claims and evidence. Confirmed repair actions resume from a
+fresh snapshot.
 
 ## Bounded repair dispatch
 

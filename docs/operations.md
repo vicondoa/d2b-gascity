@@ -329,9 +329,11 @@ requires persisted `merge_strategy=pr` plus `base_ref`, `target`, or
 ID, creates or reuses exactly one Beads watch, routes it without wake, writes
 matching verified receipts, and then nudges the binding-qualified babysitter.
 A complete receipt requires `handoff_verified=true`, the self watch ID, the
-binding-qualified target, and the publication bead. `pending` and
-`route-failed` receipts cannot act. A repeated complete receipt does not issue
-another wake. Publication may close only after
+binding-qualified target, the publication bead, `handoff_route_status=complete`,
+and `handoff_wake_status=delivered`. `pending`, `ready`, and `route-failed`
+receipts cannot act; `ready` is only a recoverable publication-handoff wake
+replay intermediate. A repeated complete receipt does not issue another wake.
+Publication may close only after
 `verify-handoff` re-reads the matching receipt. Inspect safe state with:
 
 ```text
@@ -376,7 +378,10 @@ ends. Only a `result-recorded` action with a passed `make check` and matching
 pushed SHA plus a current passed reviewer verdict may be confirmed and
 closed; failed or ambiguous actions remain human blockers. Only `watching`
 watches may claim repairs; `waiting` may transition to `merge-ready` or
-`blocked` but not directly to `repairing`.
+`blocked` but not directly to `repairing`. Confirmed review repairs retain
+their carried action kind and addressed IDs as pending dispositions; a
+claim-free `watching` or `waiting` watch remains sweep-eligible until those
+dispositions are acknowledged.
 
 The `pr-babysit-sweep` cooldown order in the rig-imported pack runs every
 `1m` through the canonical bounded `sweep` state action. It validates the
@@ -387,6 +392,9 @@ target:
 ```text
 gc core-city pr-babysit sweep --rig d2b --limit 4 --json
 ```
+
+Sweep lock acquisition is nonblocking; a busy watch is left due for the next
+`1m` tick. State mutation and repair operations retain blocking watch locks.
 
 One checkpoint is one fresh snapshot, one ordered decision pass, and one
 durable state write. The fixed order is snapshot, terminal state, head
@@ -463,11 +471,16 @@ Contents write and Pull requests read only. It must not have Pull requests
 write, merge/admin, workflow-approval, or Copilot Requests authority. The
 agent cannot introspect fine-grained permissions, so it fails closed without
 the operator attestation. Before repair, provide
-`PR_BABYSIT_VALIDATOR` as an absolute, non-symlink, executable file and set
-`PR_BABYSIT_VALIDATOR_ATTESTED=credential-isolated-v1`. It must run
-`make check` in a credential- and network-isolated environment. A missing
-validator blocks repair, as do an invalid or failed validator. There is no
-direct-make fallback.
+`PR_BABYSIT_VALIDATOR` as an absolute, non-symlink, executable file,
+`PR_BABYSIT_VALIDATOR_SHA256` as its 64-character lowercase hexadecimal
+sha256sum, and set `PR_BABYSIT_VALIDATOR_ATTESTED=credential-isolated-v1`.
+The workflow hashes that exact executable with `sha256sum` immediately before
+running it through `timeout --foreground --kill-after=5s`, using
+`PR_BABYSIT_VALIDATOR_TIMEOUT_SECONDS` from 1 through 900 seconds (default
+900). It must run `make check` in a credential- and network-isolated
+environment. A missing, mismatched, timed-out, or failed validator blocks
+repair and records a failed result; no branch update is attempted. There is
+no direct-make fallback.
 
 The reviewer is read-only with respect to GitHub and never resolves review
 threads. After a confirmed review repair, record each addressed thread,
@@ -480,13 +493,14 @@ request:
 
 ```text
 PR_BABYSIT_GITHUB_CAPABILITY_ATTESTED=contents-write,pull-requests-read \
+PR_BABYSIT_VALIDATOR_SHA256=<64-lowercase-hex-sha256> \
 PR_BABYSIT_VALIDATOR_ATTESTED=credential-isolated-v1 \
   gc core-city pr-babysit check-credentials --json
 ```
 
-This command checks the operator attestations and token separation only. The
-repair workflow separately validates the absolute, non-symlink executable
-`PR_BABYSIT_VALIDATOR` and runs it.
+This command checks the operator attestations, validator SHA-256 format, and
+token separation only. The repair workflow separately validates the absolute,
+non-symlink executable `PR_BABYSIT_VALIDATOR`, binds its hash, and runs it.
 
 Publication credentials, repair GitHub credentials, Copilot Requests
 credentials, and Discord app credentials are separate. `GH_TOKEN` and

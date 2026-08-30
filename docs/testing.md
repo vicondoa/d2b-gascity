@@ -129,11 +129,13 @@ The handoff result must show
 receipt metadata. Publication metadata must persist `merge_strategy=pr` plus
 `base_ref`, `target`, or `target_branch`; a missing target is rejected. The
 handoff routes without wake, writes matching `handoff_verified=true` receipts,
-then nudges. `handoff_route_status=pending` or `route-failed` is never
-actionable, and a repeated complete receipt does not duplicate the wake. The
-watch record must show `base_ref=v3` for d2b or `base_ref=main` for
-city-source. The publication bead's target is publication metadata, not the
-handoff routing target.
+then nudges. A complete receipt also requires
+`handoff_route_status=complete` and `handoff_wake_status=delivered`;
+`pending`, `ready`, or `route-failed` is never actionable, and `ready` is only
+a recoverable publication-handoff wake-replay intermediate. A repeated
+complete receipt does not duplicate the wake. The watch record must show
+`base_ref=v3` for d2b or `base_ref=main` for city-source. The publication
+bead's target is publication metadata, not the handoff routing target.
 
 The cooldown smoke invokes the canonical bounded state action and verifies
 that it lists, rechecks, and routes due watches in deterministic order:
@@ -174,18 +176,24 @@ merge/admin, workflow-approval, and Copilot Requests authority are refused.
 Keep publication, repair GitHub, Copilot Requests, and Discord credentials
 separate, and never reuse a Copilot token for `GH_TOKEN` or `GITHUB_TOKEN`.
 Before a repair, require `PR_BABYSIT_VALIDATOR` as an absolute, non-symlink,
-executable file and set
-`PR_BABYSIT_VALIDATOR_ATTESTED=credential-isolated-v1`. It must run
-`make check` in a credential- and network-isolated environment. A missing
-validator blocks repair, as do an invalid or failed validator. Fork or
-cross-repository PRs are human blockers in v1.
+executable file, `PR_BABYSIT_VALIDATOR_SHA256` as its 64-character lowercase
+hexadecimal sha256sum, and set
+`PR_BABYSIT_VALIDATOR_ATTESTED=credential-isolated-v1`. The workflow hashes
+the selected executable with `sha256sum` before running it through
+`timeout --foreground --kill-after=5s`;
+`PR_BABYSIT_VALIDATOR_TIMEOUT_SECONDS` must be 1 through 900 seconds (default
+900). It must run `make check` in a credential- and network-isolated
+environment. A missing, mismatched, timed-out, or failed validator records a
+failed result, blocks repair, and does not push. Fork or cross-repository PRs
+are human blockers in v1.
 Before credentialed fetch or push, the repair workflow verifies that `origin`
 and any configured push URL map exactly to the recorded GitHub
 host/owner/repository, disables Git hooks with
 `-c core.hooksPath=/dev/null`, and pushes with `--no-verify`.
 The credential-free `gc core-city pr-babysit check-credentials --json`
-command verifies the operator capability and validator attestations plus
-token separation only; it does not replace the validator run.
+command verifies the operator capability, validator attestation, lowercase
+SHA-256 format, and token separation only; it does not replace binding the
+hash to the executable or running the validator.
 
 d2b is enabled first. The `city-source` rig remains suspended-on-start and
 must not be enabled for live repair until the U8 disposable d2b acceptance

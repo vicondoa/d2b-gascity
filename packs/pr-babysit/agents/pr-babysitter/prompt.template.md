@@ -63,14 +63,14 @@ verify_projection() {
   marker_value="$(cat "$marker")" || blocker "cannot read $marker"
   [ "$marker_value" = "$commit" ] || blocker "wrong commit in $marker"
 
-  verify_file 'be2edffc1433987d4e96705fa72c0153a2f61535264e5f0945c2588d05530b3a' 'SKILL.md'
+  verify_file '50de66f88f3c8ae0f7f416b48af1b19322281fbeccfcdfa90682079c6b535be6' 'SKILL.md'
   verify_file '158a3624dd0150de39bdaba507a7685bb887c6f28899b38b1c268492a5a66ceb' 'references/branch-currency.md'
-  verify_file 'cd163ea9d6fbd70b35a9806f7130a1b1538936dd607a4b7d98cadf9ee88b8f4a' 'references/envelope.md'
+  verify_file 'ae949804f6491ac65bddb4cbacbcbc52f9877e8df6d782febb8fdb2bdfc4c241' 'references/envelope.md'
   verify_file 'aebd3a9955d7fb53e94512e4bdc998dfe7e1ca725fbfde6f902fde8382903034' 'references/pipeline.md'
   verify_file '31d79d87f9e63940714656cb35af5746aed53cc6f263de17a60b4f0e04e6362f' 'references/report.md'
   verify_file '325165b26f0945dc988df09bc8ba6dbc1baad1311a0d39d946b60f3253923e1f' 'references/settle.md'
-  verify_file 'd3eee9d0b5a132738613b353de879cdb52ceab1394d274101de7749d8377818c' 'references/setup.md'
-  verify_file 'dd8e0c2c9c5a5c99ce1bb7ff1f51fff139f541aa78a11de694612c8e1769e811' 'references/tick.md'
+  verify_file '674b73e99093531d925b0ffe349a651e3ad4dc31ff029777c53175e4df730c3c' 'references/setup.md'
+  verify_file 'eaeb7899f2647c0e448d8a23657bab741d4a28aacbc693e44100b46862ceb9d9' 'references/tick.md'
   verify_file 'ffa2bbb69316326c9d6f52a6834008c77e095607678292e228f6cd99ad748932' 'references/watch-loop.md'
   verify_file 'e1baf200b8fed443ef997f03600a42cfaee7bf301b70f48373217c9d554a97e4' 'scripts/pr-snapshot'
 }
@@ -152,15 +152,17 @@ metadata.handoff_verified=true
 metadata.handoff_watch_id=<watch-id>
 metadata.handoff_target=<rig>/pr-babysit.pr-babysitter
 metadata.handoff_publication_bead=<publication-bead-id>
-metadata.handoff_route_status=complete (or absent for a complete legacy receipt)
+metadata.handoff_route_status=complete
+metadata.handoff_wake_status=delivered
 ```
 
 The exact same-repository fence is mandatory:
 `metadata.head_repository` must equal
-`metadata.owner/metadata.repository`. Explicit `pending` and
-`route-failed` receipt states, missing receipt fields, and any other
-identity mismatch are blockers. Do not invoke `gh`, Git, a snapshot, or a
-repair until this receipt check passes.
+`metadata.owner/metadata.repository`. `ready` is only a recoverable
+publication-handoff wake-replay intermediate; explicit `pending`, `ready`, or
+`route-failed` receipt states, missing receipt fields, and any other identity
+mismatch are blockers. Do not invoke `gh`, Git, a snapshot, or a repair until
+this receipt check passes.
 
 All snapshots must use exactly `$GC_DIR/state/<watch-id>`. The helper also
 validates every existing path component and refuses paths outside this
