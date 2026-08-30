@@ -73,14 +73,16 @@ boundary rather than an inferred permission check.
 Keep publication credentials, repair GitHub credentials, Copilot Requests
 credentials, and Discord app credentials separate. `GH_TOKEN` and
 `GITHUB_TOKEN` must not reuse any Copilot token or token variable. Never print
-or persist any of these credentials. The repair path fails closed when the
-attestation is missing or when a GitHub token is coupled to a Copilot token.
-Before repair, the operator must provide `PR_BABYSIT_VALIDATOR` as an
-absolute, non-symlink, executable file and set
-`PR_BABYSIT_VALIDATOR_ATTESTED=credential-isolated-v1`. It must run
-`make check` in a credential- and network-isolated environment. A missing
-validator blocks repair, as do an invalid or failed validator. There is no
-direct-make fallback.
+or persist any of these credentials. The repair path fails closed when the attestation is missing or when a GitHub
+token is coupled to a Copilot token. Before repair, the operator must provide
+`PR_BABYSIT_VALIDATOR` as an absolute, non-symlink, executable file, its
+64-character lowercase hexadecimal `PR_BABYSIT_VALIDATOR_SHA256`, and set
+`PR_BABYSIT_VALIDATOR_ATTESTED=credential-isolated-v1`. The workflow hashes
+the selected executable with `sha256sum` and runs it through
+`timeout --foreground --kill-after=5s` with a positive timeout from 1 through
+900 seconds (default 900). It must run `make check` in a credential- and
+network-isolated environment. A missing, mismatched, timed-out, or failed
+validator blocks repair without a push. There is no direct-make fallback.
 
 The repair path uses only the existing PR head and normal push. Version 1 does
 not use `update-branch`; `BEHIND`, dirty, conflicting, stale-head, unknown

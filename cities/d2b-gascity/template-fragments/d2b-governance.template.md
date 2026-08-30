@@ -29,9 +29,11 @@ target-only: they may inspect and repair the named pull request on its
 existing head branch, but may not create a replacement pull request. Repairs
 are same-repository-only; fork or cross-repository PRs are human blockers in
 v1. Before repair, the operator must provide an absolute, non-symlink,
-executable `PR_BABYSIT_VALIDATOR` and set
+executable `PR_BABYSIT_VALIDATOR`, its matching 64-character lowercase
+`PR_BABYSIT_VALIDATOR_SHA256`, and set
 `PR_BABYSIT_VALIDATOR_ATTESTED=credential-isolated-v1`; it runs `make check`
-in a credential- and network-isolated environment, and a missing validator
+in a credential- and network-isolated environment through the bounded
+validator timeout, and a missing, mismatched, timed-out, or failed validator
 blocks repair. It may never merge; it may never force-push or rebase, approve
 workflow runs, or update branch currency. Merge decisions remain human-owned.
 The deterministic state CLI is exposed only through the city-scoped

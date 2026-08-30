@@ -26,10 +26,13 @@ When `open_pr` is true:
 
    The command first routes the watch without waking it, persists matching
    `handoff_verified=true` identity receipts on the publication and watch
-   beads, then nudges the binding-qualified babysitter. A route or wake
-   failure records a recoverable `handoff_route_status=route-failed` state
-   without leaving a verified receipt. Repeating a complete receipt does not
-   issue another wake.
+   beads, then nudges the binding-qualified babysitter. A complete receipt
+   requires `handoff_route_status=complete` and
+   `handoff_wake_status=delivered`. A route or wake failure records a
+   recoverable `handoff_route_status=route-failed` state without leaving a
+   verified receipt; `handoff_wake_status=ready` is only a recoverable
+   wake-replay intermediate. Repeating a complete receipt does not issue
+   another wake.
 
 4. Immediately before closing this publication step, verify the machine-owned
    receipt:

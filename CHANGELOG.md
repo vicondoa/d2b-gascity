@@ -21,8 +21,9 @@ and this project follows semantic versioning where releases are published.
   `base_ref=v3` or `base_ref=main`, and publication metadata requires
   `merge_strategy=pr`.
 - Documented same-repository-only repair, the mandatory absolute,
-  non-symlink executable `PR_BABYSIT_VALIDATOR`, and its
-  `PR_BABYSIT_VALIDATOR_ATTESTED=credential-isolated-v1` attestation.
+  non-symlink executable `PR_BABYSIT_VALIDATOR`, matching lowercase SHA-256
+  attestation, bounded validator timeout, and
+  `PR_BABYSIT_VALIDATOR_ATTESTED=credential-isolated-v1`.
 - Documented target-only d2b `v3` and city-source `main` behavior, review-
   before-CI checkpoint order, action-child dependency wake, three CI and two
   review attempts, eight active hours, a three-day backstop, explicit rearm,

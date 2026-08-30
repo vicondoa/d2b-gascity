@@ -90,9 +90,11 @@ and machine-enforced reviewer verdict before validation or a bounded normal
 push, and local snapshot disposition replaces any GitHub thread mutation.
 Repairs are same-repository-only; fork and cross-repository PRs are human
 blockers in v1. Repair also requires an absolute, non-symlink, executable
-`PR_BABYSIT_VALIDATOR` with
+`PR_BABYSIT_VALIDATOR` with its matching 64-character lowercase
+`PR_BABYSIT_VALIDATOR_SHA256` and
 `PR_BABYSIT_VALIDATOR_ATTESTED=credential-isolated-v1` to run `make check` in
-a credential- and network-isolated environment. These local Pack v2 files are
+a credential- and network-isolated environment through the bounded
+`timeout --foreground --kill-after=5s` validator execution. These local Pack v2 files are
 repository-owned Apache-2.0 content unless a file retains an upstream notice.
 
 The deterministic state CLI is exposed through the already city-scoped

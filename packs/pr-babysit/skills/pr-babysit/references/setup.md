@@ -14,8 +14,11 @@ The show result must be a watch record with verified `rig`, `github_host`,
 `head_ref`, `head_sha`, and `generation` fields. It must also carry a complete
 publication receipt: `handoff_verified=true`,
 `handoff_watch_id=<watch-id>`,
-`handoff_target=<rig>/pr-babysit.pr-babysitter`, and a publication bead
-identity. Explicit `pending` or `route-failed` receipt states are blockers.
+`handoff_target=<rig>/pr-babysit.pr-babysitter`,
+`handoff_publication_bead=<publication-bead-id>`,
+`handoff_route_status=complete`, and
+`handoff_wake_status=delivered`. Explicit `pending`, `ready`, or
+`route-failed` receipt states are blockers.
 `head_repository` must equal `owner/repository`. A missing, malformed, stale,
 or mismatched field is a blocker. Never resolve a target from a current branch
 or from message text.
