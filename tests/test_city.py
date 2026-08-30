@@ -2495,6 +2495,7 @@ class VendoredPrBabysitTests(unittest.TestCase):
                 ),
                 encoding="utf-8",
             )
+            (root / "gc").mkdir()
             result = subprocess.run(
                 [
                     str(script),
@@ -2503,19 +2504,663 @@ class VendoredPrBabysitTests(unittest.TestCase):
                     "1",
                     "--repo",
                     "octo/example",
+                    "--watch-id",
+                    "d2b-pr-review-data",
                     "--state-dir",
-                    str(root / "state"),
+                    str(root / "gc" / "state" / "d2b-pr-review-data"),
                     "--fetch-file",
                     str(fixture),
                     "--start-invocation",
                 ],
                 capture_output=True,
                 text=True,
+                env=os.environ | {"GC_DIR": str(root / "gc")},
                 check=False,
             )
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn(planted, result.stdout)
             self.assertFalse(marker.exists())
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
+
+    def test_pr_babysit_wake_bootstrap_uses_watch_id_and_read_only_commands(self):
+        skill = (PR_BABYSIT_SKILL_ROOT / "SKILL.md").read_text(
+            encoding="utf-8"
+        )
+        prompt = (
+            PR_BABYSIT_ROOT
+            / "agents"
+            / "pr-babysitter"
+            / "prompt.template.md"
+        ).read_text(encoding="utf-8")
+        glossary = (
+            CORE_PACK_ROOT
+            / "template-fragments"
+            / "command-glossary.template.md"
+        ).read_text(encoding="utf-8")
+        show = "gc pr-babysit pr-babysit show --watch-id <watch-id> --json"
+        checkpoint = "gc pr-babysit pr-babysit checkpoint"
+        dispatch = "gc pr-babysit pr-babysit dispatch-repair"
+        for text in (skill, prompt):
+            self.assertIn(show, text)
+            self.assertIn(checkpoint, text)
+            self.assertIn(dispatch, text)
+            for field in (
+                "watch_id",
+                "expected_generation",
+                "expected_head_sha",
+                "observed_head_sha",
+                "observed_at",
+                "next_snapshot_at",
+                "action_kind",
+                "fingerprint",
+                "addressed_thread_ids",
+            ):
+                self.assertIn(field, text)
+            self.assertNotIn("git checkout", text.lower())
+            self.assertNotIn("git push", text.lower())
+        self.assertIn("gc pr-babysit pr-babysit", glossary)
+        gate_end = prompt.index("\ndone\n```")
+        self.assertGreater(prompt.index(show), gate_end)
+        self.assertIn("$GC_DIR/state/<watch-id>", prompt)
+        self.assertIn("current branch", prompt.lower())
+
+    @staticmethod
+    def _snapshot_fixture(
+        root: pathlib.Path,
+        *,
+        base: dict[str, object],
+        threads: list[dict[str, object]] | None = None,
+        extra: dict[str, object] | None = None,
+    ) -> tuple[subprocess.CompletedProcess[str], pathlib.Path]:
+        script = PR_BABYSIT_SKILL_ROOT / "scripts" / "pr-snapshot"
+        gc_dir = root / "gc"
+        gc_dir.mkdir(parents=True)
+        fixture = root / "snapshot.json"
+        payload: dict[str, object] = {
+            "url": "https://github.com/octo/example/pull/7",
+            "pr_state": "OPEN",
+            "head_ref": "feature/x",
+            "head_sha": "a" * 40,
+            "mergeable": "MERGEABLE",
+            "merge_state_status": "CLEAN",
+            "base": base,
+            "checks": [],
+            "threads": threads or [],
+            "feedback": [],
+        }
+        payload.update(extra or {})
+        fixture.write_text(json.dumps(payload), encoding="utf-8")
+        result = subprocess.run(
+            [
+                str(script),
+                "snapshot",
+                "--pr",
+                "7",
+                "--repo",
+                "octo/example",
+                "--expected-base",
+                "main",
+                "--expected-head-ref",
+                "feature/x",
+                "--expected-head-sha",
+                "a" * 40,
+                "--watch-id",
+                "d2b-pr-test",
+                "--state-dir",
+                str(gc_dir / "state" / "d2b-pr-test"),
+                "--fetch-file",
+                str(fixture),
+                "--start-invocation",
+            ],
+            cwd=ROOT,
+            env=os.environ | {"GC_DIR": str(gc_dir)},
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        return result, gc_dir
+
+    def test_pr_snapshot_base_identity_is_current_stale_or_unknown(self):
+        cases = (
+            ("current", {"ref": "main", "oid": "b" * 40, "current_oid": "b" * 40}),
+            ("stale", {"ref": "main", "oid": "b" * 40, "current_oid": "c" * 40}),
+            ("unknown", {"ref": "main", "oid": "b" * 40, "identity": "unknown"}),
+        )
+        for identity, base in cases:
+            with self.subTest(identity=identity):
+                root = ROOT / ".scratch" / f"snapshot-base-{identity}"
+                shutil.rmtree(root, ignore_errors=True)
+                root.mkdir(parents=True)
+                try:
+                    result, _ = self._snapshot_fixture(root, base=base)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    snapshot = json.loads(result.stdout)
+                    self.assertEqual(snapshot["base"]["identity"], identity)
+                    self.assertEqual(snapshot["base_ref_blocker"], None if identity == "current" else identity)
+                    self.assertEqual(
+                        snapshot["mergeability_certain"],
+                        identity == "current",
+                    )
+                finally:
+                    shutil.rmtree(root, ignore_errors=True)
+
+    def test_pr_snapshot_live_base_identity_compares_repository_ref(self):
+        page = {
+            "data": {
+                "repository": {
+                    "pullRequest": {
+                        "reviewThreads": {
+                            "nodes": [],
+                            "pageInfo": {
+                                "hasNextPage": False,
+                                "endCursor": None,
+                            },
+                        }
+                    }
+                }
+            }
+        }
+        cases = (
+            ("current", {"object": {"sha": "b" * 40}}, True),
+            ("stale", {"object": {"sha": "c" * 40}}, True),
+            ("unknown", {"object": {}}, False),
+        )
+        for identity, base, succeeds in cases:
+            with self.subTest(identity=identity):
+                root = ROOT / ".scratch" / f"snapshot-live-base-{identity}"
+                shutil.rmtree(root, ignore_errors=True)
+                root.mkdir(parents=True)
+                try:
+                    result, calls = self._run_live_snapshot(
+                        root,
+                        graphql=[page],
+                        base=base,
+                    )
+                    if succeeds:
+                        self.assertEqual(result.returncode, 0, result.stderr)
+                        snapshot = json.loads(result.stdout)
+                        self.assertEqual(
+                            snapshot["base"]["identity"],
+                            identity,
+                        )
+                        self.assertEqual(
+                            snapshot["base"]["current_oid"],
+                            base["object"]["sha"],
+                        )
+                        self.assertEqual(
+                            [call[0:2] for call in calls[:2]],
+                            [["pr", "view"], ["api", "repos/octo/example/git/ref/heads/main"]],
+                        )
+                    else:
+                        self.assertNotEqual(result.returncode, 0)
+                        self.assertIn("invalid SHA", result.stderr)
+                finally:
+                    shutil.rmtree(root, ignore_errors=True)
+
+    def test_pr_snapshot_wake_payload_is_the_stable_watch_id(self):
+        root = ROOT / ".scratch" / "snapshot-wake"
+        shutil.rmtree(root, ignore_errors=True)
+        root.mkdir(parents=True)
+        try:
+            result, gc_dir = self._snapshot_fixture(
+                root,
+                base={
+                    "ref": "main",
+                    "oid": "b" * 40,
+                    "current_oid": "b" * 40,
+                },
+                extra={
+                    "checks": [
+                        {
+                            "key": "ci",
+                            "status": "COMPLETED",
+                            "conclusion": "SUCCESS",
+                        }
+                    ]
+                },
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            fixture = root / "snapshot.json"
+            source_root = root / "source"
+            source_root.mkdir()
+            sentinel = source_root / "sentinel"
+            sentinel.write_text("untouched\n", encoding="utf-8")
+            wake = subprocess.run(
+                [
+                    str(PR_BABYSIT_SKILL_ROOT / "scripts" / "pr-snapshot"),
+                    "watch",
+                    "--pr",
+                    "7",
+                    "--repo",
+                    "octo/example",
+                    "--expected-base",
+                    "main",
+                    "--expected-head-ref",
+                    "feature/x",
+                    "--expected-head-sha",
+                    "a" * 40,
+                    "--watch-id",
+                    "d2b-pr-wake",
+                    "--state-dir",
+                    str(gc_dir / "state" / "d2b-pr-wake"),
+                    "--fetch-file",
+                    str(fixture),
+                    "--start-invocation",
+                ],
+                cwd=ROOT,
+                env=os.environ
+                | {
+                    "GC_DIR": str(gc_dir),
+                    "GC_RIG_ROOT": str(source_root),
+                },
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(wake.returncode, 0, wake.stderr)
+            self.assertTrue(wake.stdout.startswith("BABYSIT_WAKE "))
+            payload = json.loads(wake.stdout.split(" ", 1)[1])
+            self.assertEqual(payload["watch_id"], "d2b-pr-wake")
+            self.assertEqual(
+                sentinel.read_text(encoding="utf-8"),
+                "untouched\n",
+            )
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
+
+    @staticmethod
+    def _fake_github_script() -> str:
+        return r"""#!/usr/bin/env python3
+import json
+import os
+import sys
+import time
+from pathlib import Path
+
+args = sys.argv[1:]
+config = json.loads(Path(os.environ["FAKE_GH_CONFIG"]).read_text(encoding="utf-8"))
+calls_path = Path(os.environ["FAKE_GH_CALLS"])
+calls = json.loads(calls_path.read_text(encoding="utf-8")) if calls_path.exists() else []
+calls.append(args)
+calls_path.write_text(json.dumps(calls), encoding="utf-8")
+if config.get("sleep"):
+    time.sleep(float(config["sleep"]))
+if args[:2] == ["pr", "view"]:
+    print(json.dumps(config["pr"]))
+elif args and args[0] == "api" and "graphql" in args:
+    index = sum("graphql" in call for call in calls[:-1])
+    print(json.dumps(config["graphql"][index]))
+elif args and args[0] == "api":
+    print(json.dumps(config["base"]))
+else:
+    print("unexpected GitHub command", file=sys.stderr)
+    raise SystemExit(2)
+"""
+
+    def _run_live_snapshot(
+        self,
+        root: pathlib.Path,
+        *,
+        graphql: list[dict[str, object]],
+        pr: dict[str, object] | None = None,
+        base: dict[str, object] | None = None,
+        timeout: str | None = None,
+    ) -> tuple[subprocess.CompletedProcess[str], list[list[str]]]:
+        fake = root / "gh"
+        fake.write_text(self._fake_github_script(), encoding="utf-8")
+        fake.chmod(0o755)
+        calls_path = root / "gh-calls.json"
+        calls_path.write_text("[]\n", encoding="utf-8")
+        config_path = root / "gh-config.json"
+        config_path.write_text(
+            json.dumps(
+                {
+                    "pr": pr
+                    or {
+                        "state": "OPEN",
+                        "isDraft": False,
+                        "mergeable": "MERGEABLE",
+                        "mergeStateStatus": "CLEAN",
+                        "reviewDecision": None,
+                        "headRefName": "feature/x",
+                        "headRefOid": "a" * 40,
+                        "baseRefName": "main",
+                        "baseRefOid": "b" * 40,
+                        "url": "https://github.com/octo/example/pull/7",
+                        "statusCheckRollup": [],
+                        "comments": [],
+                        "reviews": [],
+                        "isCrossRepository": False,
+                        "headRepository": {"nameWithOwner": "octo/example"},
+                        "baseRepository": {"nameWithOwner": "octo/example"},
+                    },
+                    "base": base or {"object": {"sha": "b" * 40}},
+                    "graphql": graphql,
+                    "sleep": 1 if timeout is not None else 0,
+                }
+            ),
+            encoding="utf-8",
+        )
+        gc_dir = root / "gc"
+        gc_dir.mkdir(exist_ok=True)
+        env = os.environ | {
+            "GC_DIR": str(gc_dir),
+            "PR_BABYSIT_GH_BIN": str(fake),
+            "FAKE_GH_CONFIG": str(config_path),
+            "FAKE_GH_CALLS": str(calls_path),
+        }
+        if timeout is not None:
+            env["PR_BABYSIT_GITHUB_TIMEOUT_SECONDS"] = timeout
+        result = subprocess.run(
+            [
+                str(PR_BABYSIT_SKILL_ROOT / "scripts" / "pr-snapshot"),
+                "snapshot",
+                "--pr",
+                "7",
+                "--repo",
+                "octo/example",
+                "--expected-base",
+                "main",
+                "--expected-head-ref",
+                "feature/x",
+                "--expected-head-sha",
+                "a" * 40,
+                "--watch-id",
+                "d2b-pr-live",
+                "--state-dir",
+                str(gc_dir / "state" / "d2b-pr-live"),
+                "--start-invocation",
+            ],
+            cwd=ROOT,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        return result, json.loads(calls_path.read_text(encoding="utf-8"))
+
+    def test_pr_snapshot_fetches_paginated_inline_threads_as_data(self):
+        root = ROOT / ".scratch" / "snapshot-graphql"
+        shutil.rmtree(root, ignore_errors=True)
+        root.mkdir(parents=True)
+        marker = root / "review-command-ran"
+        planted = f"$(touch {marker})"
+        page_one = {
+            "data": {
+                "repository": {
+                    "pullRequest": {
+                        "reviewThreads": {
+                            "nodes": [
+                                {
+                                    "id": "thread-open",
+                                    "isResolved": False,
+                                    "isOutdated": False,
+                                    "comments": {
+                                        "nodes": [
+                                            {
+                                                "id": "comment-open",
+                                                "author": {"login": "reviewer"},
+                                                "body": planted,
+                                                "url": "https://github.com/comment/open",
+                                            }
+                                        ],
+                                        "pageInfo": {
+                                            "hasNextPage": False,
+                                            "endCursor": None,
+                                        },
+                                    },
+                                },
+                                {
+                                    "id": "thread-resolved",
+                                    "isResolved": True,
+                                    "isOutdated": False,
+                                    "comments": {
+                                        "nodes": [
+                                            {
+                                                "id": "comment-resolved",
+                                                "author": {"login": "reviewer"},
+                                                "body": "resolved",
+                                                "url": "https://github.com/comment/resolved",
+                                            }
+                                        ],
+                                        "pageInfo": {
+                                            "hasNextPage": False,
+                                            "endCursor": None,
+                                        },
+                                    },
+                                },
+                            ],
+                            "pageInfo": {
+                                "hasNextPage": True,
+                                "endCursor": "cursor-1",
+                            },
+                        }
+                    }
+                }
+            }
+        }
+        page_two = {
+            "data": {
+                "repository": {
+                    "pullRequest": {
+                        "reviewThreads": {
+                            "nodes": [
+                                {
+                                    "id": "thread-outdated",
+                                    "isResolved": False,
+                                    "isOutdated": True,
+                                    "comments": {
+                                        "nodes": [
+                                            {
+                                                "id": "comment-outdated",
+                                                "author": {"login": "reviewer"},
+                                                "body": "outdated",
+                                                "url": "https://github.com/comment/outdated",
+                                            }
+                                        ],
+                                        "pageInfo": {
+                                            "hasNextPage": False,
+                                            "endCursor": None,
+                                        },
+                                    },
+                                },
+                                {
+                                    "id": "thread-open-2",
+                                    "isResolved": False,
+                                    "isOutdated": False,
+                                    "comments": {
+                                        "nodes": [
+                                            {
+                                                "id": "comment-open-2",
+                                                "author": {"login": "reviewer-2"},
+                                                "body": "second open",
+                                                "url": "https://github.com/comment/open-2",
+                                            }
+                                        ],
+                                        "pageInfo": {
+                                            "hasNextPage": False,
+                                            "endCursor": None,
+                                        },
+                                    },
+                                },
+                            ],
+                            "pageInfo": {
+                                "hasNextPage": False,
+                                "endCursor": None,
+                            },
+                        }
+                    }
+                }
+            }
+        }
+        try:
+            result, calls = self._run_live_snapshot(
+                root,
+                graphql=[page_one, page_two],
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            snapshot = json.loads(result.stdout)
+            threads = {
+                item["thread_id"]: item for item in snapshot["threads"]
+            }
+            self.assertEqual(snapshot["counts"]["threads"], 2)
+            self.assertEqual(
+                set(threads),
+                {
+                    "thread-open",
+                    "thread-resolved",
+                    "thread-outdated",
+                    "thread-open-2",
+                },
+            )
+            self.assertEqual(
+                threads["thread-open"]["comments"][0]["body"],
+                planted,
+            )
+            self.assertEqual(
+                threads["thread-open"]["comments"][0]["author"],
+                "reviewer",
+            )
+            self.assertEqual(
+                threads["thread-resolved"]["is_resolved"],
+                True,
+            )
+            self.assertEqual(
+                threads["thread-outdated"]["is_outdated"],
+                True,
+            )
+            self.assertFalse(marker.exists())
+            self.assertEqual(sum("graphql" in call for call in calls), 2)
+            self.assertNotIn(
+                planted,
+                json.dumps([call for call in calls if "graphql" in call]),
+            )
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
+
+    def test_pr_snapshot_surfaces_fork_identity_without_mapping_head(self):
+        root = ROOT / ".scratch" / "snapshot-fork"
+        shutil.rmtree(root, ignore_errors=True)
+        root.mkdir(parents=True)
+        try:
+            result, _ = self._run_live_snapshot(
+                root,
+                graphql=[
+                    {
+                        "data": {
+                            "repository": {
+                                "pullRequest": {
+                                    "reviewThreads": {
+                                        "nodes": [],
+                                        "pageInfo": {
+                                            "hasNextPage": False,
+                                            "endCursor": None,
+                                        },
+                                    }
+                                }
+                            }
+                        }
+                    }
+                ],
+                pr={
+                    "state": "OPEN",
+                    "isDraft": False,
+                    "mergeable": "MERGEABLE",
+                    "mergeStateStatus": "CLEAN",
+                    "reviewDecision": None,
+                    "headRefName": "feature/x",
+                    "headRefOid": "a" * 40,
+                    "baseRefName": "main",
+                    "baseRefOid": "b" * 40,
+                    "url": "https://github.com/octo/example/pull/7",
+                    "statusCheckRollup": [],
+                    "comments": [],
+                    "reviews": [],
+                    "isCrossRepository": True,
+                    "headRepository": {"nameWithOwner": "fork/example"},
+                    "baseRepository": {"nameWithOwner": "octo/example"},
+                },
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            snapshot = json.loads(result.stdout)
+            self.assertTrue(snapshot["cross_repository"])
+            self.assertEqual(
+                snapshot["identity_blocker"]["code"],
+                "cross-repository-head",
+            )
+            self.assertEqual(snapshot["head_repository"], "fork/example")
+            self.assertFalse(snapshot["mergeability_certain"])
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
+
+    def test_pr_snapshot_github_timeout_fails_closed(self):
+        root = ROOT / ".scratch" / "snapshot-timeout"
+        shutil.rmtree(root, ignore_errors=True)
+        root.mkdir(parents=True)
+        try:
+            result, _ = self._run_live_snapshot(
+                root,
+                graphql=[],
+                timeout="0.05",
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("timed out", result.stderr.lower())
+            self.assertNotIn("traceback", result.stderr.lower())
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
+
+    def test_pr_snapshot_rejects_symlinked_watch_state_path(self):
+        root = ROOT / ".scratch" / "snapshot-symlink"
+        shutil.rmtree(root, ignore_errors=True)
+        root.mkdir(parents=True)
+        try:
+            gc_dir = root / "gc"
+            gc_dir.mkdir()
+            outside = root / "outside"
+            outside.mkdir()
+            (gc_dir / "state").symlink_to(outside, target_is_directory=True)
+            fixture = root / "fixture.json"
+            fixture.write_text(
+                json.dumps(
+                    {
+                        "head_sha": "a" * 40,
+                        "base": {
+                            "ref": "main",
+                            "oid": "b" * 40,
+                            "current_oid": "b" * 40,
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            result = subprocess.run(
+                [
+                    str(PR_BABYSIT_SKILL_ROOT / "scripts" / "pr-snapshot"),
+                    "snapshot",
+                    "--pr",
+                    "7",
+                    "--repo",
+                    "octo/example",
+                    "--expected-base",
+                    "main",
+                    "--watch-id",
+                    "d2b-pr-symlink",
+                    "--state-dir",
+                    str(gc_dir / "state" / "d2b-pr-symlink"),
+                    "--fetch-file",
+                    str(fixture),
+                    "--start-invocation",
+                ],
+                cwd=ROOT,
+                env=os.environ | {"GC_DIR": str(gc_dir)},
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("symlink", result.stderr.lower())
+            self.assertFalse((outside / "d2b-pr-symlink").exists())
         finally:
             shutil.rmtree(root, ignore_errors=True)
 
@@ -2669,8 +3314,10 @@ class VendoredPrBabysitTests(unittest.TestCase):
         ):
             self.assertIn(marker.lower(), lowered)
         gate = lowered.index(PR_BABYSIT_PROJECTION_MARKER)
-        for action in ("`gh`", "git push"):
-            self.assertGreater(lowered.index(action), gate, action)
+        show = "gc pr-babysit pr-babysit show --watch-id <watch-id> --json"
+        self.assertGreater(lowered.index(show), gate)
+        self.assertNotIn("git checkout", lowered)
+        self.assertNotIn("git push", lowered)
         for marker in (
             "user-global",
             "/tmp",

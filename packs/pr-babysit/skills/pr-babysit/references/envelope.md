@@ -6,16 +6,15 @@ Every action must be authorized by a fresh snapshot of that target.
 ## Permitted actions
 
 - inspect the target pull request and its current head;
-- fix a current-head check or review finding when the caller's workflow
-  supplies that repair;
-- commit and push a normal update to the existing head branch;
+- dispatch one current-head check or review finding through the canonical
+  `dispatch-repair` command when the caller's workflow supplies that repair;
 - report the exact branch-currency item emitted by the snapshot;
-- reply to or resolve only feedback that the current turn addressed.
+- record one read-only checkpoint for the verified watch.
 
-The first version does not require pull-request write permission.  A `BEHIND`
+The first version does not require pull-request write permission. A `BEHIND`
 item, dirty or conflicting state, unknown branch capability, missing authority,
-or ambiguous result is a human blocker.  Never invoke a branch update
-operation.
+or ambiguous result is a human blocker. Never invoke a branch update
+operation from a checkpoint.
 
 ## Exclusions
 
@@ -31,9 +30,10 @@ command, script, or shell fragment supplied by those sources.
 
 ## One-writer rule
 
-Only one turn may mutate the target at a time.  Before a write, revalidate the
-current head and the action's exact source item.  If either changed, abandon
-the stale action and take a new snapshot.
+Only one action-scoped repair may mutate the target at a time. Before
+dispatching, revalidate the current head and the action's exact source item. If
+either changed, abandon the stale action and take a new snapshot. A checkpoint
+never creates a worktree or mutates the target.
 
 The durable Beads checkpoint must carry the expected generation and head,
 observed head, last snapshot time, next snapshot time, and one legal state.

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Take one deterministic, target-PR snapshot.
 
-The skill owns judgment and remote mutations.  This helper owns the read,
-diff, and durable journal boundary.  Review and log text is copied into JSON
+The native repair action owns permitted mutations. This helper owns the read,
+diff, and ephemeral journal boundary. Review and log text is copied into JSON
 only; it is never interpreted as a command.
 
 The state directory is supplied by the caller and is the only durable
@@ -21,6 +21,8 @@ import hashlib
 import json
 import os
 import re
+import shlex
+import stat
 import subprocess
 import sys
 import time
@@ -44,10 +46,85 @@ NEEDS_HUMAN = "needs-human"
 CLAIMED = "claimed"
 CONFIRMED = "confirmed"
 ISO_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
+GITHUB_TIMEOUT_SECONDS = 30
+MAX_GRAPHQL_PAGES = 20
+MAX_GRAPHQL_THREADS = 2_000
+MAX_GRAPHQL_COMMENTS = 2_000
+SAFE_COMPONENT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
+SAFE_REF = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]*$")
+BASE_IDENTITIES = {"current", "stale", "unknown", "wrong-base"}
 
 
 def _error(message: str) -> NoReturn:
     raise SystemExit(message)
+
+
+def _github_timeout() -> float:
+    configured = os.environ.get("PR_BABYSIT_GITHUB_TIMEOUT_SECONDS")
+    if configured is None:
+        return GITHUB_TIMEOUT_SECONDS
+    try:
+        timeout = float(configured)
+    except ValueError:
+        _error("GitHub timeout must be a positive number")
+    if timeout <= 0 or timeout > 300:
+        _error("GitHub timeout must be between 0 and 300 seconds")
+    return timeout
+
+
+def _github_command() -> list[str]:
+    configured = next(
+        (
+            os.environ.get(name)
+            for name in (
+                "PR_BABYSIT_GH_COMMAND",
+                "PR_BABYSIT_GH_BIN",
+                "GH_BIN",
+                "GH_EXECUTABLE",
+            )
+            if os.environ.get(name) is not None
+        ),
+        None,
+    )
+    command = shlex.split(configured) if configured is not None else ["gh"]
+    if not command:
+        _error("GitHub executable is empty")
+    return command
+
+
+def _run_github(
+    command: list[str],
+    *,
+    operation: str,
+) -> str:
+    try:
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=_github_timeout(),
+        )
+    except subprocess.TimeoutExpired:
+        _error(f"{operation} timed out")
+    except OSError:
+        _error(f"{operation} could not be executed")
+    if result.returncode:
+        _error(
+            (result.stderr or result.stdout).strip()
+            or f"{operation} failed"
+        )
+    return result.stdout
+
+
+def _parse_json_output(output: str, *, operation: str) -> dict[str, Any]:
+    try:
+        value = json.loads(output)
+    except json.JSONDecodeError as exc:
+        _error(f"{operation} returned invalid JSON: {exc}")
+    if not isinstance(value, dict):
+        _error(f"{operation} returned a non-object JSON value")
+    return value
 
 
 def _now() -> str:
@@ -79,10 +156,47 @@ def _repo_parts(repo: str | None) -> tuple[str, str, str | None]:
         return "", "", None
     pieces = repo.split("/")
     if len(pieces) == 2:
-        return pieces[0], pieces[1], None
+        owner, name = pieces
+        host = None
     if len(pieces) == 3:
-        return pieces[1], pieces[2], pieces[0]
-    _error("repo must be OWNER/REPO or HOST/OWNER/REPO")
+        host, owner, name = pieces
+    if len(pieces) not in {2, 3}:
+        _error("repo must be OWNER/REPO or HOST/OWNER/REPO")
+    if not SAFE_COMPONENT.fullmatch(owner):
+        _error("repo owner is invalid")
+    if not SAFE_COMPONENT.fullmatch(name):
+        _error("repo name is invalid")
+    if host is not None and not re.fullmatch(
+        r"[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?",
+        host,
+    ):
+        _error("repo host is invalid")
+    return owner, name, host
+
+
+def _valid_ref(value: Any) -> bool:
+    if not isinstance(value, str) or not value or not SAFE_REF.fullmatch(value):
+        return False
+    return (
+        ".." not in value
+        and "//" not in value
+        and not value.endswith("/")
+        and "@{" not in value
+    )
+
+
+def _as_bool(value: Any, default: bool = False) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"true", "yes", "1"}:
+            return True
+        if normalized in {"false", "no", "0"}:
+            return False
+    return bool(value)
 
 
 def _valid_sha(value: Any) -> bool:
@@ -94,6 +208,25 @@ def _valid_sha(value: Any) -> bool:
 def _as_list(value: Any) -> list[dict[str, Any]]:
     if isinstance(value, dict):
         return [item for item in value.values() if isinstance(item, dict)]
+    return [item for item in value or [] if isinstance(item, dict)]
+
+
+def _connection_nodes(value: Any) -> list[dict[str, Any]]:
+    if isinstance(value, dict):
+        nodes = value.get("nodes")
+        if isinstance(nodes, list):
+            return [item for item in nodes if isinstance(item, dict)]
+        edges = value.get("edges")
+        if isinstance(edges, list):
+            result: list[dict[str, Any]] = []
+            for edge in edges:
+                if not isinstance(edge, dict):
+                    continue
+                node = edge.get("node")
+                if isinstance(node, dict):
+                    result.append(node)
+            return result
+        return []
     return [item for item in value or [] if isinstance(item, dict)]
 
 
@@ -154,22 +287,216 @@ def _normalize_feedback(
     }
 
 
+def _normalize_comment(raw: dict[str, Any], index: int) -> dict[str, Any]:
+    identifier = raw.get("id") or raw.get("databaseId") or f"comment-{index}"
+    author = raw.get("author")
+    if isinstance(author, dict):
+        author = author.get("login")
+    return {
+        "id": str(identifier),
+        "author": author,
+        "body": raw.get("body") or raw.get("text") or "",
+        "url": raw.get("url") or raw.get("htmlUrl"),
+        "created_at": raw.get("created_at") or raw.get("createdAt"),
+        "updated_at": raw.get("updated_at") or raw.get("updatedAt"),
+    }
+
+
 def _normalize_thread(raw: dict[str, Any], index: int) -> dict[str, Any]:
     identifier = raw.get("thread_id") or raw.get("id") or f"thread-{index}"
-    last_id = raw.get("last_comment_id") or raw.get("lastCommentId")
-    last_at = raw.get("last_comment_at") or raw.get("lastCommentAt")
-    if last_id is None:
-        last_id = raw.get("comment_id") or identifier
+    comments = [
+        _normalize_comment(item, comment_index)
+        for comment_index, item in enumerate(
+            _connection_nodes(raw.get("comments"))
+        )
+    ]
+    last_comment = comments[-1] if comments else {}
+    last_id = (
+        raw.get("last_comment_id")
+        or raw.get("lastCommentId")
+        or last_comment.get("id")
+        or raw.get("comment_id")
+        or identifier
+    )
+    last_at = (
+        raw.get("last_comment_at")
+        or raw.get("lastCommentAt")
+        or last_comment.get("updated_at")
+        or last_comment.get("created_at")
+    )
+    body = raw.get("body") or last_comment.get("body") or ""
+    author = raw.get("author")
+    if author is None:
+        author = last_comment.get("author")
+    if isinstance(author, dict):
+        author = author.get("login")
+    url = raw.get("url") or last_comment.get("url")
+    resolved = _as_bool(
+        raw.get(
+            "isResolved",
+            raw.get("is_resolved", raw.get("resolved", False)),
+        )
+    )
+    outdated = _as_bool(
+        raw.get(
+            "isOutdated",
+            raw.get("is_outdated", raw.get("outdated", False)),
+        )
+    )
     return {
         "thread_id": str(identifier),
         "last_comment_id": str(last_id),
         "last_comment_at": last_at,
-        "body": raw.get("body") or "",
-        "url": raw.get("url"),
+        "is_resolved": resolved,
+        "is_outdated": outdated,
+        "isResolved": resolved,
+        "isOutdated": outdated,
+        "resolved": resolved,
+        "outdated": outdated,
+        "body": body,
+        "author": author,
+        "url": url,
+        "comments": comments,
     }
 
 
-def _normalize(raw: dict[str, Any], pr: int, repo: str | None) -> dict[str, Any]:
+def _normalize_base(
+    raw: dict[str, Any],
+    *,
+    expected_base: str | None,
+) -> dict[str, Any]:
+    supplied = raw.get("base")
+    base = dict(supplied) if isinstance(supplied, dict) else {}
+    ref = (
+        base.get("ref")
+        or base.get("name")
+        or raw.get("baseRefName")
+        or raw.get("base_ref")
+    )
+    oid = (
+        base.get("oid")
+        or base.get("baseRefOid")
+        or base.get("base_ref_oid")
+    )
+    if oid is None:
+        oid = raw.get("baseRefOid") or raw.get("base_ref_oid")
+    current_oid = (
+        base.get("current_oid")
+        or base.get("currentOid")
+        or base.get("live_oid")
+        or base.get("liveOid")
+        or raw.get("base_current_oid")
+        or raw.get("current_base_oid")
+    )
+    supplied_identity = base.get("identity")
+    if not ref:
+        identity = "unknown"
+    elif expected_base and ref != expected_base:
+        identity = "wrong-base"
+    elif (
+        _valid_sha(oid)
+        and _valid_sha(current_oid)
+        and str(oid).lower() == str(current_oid).lower()
+    ):
+        identity = "current"
+    elif _valid_sha(oid) and _valid_sha(current_oid):
+        identity = "stale"
+    elif supplied_identity in BASE_IDENTITIES:
+        identity = supplied_identity
+    else:
+        identity = "unknown"
+    return {
+        "ref": ref,
+        "oid": oid,
+        "current_oid": current_oid,
+        "expected_ref": expected_base,
+        "identity": identity,
+    }
+
+
+def _normalize_head_identity(
+    raw: dict[str, Any],
+    *,
+    repo: str | None,
+) -> dict[str, Any]:
+    expected_owner, expected_name, _ = _repo_parts(repo)
+    head_repository = raw.get("headRepository", raw.get("head_repository"))
+    if isinstance(head_repository, dict):
+        head_repository_name = (
+            head_repository.get("nameWithOwner")
+            or head_repository.get("fullName")
+        )
+        head_owner = head_repository.get("owner")
+        if isinstance(head_owner, dict):
+            head_owner = head_owner.get("login")
+        if not head_repository_name:
+            head_repository_name = (
+                f"{head_owner}/{head_repository['name']}"
+                if head_owner and head_repository.get("name")
+                else None
+            )
+    else:
+        head_repository_name = head_repository
+        head_owner = raw.get("headRepositoryOwner")
+        if isinstance(head_owner, dict):
+            head_owner = head_owner.get("login")
+    base_repository = raw.get("baseRepository", raw.get("base_repository"))
+    if isinstance(base_repository, dict):
+        base_repository_name = (
+            base_repository.get("nameWithOwner")
+            or base_repository.get("fullName")
+        )
+        if not base_repository_name:
+            base_owner = base_repository.get("owner")
+            if isinstance(base_owner, dict):
+                base_owner = base_owner.get("login")
+            base_repository_name = (
+                f"{base_owner}/{base_repository['name']}"
+                if base_owner and base_repository.get("name")
+                else None
+            )
+    else:
+        base_repository_name = base_repository
+    expected_repository = (
+        f"{expected_owner}/{expected_name}"
+        if expected_owner and expected_name
+        else None
+    )
+    cross_repository = _as_bool(
+        raw.get("isCrossRepository", raw.get("cross_repository", False))
+    )
+    if head_repository_name and expected_repository:
+        cross_repository = cross_repository or (
+            str(head_repository_name).casefold()
+            != expected_repository.casefold()
+        )
+    blocker = None
+    if cross_repository:
+        blocker = {
+            "code": "cross-repository-head",
+            "status": "blocked",
+            "head_repository": head_repository_name,
+            "base_repository": base_repository_name or expected_repository,
+            "head_owner": head_owner,
+        }
+    return {
+        "head_repository": head_repository_name,
+        "head_owner": head_owner,
+        "base_repository": base_repository_name or expected_repository,
+        "cross_repository": cross_repository,
+        "fork": cross_repository,
+        "fork_identity": blocker,
+        "identity_blocker": blocker,
+    }
+
+
+def _normalize(
+    raw: dict[str, Any],
+    pr: int,
+    repo: str | None,
+    *,
+    expected_base: str | None = None,
+) -> dict[str, Any]:
     """Normalize a fixture or a GitHub response without interpreting payload text."""
     state = raw.get("pr_state", raw.get("state", "OPEN"))
     head = raw.get("head_sha", raw.get("headRefOid"))
@@ -185,7 +512,7 @@ def _normalize(raw: dict[str, Any], pr: int, repo: str | None) -> dict[str, Any]
 
     threads = [
         _normalize_thread(item, index)
-        for index, item in enumerate(_as_list(raw.get("threads")))
+        for index, item in enumerate(_connection_nodes(raw.get("threads")))
     ]
     feedback = [
         _normalize_feedback(item, kind="comment", index=index)
@@ -202,15 +529,8 @@ def _normalize(raw: dict[str, Any], pr: int, repo: str | None) -> dict[str, Any]
             if (item.get("body") or "").strip()
         )
 
-    base = raw.get("base")
-    if not isinstance(base, dict):
-        base = {
-            "ref": raw.get("baseRefName"),
-            "oid": raw.get("baseRefOid"),
-            "identity": raw.get("base_identity", "unknown"),
-        }
-    else:
-        base = dict(base)
+    base = _normalize_base(raw, expected_base=expected_base)
+    head_identity = _normalize_head_identity(raw, repo=repo)
 
     result = {
         "pr": pr,
@@ -218,6 +538,7 @@ def _normalize(raw: dict[str, Any], pr: int, repo: str | None) -> dict[str, Any]
         "url": url,
         "pr_state": str(state).upper(),
         "pr_is_draft": raw.get("pr_is_draft", raw.get("isDraft")),
+        "head_ref": raw.get("head_ref", raw.get("headRefName")),
         "head_sha": head,
         "mergeable": raw.get("mergeable", "UNKNOWN"),
         "merge_state_status": raw.get(
@@ -233,6 +554,7 @@ def _normalize(raw: dict[str, Any], pr: int, repo: str | None) -> dict[str, Any]
             "host_branch_update_capability", "unknown"
         ),
         "base": base,
+        **head_identity,
         "checks": checks,
         "threads": threads,
         "feedback": feedback,
@@ -249,6 +571,12 @@ def _normalize(raw: dict[str, Any], pr: int, repo: str | None) -> dict[str, Any]
 
 
 def _fetch(args: argparse.Namespace) -> dict[str, Any]:
+    if args.expected_base and not _valid_ref(args.expected_base):
+        _error("expected base ref is invalid")
+    if args.expected_head_ref and not _valid_ref(args.expected_head_ref):
+        _error("expected head ref is invalid")
+    if args.expected_head_sha and not _valid_sha(args.expected_head_sha):
+        _error("expected head SHA is invalid")
     if args.fetch_file:
         try:
             raw = json.loads(Path(args.fetch_file).read_text(encoding="utf-8"))
@@ -256,34 +584,320 @@ def _fetch(args: argparse.Namespace) -> dict[str, Any]:
             _error(f"cannot read fetch fixture: {exc}")
         if not isinstance(raw, dict):
             _error("fetch fixture must contain a JSON object")
-        return _normalize(raw, args.pr, args.repo)
+        normalized = _normalize(
+            raw,
+            args.pr,
+            args.repo,
+            expected_base=args.expected_base,
+        )
+        _verify_expected_identity(normalized, args)
+        return normalized
 
-    command = ["gh", "pr", "view", str(args.pr)]
-    if args.repo:
-        command.extend(["--repo", args.repo])
+    if not args.repo:
+        _error("repository is required for a live snapshot")
+    if not args.expected_base:
+        _error("expected base ref is required for a live snapshot")
+    owner, name, host = _repo_parts(args.repo)
+    command = _github_command() + ["pr", "view", str(args.pr)]
+    command.extend(["--repo", args.repo])
     command.extend(
         [
             "--json",
             (
                 "state,isDraft,mergeable,mergeStateStatus,reviewDecision,"
-                "headRefOid,baseRefOid,baseRefName,url,statusCheckRollup,"
-                "comments,reviews"
+                "headRefName,headRefOid,baseRefName,baseRefOid,url,"
+                "statusCheckRollup,comments,reviews,isCrossRepository,"
+                "headRepository,headRepositoryOwner"
             ),
         ]
     )
-    result = subprocess.run(
-        command,
-        capture_output=True,
-        text=True,
-        check=False,
+    raw = _parse_json_output(
+        _run_github(command, operation="gh pr view"),
+        operation="gh pr view",
     )
-    if result.returncode:
-        _error((result.stderr or result.stdout).strip() or "gh pr view failed")
-    try:
-        raw = json.loads(result.stdout)
-    except json.JSONDecodeError as exc:
-        _error(f"gh returned invalid JSON: {exc}")
-    return _normalize(raw, args.pr, args.repo)
+    base_ref = raw.get("baseRefName")
+    if not isinstance(base_ref, str) or not base_ref:
+        _error("gh pr view omitted baseRefName")
+    if base_ref != args.expected_base:
+        raw["base"] = {
+            "ref": base_ref,
+            "oid": raw.get("baseRefOid"),
+            "current_oid": None,
+            "expected_ref": args.expected_base,
+            "identity": "wrong-base",
+        }
+    else:
+        current_oid = _fetch_current_base_oid(
+            owner,
+            name,
+            host,
+            base_ref,
+        )
+        raw["base"] = {
+            "ref": base_ref,
+            "oid": raw.get("baseRefOid"),
+            "current_oid": current_oid,
+        }
+    raw["threads"] = _fetch_review_threads(
+        owner,
+        name,
+        host,
+        args.pr,
+    )
+    normalized = _normalize(
+        raw,
+        args.pr,
+        args.repo,
+        expected_base=args.expected_base,
+    )
+    _verify_expected_identity(normalized, args)
+    return normalized
+
+
+def _fetch_current_base_oid(
+    owner: str,
+    name: str,
+    host: str | None,
+    base_ref: str,
+) -> str:
+    if not _valid_ref(base_ref):
+        _error("GitHub base ref is invalid")
+    endpoint = f"repos/{owner}/{name}/git/ref/heads/{base_ref}"
+    command = _github_command() + ["api"]
+    if host:
+        command.extend(["--hostname", host])
+    command.append(endpoint)
+    payload = _parse_json_output(
+        _run_github(command, operation="gh base ref query"),
+        operation="gh base ref query",
+    )
+    obj = payload.get("object")
+    current_oid = obj.get("sha") if isinstance(obj, dict) else payload.get("sha")
+    if not _valid_sha(current_oid):
+        _error("gh base ref query returned an invalid SHA")
+    return str(current_oid)
+
+
+GRAPHQL_THREADS_QUERY = """
+query($owner: String!, $name: String!, $number: Int!, $after: String) {
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $number) {
+      reviewThreads(first: 100, after: $after) {
+        nodes {
+          id
+          isResolved
+          isOutdated
+          comments(first: 100) {
+            nodes {
+              id
+              author { login }
+              body
+              url
+              createdAt
+              updatedAt
+            }
+            pageInfo { hasNextPage endCursor }
+          }
+        }
+        pageInfo { hasNextPage endCursor }
+      }
+    }
+  }
+}
+""".strip()
+
+
+GRAPHQL_THREAD_COMMENTS_QUERY = """
+query($thread: ID!, $after: String) {
+  node(id: $thread) {
+    ... on PullRequestReviewThread {
+      comments(first: 100, after: $after) {
+        nodes {
+          id
+          author { login }
+          body
+          url
+          createdAt
+          updatedAt
+        }
+        pageInfo { hasNextPage endCursor }
+      }
+    }
+  }
+}
+""".strip()
+
+
+def _graphql(
+    query: str,
+    *,
+    owner: str,
+    name: str,
+    number: int | None = None,
+    thread: str | None = None,
+    after: str | None = None,
+    host: str | None,
+    operation: str,
+) -> dict[str, Any]:
+    command = _github_command() + ["api"]
+    if host:
+        command.extend(["--hostname", host])
+    command.extend(["graphql", "-f", f"query={query}"])
+    if "$owner:" in query:
+        command.extend(["-F", f"owner={owner}"])
+    if "$name:" in query:
+        command.extend(["-F", f"name={name}"])
+    if number is not None and "$number:" in query:
+        command.extend(["-F", f"number={number}"])
+    if thread is not None and "$thread:" in query:
+        command.extend(["-F", f"thread={thread}"])
+    if "$after:" in query:
+        command.extend(
+            ["-F", f"after={after if after is not None else 'null'}"]
+        )
+    payload = _parse_json_output(
+        _run_github(command, operation=operation),
+        operation=operation,
+    )
+    errors = payload.get("errors")
+    if errors:
+        _error(f"{operation} returned GraphQL errors")
+    data = payload.get("data")
+    if not isinstance(data, dict):
+        _error(f"{operation} returned incomplete data")
+    return data
+
+
+def _page_info(connection: Any, operation: str) -> tuple[bool, str | None]:
+    if not isinstance(connection, dict):
+        _error(f"{operation} returned an invalid connection")
+    info = connection.get("pageInfo") or {}
+    if not isinstance(info, dict):
+        _error(f"{operation} returned invalid pageInfo")
+    has_next = info.get("hasNextPage", False)
+    if not isinstance(has_next, bool):
+        _error(f"{operation} returned invalid pageInfo")
+    cursor = info.get("endCursor")
+    if cursor is not None and not isinstance(cursor, str):
+        _error(f"{operation} returned invalid page cursor")
+    return has_next, cursor
+
+
+def _fetch_thread_comments(
+    thread: dict[str, Any],
+    *,
+    owner: str,
+    name: str,
+    host: str | None,
+    pages_used: int,
+) -> tuple[list[dict[str, Any]], int]:
+    comments_connection = thread.get("comments")
+    if comments_connection is None:
+        return [], pages_used
+    comments = _connection_nodes(comments_connection)
+    has_next, cursor = _page_info(
+        comments_connection,
+        "gh GraphQL review comments",
+    )
+    while has_next:
+        if pages_used >= MAX_GRAPHQL_PAGES:
+            _error("gh GraphQL review comment pagination exceeded limit")
+        if not cursor:
+            _error("gh GraphQL review comments returned no cursor")
+        data = _graphql(
+            GRAPHQL_THREAD_COMMENTS_QUERY,
+            owner=owner,
+            name=name,
+            thread=str(thread.get("id") or ""),
+            after=cursor,
+            host=host,
+            operation="gh GraphQL review comments",
+        )
+        pages_used += 1
+        node = data.get("node")
+        if not isinstance(node, dict):
+            _error("gh GraphQL review comments returned no thread")
+        connection = node.get("comments")
+        if not isinstance(connection, dict):
+            _error("gh GraphQL review comments returned no comments")
+        comments.extend(_connection_nodes(connection))
+        has_next, cursor = _page_info(
+            connection,
+            "gh GraphQL review comments",
+        )
+    return comments, pages_used
+
+
+def _fetch_review_threads(
+    owner: str,
+    name: str,
+    host: str | None,
+    number: int,
+) -> list[dict[str, Any]]:
+    threads: list[dict[str, Any]] = []
+    after: str | None = None
+    pages_used = 0
+    while True:
+        if pages_used >= MAX_GRAPHQL_PAGES:
+            _error("gh GraphQL review thread pagination exceeded limit")
+        data = _graphql(
+            GRAPHQL_THREADS_QUERY,
+            owner=owner,
+            name=name,
+            number=number,
+            after=after,
+            host=host,
+            operation="gh GraphQL review threads",
+        )
+        pages_used += 1
+        repository = data.get("repository")
+        pull_request = (
+            repository.get("pullRequest")
+            if isinstance(repository, dict)
+            else None
+        )
+        connection = (
+            pull_request.get("reviewThreads")
+            if isinstance(pull_request, dict)
+            else None
+        )
+        if not isinstance(connection, dict):
+            _error("gh GraphQL review threads returned no connection")
+        page_threads = _connection_nodes(connection)
+        if len(threads) + len(page_threads) > MAX_GRAPHQL_THREADS:
+            _error("gh GraphQL review thread count exceeded limit")
+        for thread in page_threads:
+            comments, pages_used = _fetch_thread_comments(
+                thread,
+                owner=owner,
+                name=name,
+                host=host,
+                pages_used=pages_used,
+            )
+            if len(comments) > MAX_GRAPHQL_COMMENTS:
+                _error("gh GraphQL review comment count exceeded limit")
+            thread["comments"] = {"nodes": comments}
+            threads.append(thread)
+        has_next, cursor = _page_info(
+            connection,
+            "gh GraphQL review threads",
+        )
+        if not has_next:
+            break
+        if not cursor:
+            _error("gh GraphQL review threads returned no cursor")
+        after = cursor
+    return threads
+
+
+def _verify_expected_identity(
+    current: dict[str, Any],
+    args: argparse.Namespace,
+) -> None:
+    if args.expected_head_ref and current.get("head_ref") != args.expected_head_ref:
+        _error("GitHub head ref does not match the watch receipt")
+    if args.expected_head_sha and current.get("head_sha") != args.expected_head_sha:
+        _error("GitHub head SHA does not match the watch receipt")
 
 
 def _empty_state(pr: int, repo: str | None) -> dict[str, Any]:
@@ -306,28 +920,135 @@ def _empty_state(pr: int, repo: str | None) -> dict[str, Any]:
     }
 
 
+def _validate_path(
+    path: Path,
+    *,
+    label: str,
+    allow_missing: bool,
+) -> Path:
+    if not path.is_absolute():
+        _error(f"{label} must be an absolute path")
+    if any(part in {".", ".."} for part in path.parts[1:]):
+        _error(f"{label} contains a relative path component")
+    current = Path(path.anchor)
+    for part in path.parts[1:]:
+        current /= part
+        try:
+            info = current.lstat()
+        except FileNotFoundError:
+            if not allow_missing:
+                _error(f"{label} does not exist")
+            continue
+        except OSError:
+            _error(f"{label} could not be validated")
+        if stat.S_ISLNK(info.st_mode):
+            _error(f"{label} contains a symlink")
+        if current != path and not stat.S_ISDIR(info.st_mode):
+            _error(f"{label} contains a non-directory")
+    return path
+
+
+def _state_dir(args: argparse.Namespace) -> Path:
+    watch_id = args.watch_id
+    if watch_id is not None:
+        if not re.fullmatch(r"[a-z0-9][a-z0-9-]*", watch_id):
+            _error("watch ID is invalid")
+        gc_dir_value = os.environ.get("GC_DIR")
+        if not gc_dir_value:
+            _error("GC_DIR is required with a watch ID")
+        gc_dir = _validate_path(
+            Path(gc_dir_value),
+            label="GC_DIR",
+            allow_missing=False,
+        )
+        try:
+            gc_info = gc_dir.lstat()
+        except OSError:
+            _error("GC_DIR could not be validated")
+        if not stat.S_ISDIR(gc_info.st_mode):
+            _error("GC_DIR is not a directory")
+        expected = gc_dir / "state" / watch_id
+        if args.state_dir is None:
+            state_dir = expected
+        else:
+            state_dir = Path(args.state_dir)
+            if state_dir != expected:
+                _error("state directory is not scoped to the watch ID")
+    elif args.state_dir is None:
+        _error("state directory is required")
+    else:
+        state_dir = Path(args.state_dir)
+    state_dir = _validate_path(
+        state_dir,
+        label="state directory",
+        allow_missing=True,
+    )
+    if state_dir.exists() and not state_dir.is_dir():
+        _error("state directory is not a directory")
+    return state_dir
+
+
 def _atomic_write(path: Path, value: dict[str, Any]) -> None:
     replacement = path.with_name(f"{path.name}.next")
-    replacement.write_text(
-        json.dumps(value, indent=2, sort_keys=True, ensure_ascii=False)
-        + "\n",
-        encoding="utf-8",
+    _validate_path(
+        path.parent,
+        label="state directory",
+        allow_missing=False,
     )
-    os.chmod(replacement, 0o600)
-    os.replace(replacement, path)
+    if replacement.exists() or replacement.is_symlink():
+        _error("state replacement path already exists")
+    try:
+        replacement.write_text(
+            json.dumps(value, indent=2, sort_keys=True, ensure_ascii=False)
+            + "\n",
+            encoding="utf-8",
+        )
+        os.chmod(replacement, 0o600)
+        os.replace(replacement, path)
+    except OSError:
+        _error("state journal could not be written")
 
 
 @contextlib.contextmanager
 def _locked_state(
     state_dir: Path, pr: int, repo: str | None
 ) -> Iterator[dict[str, Any]]:
-    state_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+    _validate_path(state_dir, label="state directory", allow_missing=True)
+    try:
+        state_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+    except OSError:
+        _error("state directory could not be created")
+    _validate_path(state_dir, label="state directory", allow_missing=False)
+    try:
+        state_info = state_dir.lstat()
+    except OSError:
+        _error("state directory could not be validated")
+    if not stat.S_ISDIR(state_info.st_mode):
+        _error("state directory is not a directory")
     os.chmod(state_dir, 0o700)
     lock_path = state_dir / "lock"
     state_path = state_dir / "state.json"
-    fd = os.open(lock_path, os.O_RDWR | os.O_CREAT, 0o600)
+    if lock_path.exists() and lock_path.is_symlink():
+        _error("state lock is a symlink")
+    if state_path.exists() and state_path.is_symlink():
+        _error("state journal is a symlink")
+    flags = os.O_RDWR | os.O_CREAT
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
     try:
-        fcntl.flock(fd, fcntl.LOCK_EX)
+        fd = os.open(lock_path, flags, 0o600)
+    except OSError:
+        _error("state lock could not be opened")
+    locked = False
+    try:
+        lock_info = os.fstat(fd)
+        if not stat.S_ISREG(lock_info.st_mode):
+            _error("state lock is not a regular file")
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX)
+        except OSError:
+            _error("state lock could not be acquired")
+        locked = True
         if state_path.exists():
             try:
                 state = json.loads(state_path.read_text(encoding="utf-8"))
@@ -340,7 +1061,11 @@ def _locked_state(
         yield state
         _atomic_write(state_path, state)
     finally:
-        fcntl.flock(fd, fcntl.LOCK_UN)
+        if locked:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_UN)
+            except OSError:
+                pass
         os.close(fd)
 
 
@@ -483,7 +1208,12 @@ def _snapshot(
         current.get("threads") or [],
         state.get("threads") or {},
         "thread_id",
-        identity_fields=("last_comment_id", "last_comment_at"),
+        identity_fields=(
+            "last_comment_id",
+            "last_comment_at",
+            "is_resolved",
+            "is_outdated",
+        ),
     )
     state["feedback"] = _merge_records(
         current.get("feedback") or [],
@@ -504,7 +1234,11 @@ def _snapshot(
     actionable_threads = [
         item
         for item in state["threads"].values()
-        if item.get("disposition") == OPEN
+        if (
+            item.get("disposition") == OPEN
+            and not item.get("is_resolved", False)
+            and not item.get("is_outdated", False)
+        )
     ]
     actionable_feedback = [
         item
@@ -526,6 +1260,11 @@ def _snapshot(
         "merge_state_status": current.get("merge_state_status"),
         "review_decision": current.get("review_decision"),
         "review_in_progress": current.get("review_in_progress"),
+        "base": current.get("base"),
+        "head_ref": current.get("head_ref"),
+        "head_repository": current.get("head_repository"),
+        "cross_repository": current.get("cross_repository"),
+        "identity_blocker": current.get("identity_blocker"),
         "checks": state["checks"],
         "threads": state["threads"],
         "feedback": state["feedback"],
@@ -543,11 +1282,14 @@ def _snapshot(
     base_ref_blocker = (
         None if base.get("identity") == "current" else base.get("identity")
     )
+    identity_blocker = current.get("identity_blocker")
     result = {
         **current,
+        "watch_id": args.watch_id,
         "head_sha": head,
         "head_changed": head_changed,
         "base_ref_blocker": base_ref_blocker,
+        "identity_blocker": identity_blocker,
         "branch_currency": currency,
         "branch_currency_blocker": (
             {
@@ -567,7 +1309,8 @@ def _snapshot(
             "MERGEABLE",
             "CONFLICTING",
         }
-        and base.get("identity") == "current",
+        and base.get("identity") == "current"
+        and identity_blocker is None,
         "actionable": {
             "threads": actionable_threads,
             "comments": actionable_feedback,
@@ -592,8 +1335,11 @@ def _snapshot(
 
 
 def _run_snapshot(args: argparse.Namespace) -> dict[str, Any]:
+    if not args.watch_id:
+        _error("snapshot requires --watch-id from the wake payload")
+    state_dir = _state_dir(args)
     current = _fetch(args)
-    with _locked_state(Path(args.state_dir), args.pr, args.repo) as state:
+    with _locked_state(state_dir, args.pr, args.repo) as state:
         _apply_invocation(state, args)
         result = _snapshot(state, current, args)
     return result
@@ -670,6 +1416,8 @@ def cmd_mark(args: argparse.Namespace) -> None:
 
 
 def cmd_watch(args: argparse.Namespace) -> None:
+    if not args.watch_id:
+        _error("watch requires --watch-id from the wake payload")
     result = _run_snapshot(args)
     reasons: list[str] = []
     if result.get("pr_state") in {"MERGED", "CLOSED"}:
@@ -680,6 +1428,8 @@ def cmd_watch(args: argparse.Namespace) -> None:
         reasons.append("ci")
     if result.get("branch_currency"):
         reasons.append("branch-currency")
+    if result.get("base_ref_blocker") or result.get("identity_blocker"):
+        reasons.append("needs-human")
     if result.get("needs_human_residuals"):
         reasons.append("needs-human")
     if not reasons and result.get("all_checks_ok"):
@@ -688,6 +1438,7 @@ def cmd_watch(args: argparse.Namespace) -> None:
         payload = {
             "reason": reasons[0],
             "reasons": reasons,
+            "watch_id": args.watch_id,
             "head_sha": result.get("head_sha"),
             "url": result.get("url"),
             "tick": result.get("tick"),
@@ -701,15 +1452,32 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="pr-snapshot")
     sub = parser.add_subparsers(dest="command", required=True)
 
+    def add_snapshot_options(command: argparse.ArgumentParser) -> None:
+        command.add_argument("--pr", type=int, required=True)
+        command.add_argument("--repo")
+        command.add_argument(
+            "--expected-base",
+            "--expected-base-ref",
+            "--expected-base-name",
+            "--base-ref",
+            dest="expected_base",
+        )
+        command.add_argument("--expected-head-ref", "--head-ref")
+        command.add_argument(
+            "--expected-head-sha",
+            "--expected-head",
+            "--head-sha",
+        )
+        command.add_argument("--watch-id")
+        command.add_argument("--state-dir")
+        command.add_argument("--fetch-file")
+        command.add_argument("--start-invocation", action="store_true")
+        command.add_argument("--invocation-id")
+        command.add_argument("--session-started-at")
+        command.add_argument("--invocation-budget-seconds", type=float)
+
     snapshot = sub.add_parser("snapshot")
-    snapshot.add_argument("--pr", type=int, required=True)
-    snapshot.add_argument("--repo")
-    snapshot.add_argument("--state-dir", required=True)
-    snapshot.add_argument("--fetch-file")
-    snapshot.add_argument("--start-invocation", action="store_true")
-    snapshot.add_argument("--invocation-id")
-    snapshot.add_argument("--session-started-at")
-    snapshot.add_argument("--invocation-budget-seconds", type=float)
+    add_snapshot_options(snapshot)
     snapshot.set_defaults(handler=cmd_snapshot)
 
     mark = sub.add_parser("mark")
@@ -737,14 +1505,7 @@ def _parser() -> argparse.ArgumentParser:
     mark.set_defaults(handler=cmd_mark)
 
     watch = sub.add_parser("watch")
-    watch.add_argument("--pr", type=int, required=True)
-    watch.add_argument("--repo")
-    watch.add_argument("--state-dir", required=True)
-    watch.add_argument("--fetch-file")
-    watch.add_argument("--start-invocation", action="store_true")
-    watch.add_argument("--invocation-id")
-    watch.add_argument("--session-started-at")
-    watch.add_argument("--invocation-budget-seconds", type=float)
+    add_snapshot_options(watch)
     watch.set_defaults(handler=cmd_watch)
     return parser
 

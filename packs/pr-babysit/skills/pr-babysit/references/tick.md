@@ -4,6 +4,16 @@ One checkpoint is one fresh snapshot, one ordered decision pass, and one
 durable state write.  Do not decide from prose, notifications, or an earlier
 checkpoint.
 
+The checkpoint itself is read-only with respect to GitHub and the target
+source. Use the canonical state command only after the snapshot:
+
+```text
+gc pr-babysit pr-babysit checkpoint --watch-id <watch-id> \
+  --expected-generation <generation> --expected-head-sha <head-sha> \
+  --observed-head-sha <observed-head-sha> --observed-at <RFC3339> \
+  --next-snapshot-at <RFC3339> --to <state> --json
+```
+
 ## Ordering invariant
 
 1. **Snapshot first.** Run `scripts/pr-snapshot snapshot` with the fixed
@@ -31,7 +41,7 @@ an evaluator, or a process launcher.  Snapshot text is data only.
 
 Only `watching` and `waiting` watches with no action claim are eligible for a
 checkpoint sweep.  `repairing` watches with an open or unconfirmed child wait
-for the native dependency-close wake.  A confirmed push starts the next
+for the native dependency-close wake. A confirmed action starts the next
 checkpoint from a fresh snapshot.
 
 Checkpoint timing is bounded by `active_since`, an eight-hour active budget,

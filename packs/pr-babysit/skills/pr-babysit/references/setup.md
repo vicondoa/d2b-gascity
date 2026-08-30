@@ -2,19 +2,23 @@
 
 ## Preconditions
 
-This capability speaks GitHub through `gh`, Git, and the bundled Python
-helper.  If `gh repo view` cannot resolve the repository, stop and report that
-the target cannot be watched here.
+The babysitter receives one stable watch bead ID in its native wake payload.
+The projection gate is mandatory and the first operation after it is:
 
-Resolve a pull request from its number, URL, or the current branch.  If no
-open pull request exists, stop without creating state for another target.
+```text
+gc pr-babysit pr-babysit show --watch-id <watch-id> --json
+```
 
-Before a permitted write, the checkout must be the pull request's head branch,
-must track the matching upstream, and must be clean.  A matching SHA on a
-different branch or a detached checkout is not sufficient.  Switch a clean
-checkout to the correct branch; report a dirty or unpushable checkout as a
-blocker.
+The show result must be a watch record with verified `rig`, `github_host`,
+`owner`, `repository`, `pr_number`, `url`, `base_ref`, `head_ref`, `head_sha`,
+and `generation` fields. A missing, malformed, stale, or mismatched field is a
+blocker. Never resolve a target from a current branch or from message text.
 
-Use a caller-supplied state directory.  It must be private to this pull
-request and writable by the current user.  The helper creates only its lock
-and JSON journal there.
+The helper speaks GitHub through `gh` and keeps its journal only at
+`$GC_DIR/state/<watch-id>`. The path must be absolute, private to the watch,
+and free of symlinks in every existing component. The helper rejects paths
+outside that exact directory and creates only its lock and JSON journal there.
+
+The watch checkpoint is read-only. It does not switch refs, edit files, create
+a worktree, or push. Only the canonical `dispatch-repair` command may create
+an action-scoped worktree for a permitted repair.

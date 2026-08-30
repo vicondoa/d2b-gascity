@@ -5,23 +5,17 @@ snapshot.  No object means no branch update, whatever else changed remotely.
 
 ## `BEHIND`
 
-Proceed only when the item says `route: normal-base` and
-`host_branch_update_capability: true`.  Claim the item before writing, then
-re-read the pull request and compare its current head and base with the
-recorded observations.  Send the recorded `expected_head_sha` to the host
-branch-update endpoint exactly once.  A head mismatch is stale evidence:
-take a new snapshot and do not resubmit.
-
-Host acceptance is not completion.  Confirm the action only after a fresh
-snapshot proves the expected base is present and the currency item is clear.
-An unknown or denied capability is a human blocker, never a reason to guess.
+`BEHIND` is a human blocker in this target-only capability. Preserve the exact
+item, including `route`, `expected_head_sha`, base identity, and host
+capability, in the checkpoint evidence. Do not invoke a branch-update
+operation or infer one from prose. An unknown or denied capability is also a
+human blocker.
 
 ## `DIRTY` and `CONFLICTING`
 
-These states require a clean, exact-head checkout and positive intent evidence
-before any local repair.  A missing checkout, stale SHA, ambiguous resolution,
-or absent write authority is a blocker.  Preserve the conflict evidence and
-stop; do not alter the branch while the choice is unresolved.
+These states are read-only human blockers. Preserve the exact conflict
+evidence, current head, and capability fields and stop; do not alter the target
+while the choice is unresolved.
 
 The semantic fingerprint is the sorted conflicted paths and their staged blob
 identities.  It is independent of later base movement, so repeated evidence
