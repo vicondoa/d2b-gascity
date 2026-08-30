@@ -51,12 +51,67 @@ those values outside this repository.
 - Keep Copilot Requests, d2b publication credentials, and Discord app
   credentials separate. Never set `GH_TOKEN` from a Copilot token.
 - Publication stamps and re-reads `merge_strategy=pr` plus the owning rig's
-  target: `v3` for d2b and `main` for city-source. The d2b Discord extension is
-  product-only. Publication must refuse direct merges and never merge or
-  force-push. Host branch protection for `v3` is defense-in-depth: it must
-  require pull requests and apply to administrators, but this repository does
-  not claim that the current host is already configured that way. Merge
-  decisions remain human-owned.
+  publication target: `v3` for d2b and `main` for city-source. The handoff
+  receipt's `target=<rig>/pr-babysit.pr-babysitter` is a routing target; the
+  watch records `base_ref=v3` or `base_ref=main`, and the publication bead
+  records `merge_strategy=pr`. The d2b Discord extension is product-only.
+  Publication must refuse direct merges and never merge or force-push. Host
+  branch protection for `v3` is defense-in-depth: it must require pull
+  requests and apply to administrators, but this repository does not claim
+  that the current host is already configured that way. Merge decisions remain
+  human-owned.
+
+### PR babysitting credentials and authority
+
+The rig-imported `pr-babysit` pack is target-only. Its repair identity is
+operator-attested with repository Contents write and Pull requests read only.
+It must not have Pull requests write, merge or administration authority,
+workflow-approval authority, or Copilot Requests authority. The agent cannot
+introspect fine-grained permissions, so the operator attestation is the setup
+boundary rather than an inferred permission check.
+
+Keep publication credentials, repair GitHub credentials, Copilot Requests
+credentials, and Discord app credentials separate. `GH_TOKEN` and
+`GITHUB_TOKEN` must not reuse any Copilot token or token variable. Never print
+or persist any of these credentials. The repair path fails closed when the attestation is missing or when a GitHub
+token is coupled to a Copilot token. Before repair, the operator must provide
+`PR_BABYSIT_VALIDATOR` as an absolute, non-symlink, executable file, its
+64-character lowercase hexadecimal `PR_BABYSIT_VALIDATOR_SHA256`, and set
+`PR_BABYSIT_VALIDATOR_ATTESTED=credential-isolated-v1`. The workflow hashes
+the selected executable with `sha256sum` and runs it through
+`timeout --foreground --kill-after=5s` with a positive timeout from 1 through
+900 seconds (default 900). It must run `make check` in a credential- and
+network-isolated environment. A missing, mismatched, timed-out, or failed
+validator blocks repair without a push. There is no direct-make fallback.
+
+The repair path uses only the existing PR head and normal push. Version 1 does
+not use `update-branch`; `BEHIND`, dirty, conflicting, stale-head, unknown
+capability, and ambiguous push evidence become human blockers. An ambiguous
+push records `ambiguous-outcome` and is never retried. The agent never merges,
+force-pushes (including `--force-with-lease`), performs a raw rebase, approves
+workflows, creates a replacement PR, or changes another target. A
+`merge-ready` result is a handoff, not human merge authorization. No service
+change, daemon, webhook, relay, custom provider, or separate custom
+publication machinery is introduced. Repairs are same-repository-only:
+`head_repository` must equal the verified `owner/repository`. Fork or
+cross-repository PRs are human blockers in v1 and receive no autonomous
+repair.
+
+The deterministic state CLI is city-scoped at `gc core-city pr-babysit
+<action>`. Its wrapper accepts only the sibling helper under
+`packs/pr-babysit/assets/scripts/`, verifies that the helper is executable,
+and rejects symlinks or paths resolving outside the expected packs root.
+The rig-imported pack is not imported city-wide and does not expose a second
+command entrypoint.
+
+### PR babysitting rollout
+
+d2b is enabled first. The `city-source` rig remains suspended-on-start and
+must not be enabled for live repair until the U8 disposable d2b acceptance
+passes. Static and native credential-free tests cover both d2b/`v3` and
+city-source/`main` without mutating GitHub. Live authenticated acceptance
+evidence stays private and redacted; only safe pass/fail results may be shared.
+No live U8 acceptance is claimed by this source tree.
 
 ## Human-only clean reset
 

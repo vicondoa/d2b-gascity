@@ -26,6 +26,14 @@ The standard-library test module validates:
 - the Gas City pack city and rig imports, global fragments, repository-specific
   formula defaults, and full daemon settings;
 - the local d2b Discord formula extension and governance fragment policy;
+- the rig-imported `pr-babysit` Pack v2, binding-qualified babysitter
+  identities, workdir-local dual Copilot projection, mandatory prompt gate,
+  publication handoff and verification receipt, Beads watch/action state,
+  `1m` checkpoint order, action-blocks-watch dependency, and Formula v2 repair;
+- the complete authored-file inventory for every U1-U6 local pack surface;
+- target-only d2b `v3` and city-source `main` behavior, including the
+  no-`update-branch` v1 boundary, retry and time budgets, terminal/rearm and
+  ambiguous-push handling, and human merge ownership;
 - Discord's native-service boundary and the absence of authored private
   mappings or credentials;
 - source privacy, credential separation, and the no-token-coupling rule;
@@ -58,7 +66,13 @@ resolved d2b Discord resume formula and the Gas City pack `build-basic` and
 documented Discord command contracts. It pre-seeds a separate city-source
 fixture in `.gc/site.toml`, provisions both fixture rigs through native
 `gc rig add`, and confirms that paths stay in ignored site state. The smoke
-does not start services or use credentials.
+does not start services or use credentials. The PR babysit check invokes
+`gc core-city pr-babysit show` from the initialized d2b rig context with
+`--city` and `--rig`; the city-scoped command delegates to the sibling helper
+while the rig-imported pack remains the owner of the other surfaces. It never
+injects a second `pr-babysit` import or changes the production city. If pinned
+Gas City `v1.4.1` cannot resolve that topology, the smoke reports an explicit
+blocker instead of changing the topology.
 
 ## CI inputs
 
@@ -77,37 +91,129 @@ committed test code, fixtures, reports, prompts, responses, or pull-request
 payloads. The focused suite never starts Discord, Copilot, Codex, or an
 external publication flow.
 
+The committed configuration has no service change, daemon, webhook, relay,
+custom provider, separate custom publication machinery, merge, force-push or
+`--force-with-lease`, raw rebase, workflow approval, replacement PR, private
+evidence, or runtime state. Native Gas City owns lifecycle and the
+rig-imported pack owns only its bounded checkpoint and repair seams.
+
 ### PR babysitting
 
-This smoke is blocked because `ce-babysit-pr` is not imported by the current
-city composition. It is not a credential-free repository test, and no host
-setup can prove a capability that the pinned Pack v2 sources do not expose.
-Do not invoke the unavailable skill, create a replacement watcher, or treat
-this documentation as an implementation of target-only PR observation.
+The enabled smoke exercises the rig-imported `pr-babysit` pack and its
+city-scoped command through native surfaces, not a separate service:
 
-When an official immutable Pack v2 export is published and pinned, the
-host-owned redacted smoke must use a disposable open PR and least-privilege
-GitHub access that cannot approve, merge, force-push, or administer the
-repository. It must verify explicit blocker reporting, target-only behavior,
-and human-owned approval and merge decisions. Record only redacted pass/fail
-notes outside this repository; never save PR identifiers, payloads, prompts,
-responses, logs, or watch state.
+```text
+gc config show --json
+gc config explain --rig d2b --agent pr-babysitter
+gc skill list --agent d2b/pr-babysit.pr-babysitter --json
+gc skill list --agent city-source/pr-babysit.pr-babysitter --json
+gc formula show mol-pr-babysit-repair --rig d2b --json
+```
+
+The workdir-local projection must contain the exact vendored commit in both
+`.github/skills/pr-babysit` and `.agents/skills/pr-babysit`. The babysitter's
+mandatory projection gate is the first action and fails closed before `gh`,
+Git, or a push. Publication uses one deterministic receipt:
+
+```text
+gc core-city pr-babysit publication-handoff \
+  --rig d2b --publication-bead-id <publication-bead-id> \
+  --url <pull-request-url> --pr-number <number> --json
+gc core-city pr-babysit verify-handoff \
+  --rig d2b --publication-bead-id <publication-bead-id> \
+  --url <pull-request-url> --pr-number <number> --json
+```
+
+The handoff result must show
+`target=<rig>/pr-babysit.pr-babysitter` and store it as `handoff_target` in
+receipt metadata. Publication metadata must persist `merge_strategy=pr` plus
+`base_ref`, `target`, or `target_branch`; a missing target is rejected. The
+handoff routes without wake, writes matching `handoff_verified=true` receipts,
+then nudges. A complete receipt also requires
+`handoff_route_status=complete` and `handoff_wake_status=delivered`;
+`pending`, `ready`, or `route-failed` is never actionable, and `ready` is only
+a recoverable publication-handoff wake-replay intermediate. A repeated
+complete receipt does not duplicate the wake. The watch record must show
+`base_ref=v3` for d2b or `base_ref=main` for city-source. The publication
+bead's target is publication metadata, not the handoff routing target.
+
+The cooldown smoke invokes the canonical bounded state action and verifies
+that it lists, rechecks, and routes due watches in deterministic order:
+
+```text
+gc core-city pr-babysit sweep --rig d2b --limit 4 --json
+```
+
+Credential-free tests use fake GitHub, Beads, and Gas City commands to cover
+both d2b/`v3` and city-source/`main`: duplicate handoff, one-writer action
+claims, fresh checkpoint ordering, feedback-before-CI, current-head repair,
+`bd dep <action-id> --blocks <watch-id>`, restart recovery, retry exhaustion,
+terminal state, explicit `rearm=true`, ambiguous push blocking, and
+same-repository-only repair. They do not mutate GitHub or use credentials.
+
+The repair formula records a candidate HEAD and requires a passed reviewer
+verdict bound to its action ID, generation, and exact candidate SHA before the
+validator or normal push. Failed, missing, or stale verdicts block. Review
+credentials are Pull requests read only; tests must not auto-resolve GitHub
+threads. The bounded `pr-snapshot mark` command records local
+`handled` or `ignored` feedback by stable item ID and content identity. A
+confirmed review repair carries its addressed IDs and action kind until the
+next snapshot marks every matching identity and
+`acknowledge-dispositions` clears the carryover; a changed or missing item
+remains actionable.
+
+The Formula v2 repair workflow attaches to the durable watch bead, not to the
+action child; the child carries the claim and blocks the watch until
+confirmation. A `merge-ready` checkpoint must carry structured current
+snapshot evidence for the current head, certain mergeability, clean branch,
+terminal and successful required checks, no actionable feedback, no pending
+human interaction, no currency item, and a satisfied quiet window.
+
+The first version does not call `update-branch`. Repair requires an
+operator-attested identity with Contents write and Pull requests read only;
+the agent cannot introspect fine-grained permissions. Pull requests write,
+merge/admin, workflow-approval, and Copilot Requests authority are refused.
+Keep publication, repair GitHub, Copilot Requests, and Discord credentials
+separate, and never reuse a Copilot token for `GH_TOKEN` or `GITHUB_TOKEN`.
+Before a repair, require `PR_BABYSIT_VALIDATOR` as an absolute, non-symlink,
+executable file, `PR_BABYSIT_VALIDATOR_SHA256` as its 64-character lowercase
+hexadecimal sha256sum, and set
+`PR_BABYSIT_VALIDATOR_ATTESTED=credential-isolated-v1`. The workflow hashes
+the selected executable with `sha256sum` before running it through
+`timeout --foreground --kill-after=5s`;
+`PR_BABYSIT_VALIDATOR_TIMEOUT_SECONDS` must be 1 through 900 seconds (default
+900). It must run `make check` in a credential- and network-isolated
+environment. A missing, mismatched, timed-out, or failed validator records a
+failed result, blocks repair, and does not push. Fork or cross-repository PRs
+are human blockers in v1.
+Before credentialed fetch or push, the repair workflow verifies that `origin`
+and any configured push URL map exactly to the recorded GitHub
+host/owner/repository, disables Git hooks with
+`-c core.hooksPath=/dev/null`, and pushes with `--no-verify`.
+The credential-free `gc core-city pr-babysit check-credentials --json`
+command verifies the operator capability, validator attestation, lowercase
+SHA-256 format, and token separation only; it does not replace binding the
+hash to the executable or running the validator.
+
+d2b is enabled first. The `city-source` rig remains suspended-on-start and
+must not be enabled for live repair until the U8 disposable d2b acceptance
+passes. Live authenticated evidence is private and redacted; retain only
+safe pass/fail notes outside this repository. No live U8 acceptance is claimed
+by this source tree.
 
 ### Human-gate recovery
 
-This smoke is blocked because `notify-on-human-gate-creation` and
-`renudge-stale-human-gates` are not scheduled by the pinned Gas City core.
-The existing `gate-sweep` is only the native mechanical sweep and does not
-provide the missing notification behavior. Do not create a local watcher,
-relay, scheduler, or delivery verifier to fill the gap.
+The existing `gate-sweep` remains the native mechanical gate sweep. Human-gate
+notification and stale-gate re-notification are outside the `pr-babysit`
+target-only capability. Do not create a city-owned watcher, relay, scheduler,
+or delivery verifier to change that boundary.
 
-After a compatible immutable core revision is available, a host-owned
-redacted smoke may use disposable Beads and notification fixtures to verify
-creation notification, interval-bounded stale re-notification, failed-send
-retry, resolution stop, and restart recovery from durable state. Until then,
-stop at preflight and do not claim those behaviors are available. Keep all
-recipient mappings, gate identifiers, notification bodies, runtime state, and
-delivery evidence host-local.
+If the native core later exposes those orders, a host-owned redacted smoke may
+use disposable Beads and notification fixtures to verify creation notification,
+interval-bounded stale re-notification, failed-send retry, resolution stop, and
+restart recovery from durable state. Keep recipient mappings, gate
+identifiers, notification bodies, runtime state, and delivery evidence
+host-local.
 
 ### Gas City pack
 
@@ -169,8 +275,11 @@ delivery evidence host-local.
 
 ### PR-only publication
 
-- Verify publication persists and re-reads `metadata.merge_strategy=pr` plus
-  `metadata.target=v3` for d2b or `metadata.target=main` for city-source.
+- Verify the handoff receipt's
+  `target=<rig>/pr-babysit.pr-babysitter`, the watch's
+  `base_ref=v3` or `base_ref=main`, and the publication bead's
+  `metadata.merge_strategy=pr` plus `metadata.target=v3` for d2b or
+  `metadata.target=main` for city-source.
 - Verify publication refuses direct merges and never merges or force-pushes.
 
 ## Documentation and reset evidence

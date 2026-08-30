@@ -1,0 +1,98 @@
+{
+  "upstream": {
+    "repository": "https://github.com/EveryInc/compound-engineering-plugin",
+    "tag": "compound-engineering-v3.23.4",
+    "commit": "33d9bd92689d60580e732890f94466e5793385b1"
+  },
+  "license": "MIT",
+  "files": [
+    {
+      "local": "LICENSE",
+      "source": "LICENSE",
+      "sha256": "61d89de7646effdaba2d0a4ab7bd0eba60b4094b83efe5bc73c7940e43e93fc6"
+    },
+    {
+      "local": "skills/pr-babysit/SKILL.md",
+      "source": "skills/ce-babysit-pr/SKILL.md",
+      "sha256": "a611e493ae6979063d71f4990c2f6cda9c9f1a4b114a83717c26c66c4cf4bd90",
+      "local_sha256": "50de66f88f3c8ae0f7f416b48af1b19322281fbeccfcdfa90682079c6b535be6"
+    },
+    {
+      "local": "skills/pr-babysit/references/branch-currency.md",
+      "source": "skills/ce-babysit-pr/references/branch-currency.md",
+      "sha256": "8e0101ac1b73946746579630259ae5bac12ed4dd1df78aaad4df02e0c9934429"
+    },
+    {
+      "local": "skills/pr-babysit/references/envelope.md",
+      "source": "skills/ce-babysit-pr/references/envelope.md",
+      "sha256": "74ffa9b65afccbb8add39cd9cc4b76af1a4cc9532eabde3523d78ae28e62e59a",
+      "local_sha256": "ae949804f6491ac65bddb4cbacbcbc52f9877e8df6d782febb8fdb2bdfc4c241"
+    },
+    {
+      "local": "skills/pr-babysit/references/pipeline.md",
+      "source": "skills/ce-babysit-pr/references/pipeline.md",
+      "sha256": "6b8403bcc7093d5def36e5dd84096ecc05535c4099e652b38e8ec98700b91c87"
+    },
+    {
+      "local": "skills/pr-babysit/references/report.md",
+      "source": "skills/ce-babysit-pr/references/report.md",
+      "sha256": "31774e3ad7d5ea97d6360ff5d404ade79331d42a53ec50e8cd5bae531dc98e5b",
+      "local_sha256": "31d79d87f9e63940714656cb35af5746aed53cc6f263de17a60b4f0e04e6362f"
+    },
+    {
+      "local": "skills/pr-babysit/references/settle.md",
+      "source": "skills/ce-babysit-pr/references/settle.md",
+      "sha256": "e83f49cb2511f68cf9131584737b73a91ae9a2a92435f7fd70cba40b99fc1759",
+      "local_sha256": "325165b26f0945dc988df09bc8ba6dbc1baad1311a0d39d946b60f3253923e1f"
+    },
+    {
+      "local": "skills/pr-babysit/references/setup.md",
+      "source": "skills/ce-babysit-pr/references/setup.md",
+      "sha256": "0465242d6116c3f958f76cc332c1af34896f48d8e8cc4c9716b0f089d1809954",
+      "local_sha256": "674b73e99093531d925b0ffe349a651e3ad4dc31ff029777c53175e4df730c3c"
+    },
+    {
+      "local": "skills/pr-babysit/references/tick.md",
+      "source": "skills/ce-babysit-pr/references/tick.md",
+      "sha256": "cf1fc87e87a3520c9446d997ff09ba2cccacb4a5e0a33f33fb9752325ede820c",
+      "local_sha256": "eaeb7899f2647c0e448d8a23657bab741d4a28aacbc693e44100b46862ceb9d9"
+    },
+    {
+      "local": "skills/pr-babysit/references/watch-loop.md",
+      "source": "skills/ce-babysit-pr/references/watch-loop.md",
+      "sha256": "f2abb846f4a5fd20468c7e5a4eefa4bf2929d7dcd6256da9442b751b96213f67"
+    },
+    {
+      "local": "skills/pr-babysit/scripts/pr-snapshot",
+      "source": "skills/ce-babysit-pr/scripts/pr-snapshot",
+      "sha256": "fd8a0b403703714a1257530e7053461e437b662b0ef381f780b8850439d980e7",
+      "local_sha256": "e1baf200b8fed443ef997f03600a42cfaee7bf301b70f48373217c9d554a97e4"
+    }
+  ],
+  "excluded_surfaces": [
+    "stack and stack-landing behavior",
+    "merge, force-push, and raw-rebase mutations",
+    "workflow approval",
+    "delegation to host plugins",
+    "user-global skill installation",
+    "scheduler or daemon lifecycle",
+    "durable /tmp state"
+  ],
+  "local_adaptations": [
+    "Rename the skill to pr-babysit and keep only one target pull request.",
+    "Keep snapshot-first ordering, current-head invalidation, and exact branch-currency evidence.",
+    "Replace host skill calls and user questions with native-session handoff language.",
+    "Use only the caller-supplied state directory and one checkpoint per turn.",
+    "Add native bounded repair dispatch, least-privilege credential fencing, and safe SHA/thread result handling.",
+    "Treat every branch-currency item as a human decision, never an automatic claim.",
+    "Adapt report status examples from Unicode symbols and em dashes to ASCII text and hyphen punctuation while retaining the upstream source hash.",
+    "Retain only the deployed snapshot command and canonical identity flags while preserving all normalization helpers.",
+    "Return the observed head from snapshots and reconcile it through the durable checkpoint fence instead of rejecting head drift.",
+    "Add bounded local feedback disposition by stable item identity and reopen changed content.",
+    "Carry confirmed review IDs until the next snapshot marks their current identities.",
+    "Key repair attempt budgets by action kind, fingerprint, and observed head SHA.",
+    "Bind repair validation to a persisted candidate head and independent reviewer verdict.",
+    "Require structured current-snapshot merge-ready evidence and use crash-safe same-directory state writes.",
+    "Expose the deterministic state CLI through the city-scoped core-city pack and keep the rig-imported pack command-free."
+  ]
+}

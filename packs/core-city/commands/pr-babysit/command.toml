@@ -1,0 +1,23 @@
+description = """
+Manage durable target-only pull-request handoffs, checkpoints, bounded repair
+claims, candidate-head and review-verdict fences, formula attachment,
+validation results, and confirmation in Beads.
+The repair Formula attaches to the durable watch bead; its action child carries
+the claim and blocks the watch until confirmation.
+`dispatch-repair` fences the action claim and attaches one repair formula;
+`record-repair-result` records only safe SHA, make-check, and addressed-thread
+identifiers; `record-review-verdict` binds an independent reviewer decision to
+the action, generation, and exact candidate head; `confirm-action` closes the
+action child after the pushed SHA and verdict are verified. Repair dispatch
+preserves confirmed review IDs until `acknowledge-dispositions` clears them
+after the next snapshot marks every matching content identity.
+requires operator-attested least-privilege GitHub
+capability and rejects coupled Copilot credentials. `check-credentials` only
+checks the operator capability, credential-isolated validator attestation,
+lowercase validator SHA-256 format, and token separation; validator execution
+separately binds that hash to the selected executable and applies the bounded
+timeout. It never introspects fine-grained permissions.
+`sweep` validates the owning rig and bounded limit, lists due watches, and
+routes only eligible records to the binding-qualified babysitter.
+"""
+run = "run.sh"

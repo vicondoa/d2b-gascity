@@ -1,0 +1,5 @@
+[pack]
+name = "pr-babysit"
+version = "0.1.0"
+schema = 2
+description = "Target-only pull-request babysitting for rig-local sessions."

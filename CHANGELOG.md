@@ -9,6 +9,29 @@ and this project follows semantic versioning where releases are published.
 
 ### Changed
 
+- Enabled the rig-imported `pr-babysit` Pack v2 capability with binding-
+  qualified babysitter sessions, workdir-local dual Copilot projection,
+  deterministic publication handoff and verification receipts, Beads watch
+  and action state, the `1m` checkpoint sweep, and bounded Formula v2 repair.
+- Exposed the deterministic state CLI through the city-scoped `core-city`
+  pack as `gc core-city pr-babysit <action>` and removed the unreachable rig
+  command entrypoint.
+- Clarified that a handoff receipt targets
+  `<rig>/pr-babysit.pr-babysitter`, watch metadata records
+  `base_ref=v3` or `base_ref=main`, and publication metadata requires
+  `merge_strategy=pr`.
+- Documented same-repository-only repair, the mandatory absolute,
+  non-symlink executable `PR_BABYSIT_VALIDATOR`, matching lowercase SHA-256
+  attestation, bounded validator timeout, and
+  `PR_BABYSIT_VALIDATOR_ATTESTED=credential-isolated-v1`.
+- Documented target-only d2b `v3` and city-source `main` behavior, review-
+  before-CI checkpoint order, action-child dependency wake, three CI and two
+  review attempts, eight active hours, a three-day backstop, explicit rearm,
+  terminal and ambiguous-push handling, and human merge ownership.
+- Recorded the EveryInc `compound-engineering-plugin`
+  `compound-engineering-v3.23.4`
+  source and commit provenance for the selected MIT-licensed target-only
+  files, including local modifications and excluded surfaces.
 - Added a suspended-on-start `city-source` rig for native workflows that modify
   this repository, with `main` governance and the same model-tier projection as
   the external `d2b` product rig.
@@ -62,6 +85,18 @@ and this project follows semantic versioning where releases are published.
 
 ### Security
 
+- Clarified that publication, repair GitHub, Copilot Requests, and Discord
+  credentials are separate. Repair is operator-attested Contents write plus
+  Pull requests read only; Pull requests write, merge/admin, and workflow
+  approval authority are refused, and `GH_TOKEN`/`GITHUB_TOKEN` never reuse
+  Copilot tokens.
+- Repair validation now requires the operator-supplied validator to run
+  `make check` with credential and network isolation; missing, invalid, or
+  failed validation blocks repair. Fork and cross-repository PRs are human
+  blockers in v1.
+- Recorded that d2b rolls out first while city-source remains
+  suspended-on-start until U8 disposable acceptance, with live evidence kept
+  private and redacted.
 - Reiterated that native lifecycle, runtime state, host paths, mounts, and
   credentials remain outside portable source.
 - Reiterated that publication persists `metadata.target=v3` and

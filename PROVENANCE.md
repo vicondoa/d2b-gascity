@@ -22,6 +22,7 @@ is never copied into this repository.
 | Discord pack | [gastownhall/gascity-packs/discord](https://github.com/gastownhall/gascity-packs/tree/9f98ea4e1974cb49d18cd0c453eb81b2370cca84/discord) | `9f98ea4e1974cb49d18cd0c453eb81b2370cca84` | Retain upstream notices |
 | Beads | [steveyegge/beads](https://github.com/steveyegge/beads) | `v1.2.2`, `6c124203e771433a3550c348771a5b5e27fd3c21` | MIT |
 | Dolt | [dolthub/dolt](https://github.com/dolthub/dolt) | `2.1.7` | Apache-2.0 |
+| PR babysitting source | [EveryInc/compound-engineering-plugin](https://github.com/EveryInc/compound-engineering-plugin) | `compound-engineering-v3.23.4`, `33d9bd92689d60580e732890f94466e5793385b1` | MIT |
 
 The official Gas City core, Beads, Gas City pack, and Discord pack imports
 are recorded in the nested city's `pack.toml` and `packs.lock`. The city
@@ -43,16 +44,72 @@ for all other steps.
 The local `d2b-governance` fragment records repository-specific targets (`v3`
 for the d2b product rig and `main` for the separate city-source rig), PR-only
 publication, and the human-owned merge boundary without adding a service or
-transport. The d2b Discord formula extension remains product-only. The
-city-local mayor adapts the cookbook coordinator concept through the official
-`gc.mayor` skill and official Gas City formulas and roles; it never implements
-or merges.
+transport. The publication handoff receipt routes to
+`target=<rig>/pr-babysit.pr-babysitter`; the watch records
+`base_ref=v3` or `base_ref=main`; and the publication bead requires
+`merge_strategy=pr`. The d2b Discord formula extension remains product-only.
+The city-local mayor adapts the cookbook coordinator concept through the
+official `gc.mayor` skill and official Gas City formulas and roles; it never
+implements or merges.
 
 The local core pack independently defines the `command-glossary` and
 `operational-awareness` fragments referenced by the city. Their text is local
 Apache-2.0 content and does not import the Gastown pack, its agents, sessions,
 or workflow machinery. The official Discord pack remains the source of the
 `discord-v0` fragment.
+
+### Target-only PR babysitting import
+
+The rig-imported `pr-babysit` pack vendors a selected target-only subset from
+EveryInc's MIT-licensed `compound-engineering-plugin` source. The source tag is
+`compound-engineering-v3.23.4` at commit
+`33d9bd92689d60580e732890f94466e5793385b1`. The selected upstream files are:
+
+- `skills/ce-babysit-pr/SKILL.md`;
+- `skills/ce-babysit-pr/references/branch-currency.md`,
+  `envelope.md`, `pipeline.md`, `report.md`, `settle.md`, `setup.md`,
+  `tick.md`, and `watch-loop.md`; and
+- `skills/ce-babysit-pr/scripts/pr-snapshot`.
+
+They are copied to the local `packs/pr-babysit/skills/pr-babysit` namespace
+with the original MIT notice retained in `packs/pr-babysit/LICENSE`.
+`UPSTREAM.json` records the selected-file hashes, local adaptation hashes, and
+the excluded surfaces. All existing upstream notices remain alongside their
+imported sources; local documentation, Pack v2 glue, and city configuration
+remain Apache-2.0.
+
+Local modifications are deliberately narrow: the skill is renamed to
+`pr-babysit`; stack and land behavior is removed; the first version treats
+`BEHIND` as a human blocker and does not call `update-branch`; user-global
+installation, plugin delegation, scheduler or daemon lifecycle, and durable
+`/tmp` state are removed; and native Gas City agent, Beads, projection,
+publication-handoff, checkpoint, and Formula v2 repair seams are added.
+Publication uses route-only, verified-receipt, then wake phases; incomplete,
+pending, or route-failed receipts cannot act. Repair records a candidate head
+and machine-enforced reviewer verdict before validation or a bounded normal
+push, and local snapshot disposition replaces any GitHub thread mutation.
+Repairs are same-repository-only; fork and cross-repository PRs are human
+blockers in v1. Repair also requires an absolute, non-symlink, executable
+`PR_BABYSIT_VALIDATOR` with its matching 64-character lowercase
+`PR_BABYSIT_VALIDATOR_SHA256` and
+`PR_BABYSIT_VALIDATOR_ATTESTED=credential-isolated-v1` to run `make check` in
+a credential- and network-isolated environment through the bounded
+`timeout --foreground --kill-after=5s` validator execution. These local Pack v2 files are
+repository-owned Apache-2.0 content unless a file retains an upstream notice.
+
+The deterministic state CLI is exposed through the already city-scoped
+`packs/core-city` pack as `gc core-city pr-babysit <action>`. Its wrapper
+resolves only the repository-relative sibling
+`packs/pr-babysit/assets/scripts/pr-babysit-state.py` and fails closed when
+that helper is absent, not executable, or outside the expected packs root.
+The rig-imported pack does not expose a second command entrypoint and remains
+the owner of the agent, skill, order, formula, helper, and workflows.
+
+The excluded surfaces are stack and stack-landing behavior; merge,
+force-push, and raw-rebase mutations; workflow approval; delegation to host
+plugins; user-global skill installation; scheduler or daemon lifecycle; and
+durable `/tmp` state. The pack remains target-only and never creates a
+replacement pull request or makes the human merge decision.
 
 ## Adapted cookbook material
 

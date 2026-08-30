@@ -49,6 +49,9 @@ default_branch = "v3"
 source = "https://github.com/gastownhall/gascity-packs/tree/main/gascity/roles"
 version = "sha:9f98ea4e1974cb49d18cd0c453eb81b2370cca84"
 
+[rigs.imports.pr-babysit]
+source = "../../packs/pr-babysit"
+
 [rigs.formula_vars]
 base_branch = "v3"
 target_branch = "v3"
@@ -65,6 +68,9 @@ suspended_on_start = true
 [rigs.imports.gc]
 source = "https://github.com/gastownhall/gascity-packs/tree/main/gascity/roles"
 version = "sha:9f98ea4e1974cb49d18cd0c453eb81b2370cca84"
+
+[rigs.imports.pr-babysit]
+source = "../../packs/pr-babysit"
 
 [rigs.formula_vars]
 base_branch = "main"

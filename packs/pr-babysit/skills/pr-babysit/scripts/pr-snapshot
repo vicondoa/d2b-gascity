@@ -1,0 +1,1691 @@
+#!/usr/bin/env python3
+"""Take one deterministic, target-PR snapshot.
+
+The native repair action owns permitted mutations. This helper owns the read,
+diff, and ephemeral journal boundary. Review and log text is copied into JSON
+only; it is never interpreted as a command.
+
+The state directory is supplied by the caller and is the only durable
+location used by this script.  ``snapshot`` is one fetch/diff/write operation.
+This helper does not own a lifecycle.
+"""
+
+from __future__ import annotations
+
+import argparse
+import contextlib
+import datetime as dt
+import fcntl
+import hashlib
+import json
+import os
+import re
+import shlex
+import stat
+import subprocess
+import sys
+import tempfile
+import time
+import uuid
+from pathlib import Path
+from typing import Any, Iterator, NoReturn
+
+
+FAILING = {
+    "ACTION_REQUIRED",
+    "CANCELLED",
+    "ERROR",
+    "FAILURE",
+    "STARTUP_FAILURE",
+    "STALE",
+    "TIMED_OUT",
+}
+OPEN = "open"
+ISO_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
+GITHUB_TIMEOUT_SECONDS = 30
+QUIET_WINDOW_SECONDS = 5 * 60
+MAX_GRAPHQL_PAGES = 20
+MAX_GRAPHQL_THREADS = 2_000
+MAX_GRAPHQL_COMMENTS = 2_000
+SAFE_COMPONENT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
+SAFE_REF = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]*$")
+BASE_IDENTITIES = {"current", "stale", "unknown", "wrong-base"}
+GITHUB_PR_VIEW_JSON_FIELDS = (
+    "state,isDraft,mergeable,mergeStateStatus,reviewDecision,"
+    "headRefName,headRefOid,baseRefName,baseRefOid,url,"
+    "statusCheckRollup,comments,reviews,isCrossRepository,"
+    "headRepository,headRepositoryOwner"
+)
+
+
+def _error(message: str) -> NoReturn:
+    raise SystemExit(message)
+
+
+def _github_timeout() -> float:
+    configured = os.environ.get("PR_BABYSIT_GITHUB_TIMEOUT_SECONDS")
+    if configured is None:
+        return GITHUB_TIMEOUT_SECONDS
+    try:
+        timeout = float(configured)
+    except ValueError:
+        _error("GitHub timeout must be a positive number")
+    if timeout <= 0 or timeout > 300:
+        _error("GitHub timeout must be between 0 and 300 seconds")
+    return timeout
+
+
+def _github_command() -> list[str]:
+    configured = next(
+        (
+            os.environ.get(name)
+            for name in (
+                "PR_BABYSIT_GH_COMMAND",
+                "PR_BABYSIT_GH_BIN",
+                "GH_BIN",
+                "GH_EXECUTABLE",
+            )
+            if os.environ.get(name) is not None
+        ),
+        None,
+    )
+    command = shlex.split(configured) if configured is not None else ["gh"]
+    if not command:
+        _error("GitHub executable is empty")
+    return command
+
+
+def _run_github(
+    command: list[str],
+    *,
+    operation: str,
+) -> str:
+    try:
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=_github_timeout(),
+        )
+    except subprocess.TimeoutExpired:
+        _error(f"{operation} timed out")
+    except OSError:
+        _error(f"{operation} could not be executed")
+    if result.returncode:
+        _error(
+            (result.stderr or result.stdout).strip()
+            or f"{operation} failed"
+        )
+    return result.stdout
+
+
+def _parse_json_output(output: str, *, operation: str) -> dict[str, Any]:
+    try:
+        value = json.loads(output)
+    except json.JSONDecodeError as exc:
+        _error(f"{operation} returned invalid JSON: {exc}")
+    if not isinstance(value, dict):
+        _error(f"{operation} returned a non-object JSON value")
+    return value
+
+
+def _now() -> str:
+    return time.strftime(ISO_FORMAT, time.gmtime())
+
+
+def _elapsed(timestamp: Any) -> int:
+    if not isinstance(timestamp, str):
+        return 0
+    try:
+        parsed = dt.datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+    except ValueError:
+        return 0
+    return max(0, int(time.time() - parsed.timestamp()))
+
+
+def _sha(value: Any) -> str:
+    return hashlib.sha256(
+        json.dumps(value, sort_keys=True, ensure_ascii=False).encode("utf-8")
+    ).hexdigest()[:16]
+
+
+def _body_id(body: Any) -> str:
+    return hashlib.sha256(str(body or "").encode("utf-8")).hexdigest()[:16]
+
+
+def _stable_item_id(value: Any, field: str) -> str:
+    if (
+        not isinstance(value, str)
+        or len(value) > 128
+        or not SAFE_COMPONENT.fullmatch(value)
+    ):
+        _error(f"{field} is not a stable identifier")
+    return value
+
+
+def _repo_parts(repo: str | None) -> tuple[str, str, str | None]:
+    if not repo:
+        return "", "", None
+    pieces = repo.split("/")
+    if len(pieces) == 2:
+        owner, name = pieces
+        host = None
+    if len(pieces) == 3:
+        host, owner, name = pieces
+    if len(pieces) not in {2, 3}:
+        _error("repo must be OWNER/REPO or HOST/OWNER/REPO")
+    if not SAFE_COMPONENT.fullmatch(owner):
+        _error("repo owner is invalid")
+    if not SAFE_COMPONENT.fullmatch(name):
+        _error("repo name is invalid")
+    if host is not None and not re.fullmatch(
+        r"[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?",
+        host,
+    ):
+        _error("repo host is invalid")
+    return owner, name, host
+
+
+def _valid_ref(value: Any) -> bool:
+    if not isinstance(value, str) or not value or not SAFE_REF.fullmatch(value):
+        return False
+    return (
+        ".." not in value
+        and "//" not in value
+        and not value.endswith("/")
+        and "@{" not in value
+    )
+
+
+def _as_bool(value: Any, default: bool = False) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"true", "yes", "1"}:
+            return True
+        if normalized in {"false", "no", "0"}:
+            return False
+    return bool(value)
+
+
+def _valid_sha(value: Any) -> bool:
+    return isinstance(value, str) and bool(
+        re.fullmatch(r"[0-9a-fA-F]{40}", value)
+    )
+
+
+def _as_list(value: Any) -> list[dict[str, Any]]:
+    if isinstance(value, dict):
+        return [item for item in value.values() if isinstance(item, dict)]
+    return [item for item in value or [] if isinstance(item, dict)]
+
+
+def _connection_nodes(value: Any) -> list[dict[str, Any]]:
+    if isinstance(value, dict):
+        nodes = value.get("nodes")
+        if isinstance(nodes, list):
+            return [item for item in nodes if isinstance(item, dict)]
+        edges = value.get("edges")
+        if isinstance(edges, list):
+            result: list[dict[str, Any]] = []
+            for edge in edges:
+                if not isinstance(edge, dict):
+                    continue
+                node = edge.get("node")
+                if isinstance(node, dict):
+                    result.append(node)
+            return result
+        return []
+    return [item for item in value or [] if isinstance(item, dict)]
+
+
+def _check_key(raw: dict[str, Any]) -> str:
+    workflow = raw.get("workflowName") or raw.get("workflow")
+    name = raw.get("name") or raw.get("context") or raw.get("key")
+    name = str(name or "check")
+    return f"{workflow}/{name}" if workflow else name
+
+
+def _normalize_check(raw: dict[str, Any]) -> dict[str, Any]:
+    typename = raw.get("__typename")
+    if typename == "StatusContext":
+        state = str(raw.get("state") or "").upper()
+        status = (
+            "COMPLETED"
+            if state in {"SUCCESS", "FAILURE", "ERROR"}
+            else "IN_PROGRESS"
+        )
+        conclusion = "FAILURE" if state == "ERROR" else (state or None)
+        return {
+            "key": _check_key(raw),
+            "name": raw.get("context") or "status",
+            "status": status,
+            "conclusion": conclusion,
+            "details_url": raw.get("targetUrl"),
+            "created_at": raw.get("createdAt"),
+        }
+    status = str(raw.get("status") or "IN_PROGRESS").upper()
+    conclusion = raw.get("conclusion")
+    return {
+        "key": _check_key(raw),
+        "name": raw.get("name") or "check",
+        "status": status,
+        "conclusion": (
+            str(conclusion).upper() if conclusion is not None else None
+        ),
+        "details_url": raw.get("detailsUrl") or raw.get("targetUrl"),
+        "created_at": raw.get("createdAt"),
+    }
+
+
+def _normalize_feedback(
+    raw: dict[str, Any], *, kind: str, index: int
+) -> dict[str, Any]:
+    identifier = raw.get("id") or raw.get("databaseId") or f"{kind}-{index}"
+    body = raw.get("body") or raw.get("text") or ""
+    edit_id = raw.get("edit_id") or raw.get("updatedAt") or _body_id(body)
+    return {
+        "id": str(identifier),
+        "kind": kind,
+        "body": body,
+        "edit_id": str(edit_id),
+        "author": (raw.get("author") or {}).get("login")
+        if isinstance(raw.get("author"), dict)
+        else raw.get("author"),
+        "url": raw.get("url"),
+    }
+
+
+def _normalize_comment(raw: dict[str, Any], index: int) -> dict[str, Any]:
+    identifier = raw.get("id") or raw.get("databaseId") or f"comment-{index}"
+    author = raw.get("author")
+    if isinstance(author, dict):
+        author = author.get("login")
+    return {
+        "id": str(identifier),
+        "author": author,
+        "body": raw.get("body") or raw.get("text") or "",
+        "url": raw.get("url") or raw.get("htmlUrl"),
+        "created_at": raw.get("created_at") or raw.get("createdAt"),
+        "updated_at": raw.get("updated_at") or raw.get("updatedAt"),
+    }
+
+
+def _normalize_thread(raw: dict[str, Any], index: int) -> dict[str, Any]:
+    identifier = raw.get("thread_id") or raw.get("id") or f"thread-{index}"
+    comments = [
+        _normalize_comment(item, comment_index)
+        for comment_index, item in enumerate(
+            _connection_nodes(raw.get("comments"))
+        )
+    ]
+    last_comment = comments[-1] if comments else {}
+    last_id = (
+        raw.get("last_comment_id")
+        or raw.get("lastCommentId")
+        or last_comment.get("id")
+        or raw.get("comment_id")
+        or identifier
+    )
+    last_at = (
+        raw.get("last_comment_at")
+        or raw.get("lastCommentAt")
+        or last_comment.get("updated_at")
+        or last_comment.get("created_at")
+    )
+    body = raw.get("body") or last_comment.get("body") or ""
+    author = raw.get("author")
+    if author is None:
+        author = last_comment.get("author")
+    if isinstance(author, dict):
+        author = author.get("login")
+    url = raw.get("url") or last_comment.get("url")
+    resolved = _as_bool(
+        raw.get(
+            "isResolved",
+            raw.get("is_resolved", raw.get("resolved", False)),
+        )
+    )
+    outdated = _as_bool(
+        raw.get(
+            "isOutdated",
+            raw.get("is_outdated", raw.get("outdated", False)),
+        )
+    )
+    return {
+        "thread_id": str(identifier),
+        "last_comment_id": str(last_id),
+        "last_comment_at": last_at,
+        "is_resolved": resolved,
+        "is_outdated": outdated,
+        "isResolved": resolved,
+        "isOutdated": outdated,
+        "resolved": resolved,
+        "outdated": outdated,
+        "body": body,
+        "author": author,
+        "url": url,
+        "comments": comments,
+    }
+
+
+def _normalize_base(
+    raw: dict[str, Any],
+    *,
+    expected_base: str | None,
+) -> dict[str, Any]:
+    supplied = raw.get("base")
+    base = dict(supplied) if isinstance(supplied, dict) else {}
+    ref = (
+        base.get("ref")
+        or base.get("name")
+        or raw.get("baseRefName")
+        or raw.get("base_ref")
+    )
+    oid = (
+        base.get("oid")
+        or base.get("baseRefOid")
+        or base.get("base_ref_oid")
+    )
+    if oid is None:
+        oid = raw.get("baseRefOid") or raw.get("base_ref_oid")
+    current_oid = (
+        base.get("current_oid")
+        or base.get("currentOid")
+        or base.get("live_oid")
+        or base.get("liveOid")
+        or raw.get("base_current_oid")
+        or raw.get("current_base_oid")
+    )
+    supplied_identity = base.get("identity")
+    if not ref:
+        identity = "unknown"
+    elif expected_base and ref != expected_base:
+        identity = "wrong-base"
+    elif (
+        _valid_sha(oid)
+        and _valid_sha(current_oid)
+        and str(oid).lower() == str(current_oid).lower()
+    ):
+        identity = "current"
+    elif _valid_sha(oid) and _valid_sha(current_oid):
+        identity = "stale"
+    elif supplied_identity in BASE_IDENTITIES:
+        identity = supplied_identity
+    else:
+        identity = "unknown"
+    return {
+        "ref": ref,
+        "oid": oid,
+        "current_oid": current_oid,
+        "expected_ref": expected_base,
+        "identity": identity,
+    }
+
+
+def _normalize_head_identity(
+    raw: dict[str, Any],
+    *,
+    repo: str | None,
+) -> dict[str, Any]:
+    expected_owner, expected_name, _ = _repo_parts(repo)
+    head_repository = raw.get("headRepository", raw.get("head_repository"))
+    if isinstance(head_repository, dict):
+        head_repository_name = (
+            head_repository.get("nameWithOwner")
+            or head_repository.get("fullName")
+        )
+        head_owner = head_repository.get("owner")
+        if isinstance(head_owner, dict):
+            head_owner = head_owner.get("login")
+        if not head_repository_name:
+            head_repository_name = (
+                f"{head_owner}/{head_repository['name']}"
+                if head_owner and head_repository.get("name")
+                else None
+            )
+    else:
+        head_repository_name = head_repository
+        head_owner = raw.get("headRepositoryOwner")
+        if isinstance(head_owner, dict):
+            head_owner = head_owner.get("login")
+    base_repository = raw.get("baseRepository", raw.get("base_repository"))
+    if isinstance(base_repository, dict):
+        base_repository_name = (
+            base_repository.get("nameWithOwner")
+            or base_repository.get("fullName")
+        )
+        if not base_repository_name:
+            base_owner = base_repository.get("owner")
+            if isinstance(base_owner, dict):
+                base_owner = base_owner.get("login")
+            base_repository_name = (
+                f"{base_owner}/{base_repository['name']}"
+                if base_owner and base_repository.get("name")
+                else None
+            )
+    else:
+        base_repository_name = base_repository
+    expected_repository = (
+        f"{expected_owner}/{expected_name}"
+        if expected_owner and expected_name
+        else None
+    )
+    cross_repository = _as_bool(
+        raw.get("isCrossRepository", raw.get("cross_repository", False))
+    )
+    if head_repository_name and expected_repository:
+        cross_repository = cross_repository or (
+            str(head_repository_name).casefold()
+            != expected_repository.casefold()
+        )
+    blocker = None
+    if cross_repository:
+        blocker = {
+            "code": "cross-repository-head",
+            "status": "blocked",
+            "head_repository": head_repository_name,
+            "base_repository": base_repository_name or expected_repository,
+            "head_owner": head_owner,
+        }
+    return {
+        "head_repository": head_repository_name,
+        "head_owner": head_owner,
+        "base_repository": base_repository_name or expected_repository,
+        "cross_repository": cross_repository,
+        "fork": cross_repository,
+        "fork_identity": blocker,
+        "identity_blocker": blocker,
+    }
+
+
+def _normalize(
+    raw: dict[str, Any],
+    pr: int,
+    repo: str | None,
+    *,
+    expected_base: str | None = None,
+) -> dict[str, Any]:
+    """Normalize a fixture or a GitHub response without interpreting payload text."""
+    state = raw.get("pr_state", raw.get("state", "OPEN"))
+    head = raw.get("head_sha", raw.get("headRefOid"))
+    url = raw.get("url")
+    checks = raw.get("checks")
+    if checks is None:
+        checks = [_normalize_check(item) for item in _as_list(raw.get("statusCheckRollup"))]
+    else:
+        checks = [
+            _normalize_check(item) if "status" not in item else dict(item)
+            for item in _as_list(checks)
+        ]
+
+    threads = [
+        _normalize_thread(item, index)
+        for index, item in enumerate(_connection_nodes(raw.get("threads")))
+    ]
+    feedback = [
+        _normalize_feedback(item, kind="comment", index=index)
+        for index, item in enumerate(_as_list(raw.get("feedback")))
+    ]
+    if raw.get("feedback") is None:
+        feedback.extend(
+            _normalize_feedback(item, kind="comment", index=index)
+            for index, item in enumerate(_as_list(raw.get("comments")))
+        )
+        feedback.extend(
+            _normalize_feedback(item, kind="review", index=index)
+            for index, item in enumerate(_as_list(raw.get("reviews")))
+            if (item.get("body") or "").strip()
+        )
+
+    base = _normalize_base(raw, expected_base=expected_base)
+    head_identity = _normalize_head_identity(raw, repo=repo)
+
+    result = {
+        "pr": pr,
+        "repo": repo,
+        "url": url,
+        "pr_state": str(state).upper(),
+        "pr_is_draft": raw.get("pr_is_draft", raw.get("isDraft")),
+        "head_ref": raw.get("head_ref", raw.get("headRefName")),
+        "head_sha": head,
+        "mergeable": raw.get("mergeable", "UNKNOWN"),
+        "merge_state_status": raw.get(
+            "merge_state_status", raw.get("mergeStateStatus", "UNKNOWN")
+        ),
+        "review_decision": raw.get(
+            "review_decision", raw.get("reviewDecision")
+        ),
+        "review_in_progress": bool(raw.get("review_in_progress", False)),
+        "review_signal_count": int(raw.get("review_signal_count", 0) or 0),
+        "awaiting_approval": raw.get("awaiting_approval", 0),
+        "host_branch_update_capability": raw.get(
+            "host_branch_update_capability", "unknown"
+        ),
+        "base": base,
+        **head_identity,
+        "checks": checks,
+        "threads": threads,
+        "feedback": feedback,
+        "branch_currency": raw.get("branch_currency"),
+        "unrequested_base_merge": raw.get("unrequested_base_merge"),
+    }
+    if not result["url"] and repo and head:
+        owner, name, host = _repo_parts(repo)
+        if owner and name:
+            result["url"] = (
+                f"https://{host or 'github.com'}/{owner}/{name}/pull/{pr}"
+            )
+    return result
+
+
+def _fetch(args: argparse.Namespace) -> dict[str, Any]:
+    if args.expected_base and not _valid_ref(args.expected_base):
+        _error("expected base ref is invalid")
+    if args.expected_head_ref and not _valid_ref(args.expected_head_ref):
+        _error("expected head ref is invalid")
+    if args.fetch_file:
+        try:
+            raw = json.loads(Path(args.fetch_file).read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            _error(f"cannot read fetch fixture: {exc}")
+        if not isinstance(raw, dict):
+            _error("fetch fixture must contain a JSON object")
+        normalized = _normalize(
+            raw,
+            args.pr,
+            args.repo,
+            expected_base=args.expected_base,
+        )
+        _verify_expected_identity(normalized, args)
+        return normalized
+
+    if not args.repo:
+        _error("repository is required for a live snapshot")
+    if not args.expected_base:
+        _error("expected base ref is required for a live snapshot")
+    owner, name, host = _repo_parts(args.repo)
+    command = _github_command() + ["pr", "view", str(args.pr)]
+    command.extend(["--repo", args.repo])
+    command.extend(
+        [
+            "--json",
+            GITHUB_PR_VIEW_JSON_FIELDS,
+        ]
+    )
+    raw = _parse_json_output(
+        _run_github(command, operation="gh pr view"),
+        operation="gh pr view",
+    )
+    base_ref = raw.get("baseRefName")
+    if not isinstance(base_ref, str) or not base_ref:
+        _error("gh pr view omitted baseRefName")
+    if base_ref != args.expected_base:
+        raw["base"] = {
+            "ref": base_ref,
+            "oid": raw.get("baseRefOid"),
+            "current_oid": None,
+            "expected_ref": args.expected_base,
+            "identity": "wrong-base",
+        }
+    else:
+        current_oid = _fetch_current_base_oid(
+            owner,
+            name,
+            host,
+            base_ref,
+        )
+        raw["base"] = {
+            "ref": base_ref,
+            "oid": raw.get("baseRefOid"),
+            "current_oid": current_oid,
+        }
+    raw["threads"] = _fetch_review_threads(
+        owner,
+        name,
+        host,
+        args.pr,
+    )
+    normalized = _normalize(
+        raw,
+        args.pr,
+        args.repo,
+        expected_base=args.expected_base,
+    )
+    _verify_expected_identity(normalized, args)
+    return normalized
+
+
+def _fetch_current_base_oid(
+    owner: str,
+    name: str,
+    host: str | None,
+    base_ref: str,
+) -> str:
+    if not _valid_ref(base_ref):
+        _error("GitHub base ref is invalid")
+    endpoint = f"repos/{owner}/{name}/git/ref/heads/{base_ref}"
+    command = _github_command() + ["api"]
+    if host:
+        command.extend(["--hostname", host])
+    command.append(endpoint)
+    payload = _parse_json_output(
+        _run_github(command, operation="gh base ref query"),
+        operation="gh base ref query",
+    )
+    obj = payload.get("object")
+    current_oid = obj.get("sha") if isinstance(obj, dict) else payload.get("sha")
+    if not _valid_sha(current_oid):
+        _error("gh base ref query returned an invalid SHA")
+    return str(current_oid)
+
+
+GRAPHQL_THREADS_QUERY = """
+query($owner: String!, $name: String!, $number: Int!, $after: String) {
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $number) {
+      reviewThreads(first: 100, after: $after) {
+        nodes {
+          id
+          isResolved
+          isOutdated
+          comments(first: 100) {
+            nodes {
+              id
+              author { login }
+              body
+              url
+              createdAt
+              updatedAt
+            }
+            pageInfo { hasNextPage endCursor }
+          }
+        }
+        pageInfo { hasNextPage endCursor }
+      }
+    }
+  }
+}
+""".strip()
+
+
+GRAPHQL_THREAD_COMMENTS_QUERY = """
+query($thread: ID!, $after: String) {
+  node(id: $thread) {
+    ... on PullRequestReviewThread {
+      comments(first: 100, after: $after) {
+        nodes {
+          id
+          author { login }
+          body
+          url
+          createdAt
+          updatedAt
+        }
+        pageInfo { hasNextPage endCursor }
+      }
+    }
+  }
+}
+""".strip()
+
+
+def _graphql(
+    query: str,
+    *,
+    owner: str,
+    name: str,
+    number: int | None = None,
+    thread: str | None = None,
+    after: str | None = None,
+    host: str | None,
+    operation: str,
+) -> dict[str, Any]:
+    command = _github_command() + ["api"]
+    if host:
+        command.extend(["--hostname", host])
+    command.extend(["graphql", "-f", f"query={query}"])
+    if "$owner:" in query:
+        command.extend(["-F", f"owner={owner}"])
+    if "$name:" in query:
+        command.extend(["-F", f"name={name}"])
+    if number is not None and "$number:" in query:
+        command.extend(["-F", f"number={number}"])
+    if thread is not None and "$thread:" in query:
+        command.extend(["-F", f"thread={thread}"])
+    if "$after:" in query:
+        command.extend(
+            ["-F", f"after={after if after is not None else 'null'}"]
+        )
+    payload = _parse_json_output(
+        _run_github(command, operation=operation),
+        operation=operation,
+    )
+    errors = payload.get("errors")
+    if errors:
+        _error(f"{operation} returned GraphQL errors")
+    data = payload.get("data")
+    if not isinstance(data, dict):
+        _error(f"{operation} returned incomplete data")
+    return data
+
+
+def _page_info(connection: Any, operation: str) -> tuple[bool, str | None]:
+    if not isinstance(connection, dict):
+        _error(f"{operation} returned an invalid connection")
+    info = connection.get("pageInfo") or {}
+    if not isinstance(info, dict):
+        _error(f"{operation} returned invalid pageInfo")
+    has_next = info.get("hasNextPage", False)
+    if not isinstance(has_next, bool):
+        _error(f"{operation} returned invalid pageInfo")
+    cursor = info.get("endCursor")
+    if cursor is not None and not isinstance(cursor, str):
+        _error(f"{operation} returned invalid page cursor")
+    return has_next, cursor
+
+
+def _fetch_thread_comments(
+    thread: dict[str, Any],
+    *,
+    owner: str,
+    name: str,
+    host: str | None,
+    pages_used: int,
+) -> tuple[list[dict[str, Any]], int]:
+    comments_connection = thread.get("comments")
+    if comments_connection is None:
+        return [], pages_used
+    comments = _connection_nodes(comments_connection)
+    has_next, cursor = _page_info(
+        comments_connection,
+        "gh GraphQL review comments",
+    )
+    while has_next:
+        if pages_used >= MAX_GRAPHQL_PAGES:
+            _error("gh GraphQL review comment pagination exceeded limit")
+        if not cursor:
+            _error("gh GraphQL review comments returned no cursor")
+        data = _graphql(
+            GRAPHQL_THREAD_COMMENTS_QUERY,
+            owner=owner,
+            name=name,
+            thread=str(thread.get("id") or ""),
+            after=cursor,
+            host=host,
+            operation="gh GraphQL review comments",
+        )
+        pages_used += 1
+        node = data.get("node")
+        if not isinstance(node, dict):
+            _error("gh GraphQL review comments returned no thread")
+        connection = node.get("comments")
+        if not isinstance(connection, dict):
+            _error("gh GraphQL review comments returned no comments")
+        comments.extend(_connection_nodes(connection))
+        has_next, cursor = _page_info(
+            connection,
+            "gh GraphQL review comments",
+        )
+    return comments, pages_used
+
+
+def _fetch_review_threads(
+    owner: str,
+    name: str,
+    host: str | None,
+    number: int,
+) -> list[dict[str, Any]]:
+    threads: list[dict[str, Any]] = []
+    after: str | None = None
+    pages_used = 0
+    while True:
+        if pages_used >= MAX_GRAPHQL_PAGES:
+            _error("gh GraphQL review thread pagination exceeded limit")
+        data = _graphql(
+            GRAPHQL_THREADS_QUERY,
+            owner=owner,
+            name=name,
+            number=number,
+            after=after,
+            host=host,
+            operation="gh GraphQL review threads",
+        )
+        pages_used += 1
+        repository = data.get("repository")
+        pull_request = (
+            repository.get("pullRequest")
+            if isinstance(repository, dict)
+            else None
+        )
+        connection = (
+            pull_request.get("reviewThreads")
+            if isinstance(pull_request, dict)
+            else None
+        )
+        if not isinstance(connection, dict):
+            _error("gh GraphQL review threads returned no connection")
+        page_threads = _connection_nodes(connection)
+        if len(threads) + len(page_threads) > MAX_GRAPHQL_THREADS:
+            _error("gh GraphQL review thread count exceeded limit")
+        for thread in page_threads:
+            comments, pages_used = _fetch_thread_comments(
+                thread,
+                owner=owner,
+                name=name,
+                host=host,
+                pages_used=pages_used,
+            )
+            if len(comments) > MAX_GRAPHQL_COMMENTS:
+                _error("gh GraphQL review comment count exceeded limit")
+            thread["comments"] = {"nodes": comments}
+            threads.append(thread)
+        has_next, cursor = _page_info(
+            connection,
+            "gh GraphQL review threads",
+        )
+        if not has_next:
+            break
+        if not cursor:
+            _error("gh GraphQL review threads returned no cursor")
+        after = cursor
+    return threads
+
+
+def _verify_expected_identity(
+    current: dict[str, Any],
+    args: argparse.Namespace,
+) -> None:
+    if args.expected_head_ref and current.get("head_ref") != args.expected_head_ref:
+        _error("GitHub head ref does not match the watch receipt")
+
+
+def _empty_state(pr: int, repo: str | None) -> dict[str, Any]:
+    return {
+        "pr": {"number": pr, "repo": repo, "url": None},
+        "head_sha": None,
+        "tick": 0,
+        "state_created_at": _now(),
+        "last_change_at": None,
+        "last_action": None,
+        "invocation_id": None,
+        "started_at": None,
+        "invocation_budget_seconds": None,
+        "checks": {},
+        "threads": {},
+        "feedback": {},
+        "ci_dispatched": {},
+        "branch_currency_state": {"current_key": None, "items": {}},
+        "needs_human_residuals": [],
+    }
+
+
+def _validate_path(
+    path: Path,
+    *,
+    label: str,
+    allow_missing: bool,
+) -> Path:
+    if not path.is_absolute():
+        _error(f"{label} must be an absolute path")
+    if any(part in {".", ".."} for part in path.parts[1:]):
+        _error(f"{label} contains a relative path component")
+    current = Path(path.anchor)
+    for part in path.parts[1:]:
+        current /= part
+        try:
+            info = current.lstat()
+        except FileNotFoundError:
+            if not allow_missing:
+                _error(f"{label} does not exist")
+            continue
+        except OSError:
+            _error(f"{label} could not be validated")
+        if stat.S_ISLNK(info.st_mode):
+            _error(f"{label} contains a symlink")
+        if current != path and not stat.S_ISDIR(info.st_mode):
+            _error(f"{label} contains a non-directory")
+    return path
+
+
+def _state_dir(args: argparse.Namespace) -> Path:
+    watch_id = args.watch_id
+    if watch_id is not None:
+        if not re.fullmatch(r"[a-z0-9][a-z0-9-]*", watch_id):
+            _error("watch ID is invalid")
+        gc_dir_value = os.environ.get("GC_DIR")
+        if not gc_dir_value:
+            _error("GC_DIR is required with a watch ID")
+        gc_dir = _validate_path(
+            Path(gc_dir_value),
+            label="GC_DIR",
+            allow_missing=False,
+        )
+        try:
+            gc_info = gc_dir.lstat()
+        except OSError:
+            _error("GC_DIR could not be validated")
+        if not stat.S_ISDIR(gc_info.st_mode):
+            _error("GC_DIR is not a directory")
+        expected = gc_dir / "state" / watch_id
+        if args.state_dir is None:
+            state_dir = expected
+        else:
+            state_dir = Path(args.state_dir)
+            if state_dir != expected:
+                _error("state directory is not scoped to the watch ID")
+    elif args.state_dir is None:
+        _error("state directory is required")
+    else:
+        state_dir = Path(args.state_dir)
+    state_dir = _validate_path(
+        state_dir,
+        label="state directory",
+        allow_missing=True,
+    )
+    if state_dir.exists() and not state_dir.is_dir():
+        _error("state directory is not a directory")
+    return state_dir
+
+
+def _atomic_write(path: Path, value: dict[str, Any]) -> None:
+    _validate_path(
+        path.parent,
+        label="state directory",
+        allow_missing=False,
+    )
+    if path.is_symlink():
+        _error("state journal is a symlink")
+    stale_names = {f"{path.name}.next"}
+    stale_prefix = f".{path.name}."
+    try:
+        candidates = list(path.parent.iterdir())
+    except OSError:
+        _error("state journal could not be written")
+    for candidate in candidates:
+        if candidate.name not in stale_names and not (
+            candidate.name.startswith(stale_prefix)
+            and candidate.name.endswith(".tmp")
+        ):
+            continue
+        try:
+            info = candidate.lstat()
+        except OSError:
+            _error("state journal could not be written")
+        if stat.S_ISLNK(info.st_mode):
+            _error("state replacement path is a symlink")
+        if not stat.S_ISREG(info.st_mode):
+            _error("state replacement path is not a regular file")
+        try:
+            candidate.unlink()
+        except OSError:
+            _error("state journal could not be written")
+    replacement: Path | None = None
+    try:
+        descriptor, name = tempfile.mkstemp(
+            prefix=stale_prefix,
+            suffix=".tmp",
+            dir=path.parent,
+        )
+        replacement = Path(name)
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            handle.write(
+                json.dumps(value, indent=2, sort_keys=True, ensure_ascii=False)
+                + "\n"
+            )
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.chmod(replacement, 0o600)
+        os.replace(replacement, path)
+        replacement = None
+        try:
+            directory_fd = os.open(path.parent, os.O_RDONLY)
+        except OSError:
+            _error("state journal could not be written")
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
+    except OSError:
+        _error("state journal could not be written")
+    finally:
+        if replacement is not None:
+            try:
+                info = replacement.lstat()
+            except FileNotFoundError:
+                info = None
+            except OSError:
+                info = None
+            if info is not None and stat.S_ISREG(info.st_mode):
+                try:
+                    replacement.unlink()
+                except OSError:
+                    pass
+
+
+@contextlib.contextmanager
+def _locked_state(
+    state_dir: Path, pr: int, repo: str | None
+) -> Iterator[dict[str, Any]]:
+    _validate_path(state_dir, label="state directory", allow_missing=True)
+    try:
+        state_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+    except OSError:
+        _error("state directory could not be created")
+    _validate_path(state_dir, label="state directory", allow_missing=False)
+    try:
+        state_info = state_dir.lstat()
+    except OSError:
+        _error("state directory could not be validated")
+    if not stat.S_ISDIR(state_info.st_mode):
+        _error("state directory is not a directory")
+    os.chmod(state_dir, 0o700)
+    lock_path = state_dir / "lock"
+    state_path = state_dir / "state.json"
+    if lock_path.is_symlink():
+        _error("state lock is a symlink")
+    if state_path.is_symlink():
+        _error("state journal is a symlink")
+    flags = os.O_RDWR | os.O_CREAT
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    try:
+        fd = os.open(lock_path, flags, 0o600)
+    except OSError:
+        _error("state lock could not be opened")
+    locked = False
+    try:
+        lock_info = os.fstat(fd)
+        if not stat.S_ISREG(lock_info.st_mode):
+            _error("state lock is not a regular file")
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX)
+        except OSError:
+            _error("state lock could not be acquired")
+        locked = True
+        if state_path.exists():
+            try:
+                state = json.loads(state_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError) as exc:
+                _error(f"cannot read state: {exc}")
+            if not isinstance(state, dict):
+                _error("state must contain a JSON object")
+        else:
+            state = _empty_state(pr, repo)
+        yield state
+        _atomic_write(state_path, state)
+    finally:
+        if locked:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_UN)
+            except OSError:
+                pass
+        os.close(fd)
+
+
+def _apply_invocation(
+    state: dict[str, Any], args: argparse.Namespace
+) -> None:
+    if args.start_invocation:
+        state["invocation_id"] = uuid.uuid4().hex
+        state["started_at"] = _now()
+        state["invocation_budget_seconds"] = (
+            args.invocation_budget_seconds or 8 * 60 * 60
+        )
+        args.invocation_id = state["invocation_id"]
+        args.session_started_at = state["started_at"]
+        args._started_new_invocation = True
+        return
+    required = (
+        args.invocation_id,
+        args.session_started_at,
+        args.invocation_budget_seconds,
+    )
+    if any(value in (None, "") for value in required):
+        _error(
+            "resume requires --invocation-id, --session-started-at, "
+            "and --invocation-budget-seconds"
+        )
+    if (
+        state.get("invocation_id") != args.invocation_id
+        or state.get("started_at") != args.session_started_at
+        or float(state.get("invocation_budget_seconds", 0))
+        != float(args.invocation_budget_seconds)
+    ):
+        _error("invocation values do not match persisted state")
+
+
+def _merge_records(
+    current: list[dict[str, Any]],
+    previous: dict[str, Any],
+    identifier: str,
+    *,
+    identity_fields: tuple[str, ...],
+) -> dict[str, dict[str, Any]]:
+    records: dict[str, dict[str, Any]] = {}
+    for item in current:
+        key = str(item.get(identifier))
+        if not key:
+            continue
+        old = previous.get(key) if isinstance(previous.get(key), dict) else {}
+        identity = [item.get(field) for field in identity_fields]
+        old_identity = old.get("identity")
+        content_identity = _sha(
+            {
+                "identity": identity,
+                "body": item.get("body") or "",
+            }
+        )
+        old_content_identity = _sha(
+            {
+                "identity": old_identity,
+                "body": old.get("body") or "",
+            }
+        ) if old else None
+        disposition = old.get("disposition", OPEN)
+        if (
+            old_identity is not None
+            and (
+                old_identity != identity
+                or old_content_identity != content_identity
+            )
+        ):
+            disposition = OPEN
+        records[key] = {
+            **item,
+            "identity": identity,
+            "content_identity": content_identity,
+            "disposition": disposition,
+        }
+    return records
+
+
+def _currency(
+    state: dict[str, Any], current: dict[str, Any], head: str | None
+) -> dict[str, Any] | None:
+    supplied = current.get("branch_currency")
+    if isinstance(supplied, dict):
+        item = dict(supplied)
+    else:
+        status = str(current.get("merge_state_status") or "").upper()
+        if status not in {"BEHIND", "DIRTY", "CONFLICTING"}:
+            state["branch_currency_state"] = {"current_key": None, "items": {}}
+            return None
+        base = current.get("base") or {}
+        item = {
+            "status": "BEHIND" if status == "BEHIND" else "DIRTY",
+            "route": "normal-base",
+            "head_sha": head,
+            "base_oid": base.get("oid"),
+            "expected_head_sha": head,
+            "host_branch_update_capability": current.get(
+                "host_branch_update_capability", "unknown"
+            ),
+        }
+    key = str(item.get("key") or f"currency:{_sha(item)}")
+    prior_state = state.get("branch_currency_state") or {
+        "current_key": None,
+        "items": {},
+    }
+    prior_items = prior_state.get("items") or {}
+    prior = prior_items.get(key) if isinstance(prior_items, dict) else None
+    item["key"] = key
+    item["head_sha"] = item.get("head_sha") or head
+    item["expected_head_sha"] = item.get("expected_head_sha") or head
+    item["disposition"] = (
+        prior.get("disposition", OPEN) if isinstance(prior, dict) else OPEN
+    )
+    if item["disposition"] == OPEN:
+        item["attention"] = "decide"
+    else:
+        item["attention"] = None
+    state["branch_currency_state"] = {
+        "current_key": key,
+        "items": {key: item},
+    }
+    return item
+
+
+def _snapshot(
+    state: dict[str, Any], current: dict[str, Any], args: argparse.Namespace
+) -> dict[str, Any]:
+    old_head = state.get("head_sha")
+    head = current.get("head_sha") or old_head
+    head_changed = old_head is not None and head != old_head
+    if head_changed:
+        state["ci_dispatched"] = {}
+    state["head_sha"] = head
+    state["pr"] = {
+        "number": args.pr,
+        "repo": args.repo,
+        "url": current.get("url"),
+    }
+    checks: dict[str, dict[str, Any]] = {}
+    duplicate_counts: dict[str, int] = {}
+    for item in current.get("checks") or []:
+        if not item.get("key"):
+            continue
+        key = str(item["key"])
+        count = duplicate_counts.get(key, 0)
+        duplicate_counts[key] = count + 1
+        if count:
+            key = f"{key}#{count + 1}"
+        checks[key] = {**item, "key": key, "head_sha": head}
+    state["checks"] = checks
+    state["threads"] = _merge_records(
+        current.get("threads") or [],
+        state.get("threads") or {},
+        "thread_id",
+        identity_fields=(
+            "last_comment_id",
+            "last_comment_at",
+            "is_resolved",
+            "is_outdated",
+        ),
+    )
+    state["feedback"] = _merge_records(
+        current.get("feedback") or [],
+        state.get("feedback") or {},
+        "id",
+        identity_fields=("edit_id",),
+    )
+    currency = _currency(state, current, head)
+    dispatched = set(
+        (state.get("ci_dispatched") or {}).get(head or "", [])
+    )
+    actionable_ci = [
+        item
+        for key, item in state["checks"].items()
+        if str(item.get("conclusion") or "").upper() in FAILING
+        and key not in dispatched
+    ]
+    actionable_threads = [
+        item
+        for item in state["threads"].values()
+        if (
+            item.get("disposition") == OPEN
+            and not item.get("is_resolved", False)
+            and not item.get("is_outdated", False)
+        )
+    ]
+    actionable_feedback = [
+        item
+        for item in state["feedback"].values()
+        if item.get("disposition") == OPEN
+    ]
+    checks_terminal = all(
+        item.get("status") == "COMPLETED"
+        for item in state["checks"].values()
+    )
+    has_failing = any(
+        str(item.get("conclusion") or "").upper() in FAILING
+        for item in state["checks"].values()
+    )
+    observation = {
+        "pr_state": current.get("pr_state"),
+        "head_sha": head,
+        "mergeable": current.get("mergeable"),
+        "merge_state_status": current.get("merge_state_status"),
+        "review_decision": current.get("review_decision"),
+        "review_in_progress": current.get("review_in_progress"),
+        "base": current.get("base"),
+        "head_ref": current.get("head_ref"),
+        "head_repository": current.get("head_repository"),
+        "cross_repository": current.get("cross_repository"),
+        "identity_blocker": current.get("identity_blocker"),
+        "checks": state["checks"],
+        "threads": state["threads"],
+        "feedback": state["feedback"],
+        "branch_currency": currency,
+        "unrequested_base_merge": current.get("unrequested_base_merge"),
+    }
+    observation_id = _sha(observation)
+    previous_change = state.get("observation_id") != observation_id
+    state["observation_id"] = observation_id
+    if previous_change:
+        state["last_change_at"] = _now()
+    state["tick"] = int(state.get("tick") or 0) + 1
+    state["last_action"] = "snapshot"
+    base = current.get("base") or {}
+    base_ref_blocker = (
+        None if base.get("identity") == "current" else base.get("identity")
+    )
+    identity_blocker = current.get("identity_blocker")
+    result = {
+        **current,
+        "watch_id": args.watch_id,
+        "head_sha": head,
+        "observed_head_sha": head,
+        "head_changed": head_changed,
+        "base_ref_blocker": base_ref_blocker,
+        "identity_blocker": identity_blocker,
+        "branch_currency": currency,
+        "branch_currency_blocker": (
+            {
+                "key": currency.get("key"),
+                "disposition": currency.get("disposition"),
+            }
+            if currency is not None
+            else None
+        ),
+        "checks_terminal": checks_terminal,
+        "checks_present": bool(state["checks"]),
+        "has_failing_checks": has_failing,
+        "all_checks_ok": (
+            bool(state["checks"]) and checks_terminal and not has_failing
+        ),
+        "mergeability_certain": current.get("mergeable") in {
+            "MERGEABLE",
+            "CONFLICTING",
+        }
+        and base.get("identity") == "current"
+        and identity_blocker is None,
+        "actionable": {
+            "threads": actionable_threads,
+            "comments": actionable_feedback,
+            "ci": actionable_ci,
+        },
+        "counts": {
+            "threads": len(actionable_threads),
+            "comments": len(actionable_feedback),
+            "ci": len(actionable_ci),
+            "needs_human": len(state.get("needs_human_residuals") or []),
+        },
+        "needs_human_residuals": state.get("needs_human_residuals") or [],
+        "changed_this_tick": previous_change,
+        "quiet_seconds": _elapsed(state.get("last_change_at")),
+        "tick": state["tick"],
+        "invocation_id": state.get("invocation_id"),
+        "invocation_started_at": state.get("started_at"),
+        "invocation_budget_seconds": state.get("invocation_budget_seconds"),
+        "unrequested_base_merge": current.get("unrequested_base_merge"),
+    }
+    result["merge_ready_evidence"] = {
+        "current_head_sha": head,
+        "mergeability_certain": (
+            current.get("mergeable") == "MERGEABLE"
+            and base.get("identity") == "current"
+            and identity_blocker is None
+        ),
+        "branch_clean": (
+            str(current.get("merge_state_status") or "").upper() == "CLEAN"
+            and currency is None
+        ),
+        "required_checks_terminal": checks_terminal,
+        "required_checks_successful": (
+            bool(state["checks"]) and checks_terminal and not has_failing
+        ),
+        "no_actionable_feedback": not actionable_threads and not actionable_feedback,
+        "no_pending_human_interaction": (
+            not state.get("needs_human_residuals")
+            and not current.get("review_in_progress", False)
+        ),
+        "no_currency_item": currency is None,
+        "quiet_window_satisfied": (
+            _elapsed(state.get("last_change_at")) >= QUIET_WINDOW_SECONDS
+            and not current.get("review_in_progress", False)
+        ),
+    }
+    return result
+
+
+def _run_snapshot(args: argparse.Namespace) -> dict[str, Any]:
+    if not args.watch_id:
+        _error("snapshot requires --watch-id from the wake payload")
+    state_dir = _state_dir(args)
+    current = _fetch(args)
+    with _locked_state(state_dir, args.pr, args.repo) as state:
+        _apply_invocation(state, args)
+        result = _snapshot(state, current, args)
+    return result
+
+
+def _print_json(value: Any) -> None:
+    print(json.dumps(value, indent=2, sort_keys=True, ensure_ascii=False))
+
+
+def cmd_snapshot(args: argparse.Namespace) -> None:
+    _print_json(_run_snapshot(args))
+
+
+def _disposition_collection(
+    state: dict[str, Any],
+    kind: str,
+) -> dict[str, dict[str, Any]]:
+    if kind == "thread":
+        collection = state.get("threads")
+    elif kind in {"comment", "review"}:
+        collection = state.get("feedback")
+    else:
+        _error("item kind must be thread, comment, or review")
+    if not isinstance(collection, dict):
+        _error("snapshot state has no feedback records")
+    return collection
+
+
+def _content_identity(item: dict[str, Any]) -> str:
+    value = item.get("content_identity")
+    if isinstance(value, str) and re.fullmatch(r"[0-9a-f]{16}", value):
+        return value
+    identity = item.get("identity")
+    if not isinstance(identity, list):
+        _error("snapshot feedback identity is missing")
+    return _sha(
+        {
+            "identity": identity,
+            "body": item.get("body") or "",
+        }
+    )
+
+
+def _content_identity_full(item: dict[str, Any]) -> str:
+    identity = item.get("identity")
+    if not isinstance(identity, list):
+        _error("snapshot feedback identity is missing")
+    return hashlib.sha256(
+        json.dumps(
+            {
+                "identity": identity,
+                "body": item.get("body") or "",
+            },
+            sort_keys=True,
+            ensure_ascii=False,
+        ).encode("utf-8")
+    ).hexdigest()
+
+
+def _disposition(
+    state: dict[str, Any],
+    args: argparse.Namespace,
+    *,
+    action: str = "disposition",
+) -> dict[str, Any]:
+    if not _valid_sha(args.head_sha):
+        _error("head SHA is invalid")
+    recorded_pr = state.get("pr") or {}
+    if (
+        recorded_pr.get("number") != args.pr
+        or recorded_pr.get("repo") != args.repo
+        or state.get("head_sha") != args.head_sha
+    ):
+        _error("snapshot identity is stale")
+    invocation = (
+        getattr(args, "invocation_id", None),
+        getattr(args, "session_started_at", None),
+        getattr(args, "invocation_budget_seconds", None),
+    )
+    if any(value is not None for value in invocation):
+        if any(value in (None, "") for value in invocation):
+            _error("mark invocation values are incomplete")
+        if (
+            state.get("invocation_id") != invocation[0]
+            or state.get("started_at") != invocation[1]
+            or float(state.get("invocation_budget_seconds", 0))
+            != float(invocation[2])
+        ):
+            _error("mark invocation values are stale")
+    kind = str(getattr(args, "kind", "") or "").lower()
+    item_id = getattr(args, "item_id", None)
+    marked = [
+        ("thread", getattr(args, "thread", None)),
+        ("comment", getattr(args, "comment", None)),
+        ("review", getattr(args, "review", None)),
+    ]
+    marked = [(marked_kind, value) for marked_kind, value in marked if value]
+    if marked:
+        if kind or item_id or len(marked) != 1:
+            _error("mark requires exactly one feedback item")
+        kind, item_id = marked[0]
+    if not kind or item_id is None:
+        _error("feedback item is required")
+    item_id = _stable_item_id(item_id, "item ID")
+    content_identity = str(args.content_identity or "").lower()
+    if not re.fullmatch(r"[0-9a-f]{16}|[0-9a-f]{64}", content_identity):
+        _error("content identity must be a 16- or 64-hex hash")
+    item = _disposition_collection(state, kind).get(item_id)
+    if not isinstance(item, dict):
+        _error("feedback item is unknown")
+    item_kind = item.get("kind")
+    if kind in {"comment", "review"} and item_kind != kind:
+        _error("feedback item kind does not match")
+    current_identity = _content_identity(item)
+    current_identity_full = _content_identity_full(item)
+    if content_identity not in {current_identity, current_identity_full}:
+        _error("feedback item identity is stale")
+    disposition = str(args.disposition or "").lower()
+    if disposition not in {"handled", "ignored"}:
+        _error("disposition must be handled or ignored")
+    item["disposition"] = disposition
+    item["disposition_head_sha"] = args.head_sha
+    state["last_action"] = action
+    return {
+        "action": action,
+        "disposition": disposition,
+        "head_sha": args.head_sha,
+        "item_id": item_id,
+        "item_kind": kind,
+        "content_identity": content_identity,
+        "watch_id": args.watch_id,
+    }
+
+
+def cmd_disposition(args: argparse.Namespace) -> None:
+    state_dir = _state_dir(args)
+    with _locked_state(state_dir, args.pr, args.repo) as state:
+        _print_json(_disposition(state, args))
+
+
+def cmd_mark(args: argparse.Namespace) -> None:
+    state_dir = _state_dir(args)
+    with _locked_state(state_dir, args.pr, args.repo) as state:
+        _print_json(_disposition(state, args, action="mark"))
+
+
+def _parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="pr-snapshot")
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    def add_snapshot_options(command: argparse.ArgumentParser) -> None:
+        command.add_argument("--pr", type=int, required=True)
+        command.add_argument("--repo")
+        command.add_argument(
+            "--expected-base",
+            dest="expected_base",
+        )
+        command.add_argument(
+            "--expected-head-ref",
+            dest="expected_head_ref",
+        )
+        command.add_argument("--watch-id")
+        command.add_argument("--state-dir")
+        command.add_argument("--fetch-file")
+        command.add_argument("--start-invocation", action="store_true")
+        command.add_argument("--invocation-id")
+        command.add_argument("--session-started-at")
+        command.add_argument("--invocation-budget-seconds", type=float)
+
+    snapshot = sub.add_parser("snapshot")
+    add_snapshot_options(snapshot)
+    snapshot.set_defaults(handler=cmd_snapshot)
+
+    disposition = sub.add_parser("disposition")
+    disposition.add_argument("--pr", type=int, required=True)
+    disposition.add_argument("--repo", required=True)
+    disposition.add_argument(
+        "--head-sha",
+        "--current-head-sha",
+        dest="head_sha",
+        required=True,
+    )
+    disposition.add_argument("--watch-id")
+    disposition.add_argument("--state-dir")
+    disposition.add_argument("--invocation-id")
+    disposition.add_argument("--session-started-at")
+    disposition.add_argument("--invocation-budget-seconds", type=float)
+    disposition.add_argument(
+        "--kind",
+        "--item-kind",
+        dest="kind",
+        required=True,
+    )
+    disposition.add_argument(
+        "--id",
+        "--item-id",
+        dest="item_id",
+        required=True,
+    )
+    disposition.add_argument(
+        "--identity",
+        "--content-hash",
+        "--content-identity",
+        dest="content_identity",
+        required=True,
+    )
+    disposition.add_argument(
+        "--disposition",
+        required=True,
+    )
+    disposition.set_defaults(handler=cmd_disposition)
+
+    mark = sub.add_parser("mark")
+    mark.add_argument("--pr", type=int, required=True)
+    mark.add_argument("--repo", required=True)
+    mark.add_argument(
+        "--head-sha",
+        "--current-head-sha",
+        dest="head_sha",
+        required=True,
+    )
+    mark.add_argument("--watch-id")
+    mark.add_argument("--state-dir")
+    mark.add_argument("--invocation-id")
+    mark.add_argument("--session-started-at")
+    mark.add_argument("--invocation-budget-seconds", type=float)
+    marked = mark.add_mutually_exclusive_group(required=True)
+    marked.add_argument("--thread", "--thread-id")
+    marked.add_argument("--comment", "--comment-id")
+    marked.add_argument("--review", "--review-id")
+    mark.add_argument(
+        "--identity",
+        "--content-hash",
+        "--content-identity",
+        "--content-id",
+        dest="content_identity",
+        required=True,
+    )
+    mark.add_argument("--disposition", required=True)
+    mark.set_defaults(handler=cmd_mark)
+    return parser
+
+
+def main() -> None:
+    args = _parser().parse_args()
+    args.handler(args)
+
+
+if __name__ == "__main__":
+    main()

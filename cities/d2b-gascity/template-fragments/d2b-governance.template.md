@@ -20,8 +20,27 @@ work. Use the stock official workflows without the Discord extension.
 Both rigs default to `open_pr=true`, `push=true`, and `drain_policy=separate`
 so implementation uses worktrees and publication opens a pull request.
 Publication must refuse direct merges and accept only the pull-request
-handoff. Never merge or force-push; merge decisions remain human-owned. Host
-branch protection for `v3` is defense-in-depth: it must require pull requests
-and apply to administrators. This repository does not claim that the current
-host is already configured that way.
+handoff. The handoff receipt's
+`target=<rig>/pr-babysit.pr-babysitter` is distinct from the watch's
+`base_ref=v3` or `base_ref=main` and the publication bead's
+`merge_strategy=pr`. The rig-imported `pr-babysit` agent
+`pr-babysit.pr-babysitter` and `mol-pr-babysit-repair` Formula v2 are
+target-only: they may inspect and repair the named pull request on its
+existing head branch, but may not create a replacement pull request. Repairs
+are same-repository-only; fork or cross-repository PRs are human blockers in
+v1. Before repair, the operator must provide an absolute, non-symlink,
+executable `PR_BABYSIT_VALIDATOR`, its matching 64-character lowercase
+`PR_BABYSIT_VALIDATOR_SHA256`, and set
+`PR_BABYSIT_VALIDATOR_ATTESTED=credential-isolated-v1`; it runs `make check`
+in a credential- and network-isolated environment through the bounded
+validator timeout, and a missing, mismatched, timed-out, or failed validator
+blocks repair. It may never merge; it may never force-push or rebase, approve
+workflow runs, or update branch currency. Merge decisions remain human-owned.
+The deterministic state CLI is exposed only through the city-scoped
+`core-city` pack as `gc core-city pr-babysit <action>`, delegating to the
+rig-imported helper without importing that pack city-wide or exposing a second
+command entrypoint.
+Host branch protection for `v3` is defense-in-depth: it must require pull
+requests and apply to administrators. This repository does not claim that the
+current host is already configured that way.
 {{- end }}

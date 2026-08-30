@@ -43,12 +43,85 @@ bypass either repository's pull-request handoff.
 
 Keep `d2b-governance` registered as a global fragment. Publication must
 persist and re-read `metadata.merge_strategy=pr` plus the repository-specific
-target: `v3` for `d2b`, `main` for `city-source`. Refuse direct merges and
-accept only the pull-request handoff. The d2b Discord formula extension is
-product-only. Human owners make merge decisions. Host branch protection for
-`v3` is defense-in-depth: it must require pull requests and apply to
-administrators, but this repository does not claim the current host is already
-configured that way.
+target: `v3` for `d2b`, `main` for `city-source`. The handoff receipt's
+`target=<rig>/pr-babysit.pr-babysitter` is the routing target, not the watch
+base. The watch stores `base_ref=v3` or `base_ref=main`, while the publication
+bead stores `merge_strategy=pr`. Refuse direct merges and accept only the
+pull-request handoff. The d2b Discord formula extension is product-only.
+Human owners make merge decisions. Host branch protection for `v3` is
+defense-in-depth: it must require pull requests and apply to administrators,
+but this repository does not claim the current host is already configured
+that way.
+
+The rig-imported `pr-babysit` pack provides one binding-qualified babysitter
+per rig: `d2b/pr-babysit.pr-babysitter` and
+`city-source/pr-babysit.pr-babysitter`. Each is a fresh on-demand
+`fast-worker` with one active session and a workdir-local dual projection at
+`.github/skills/pr-babysit` and `.agents/skills/pr-babysit`. The mandatory
+projection gate runs before any GitHub or repository action.
+
+The city-scoped `core-city` pack exposes the deterministic state command
+`gc core-city pr-babysit <action>`. It delegates only to the sibling helper
+owned by the rig-imported pack; the rig pack remains the owner of the agent,
+skill, order, formula, state helper, and workflows.
+
+Publication calls the native city-scoped command
+`gc core-city pr-babysit publication-handoff` and must follow it with
+`gc core-city pr-babysit verify-handoff` before closing. The handoff receipt
+binds the verified repository, PR number or URL, base, head, current SHA,
+watch bead, and babysitter identity. Use `gc core-city pr-babysit show` to
+inspect safe watch metadata.
+
+Watch states are `watching`, `waiting`, `repairing`, `merge-ready`, `blocked`,
+`exhausted`, and `terminal`. The `claim -> act -> confirm` protocol links an
+action child with `bd dep <action-id> --blocks <watch-id>`; native dependency
+closure wakes the watch. The `pr-babysit-sweep` cooldown order runs every
+`1m` and performs one short checkpoint, not a daemon or resident watcher.
+Under the watch lock it rechecks due time and a short `wake_lease_until`,
+advances the next snapshot, and settles the lease after routing so concurrent
+sweeps issue one nudge.
+Checkpoint order is snapshot, terminal, head, review, current-head CI, exact
+branch currency, then one state write.
+
+`mol-pr-babysit-repair` is Formula v2. It validates `make check`, pushes only
+the existing PR head, and records the resulting SHA. Budgets are three CI
+attempts and two review attempts per action kind, fingerprint, and head SHA,
+plus eight active hours and a three-day backstop. A new head starts a fresh
+attempt counter.
+The first version does not use `update-branch`: repair is operator-attested
+with Contents write and Pull requests read only, while the agent cannot
+introspect fine-grained permissions. Pull requests write, merge/admin,
+workflow approval, and Copilot Requests authority are refused. `GH_TOKEN` and
+`GITHUB_TOKEN` must never reuse Copilot tokens. Stale, dirty, conflicting,
+unknown, or ambiguous push evidence blocks; an ambiguous push is never
+retried. Never use `--force-with-lease` or a raw rebase. `rearm=true` may
+rearm an open blocked, exhausted, or merge-ready watch, but fails with a human
+blocker while its persisted formula root is open. Closed or missing roots are
+cleaned before rearm proceeds; a terminal watch is never rearmed.
+
+Watch `claim_status` values written by state code are `none`, `claimed`,
+`result-recorded`, `blocked`, and `exhausted`. Action records may also use
+`ambiguous` and `stale`; Beads issue status `closed` is separate from
+`claim_status` and is written when a confirmed action child closes or a watch
+reaches terminal. Repairs are same-repository-only:
+`head_repository` must equal `owner/repository`.
+Fork or cross-repository PRs are human blockers in v1. Before repair, provide
+`PR_BABYSIT_VALIDATOR` as an absolute, non-symlink, executable file, its
+64-character lowercase hexadecimal `PR_BABYSIT_VALIDATOR_SHA256`, and set
+`PR_BABYSIT_VALIDATOR_ATTESTED=credential-isolated-v1`. The workflow hashes
+that executable with `sha256sum` and runs it through
+`timeout --foreground --kill-after=5s` using a positive
+`PR_BABYSIT_VALIDATOR_TIMEOUT_SECONDS` no greater than 900 (default 900). It
+must run `make check` in a credential- and network-isolated environment; a
+missing, mismatched, timed-out, or failed validator blocks repair without a
+push. Keep the operator-attested `contents-write,pull-requests-read` GitHub
+capability and all Copilot, GitHub, and Discord credentials separate.
+
+Enable d2b first. The `city-source` rig remains suspended-on-start and must
+not be enabled for live repair until the U8 disposable d2b acceptance passes.
+Static and native credential-free tests cover both targets without mutating
+GitHub; authenticated evidence stays private and redacted. No live U8
+acceptance is claimed by this source tree.
 
 ## Source, host, and reset boundaries
 
