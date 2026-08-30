@@ -9,6 +9,10 @@ global_fragments = [
   "d2b-governance",
 ]
 
+[workspace.env]
+GH_TOKEN = ""
+GITHUB_TOKEN = ""
+
 [providers]
 [providers.deep-thinker]
 base = "copilot-deep-sol"
@@ -27,6 +31,14 @@ base = "builtin:codex"
 ready_delay_ms = 0
 [providers.codex.option_defaults]
 model = ""
+
+[[patches.agent]]
+dir = "d2b"
+name = "gc.run-operator"
+
+[patches.agent.env]
+GH_TOKEN = "$GH_TOKEN"
+GITHUB_TOKEN = ""
 
 [daemon]
 patrol_interval = "30s"

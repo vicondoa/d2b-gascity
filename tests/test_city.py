@@ -594,7 +594,24 @@ class RootPortableCityTests(unittest.TestCase):
                     "discord-v0",
                     "d2b-governance",
                 ],
+                "env": {
+                    "GH_TOKEN": "",
+                    "GITHUB_TOKEN": "",
+                },
             },
+        )
+        self.assertEqual(
+            config["patches"]["agent"],
+            [
+                {
+                    "dir": "d2b",
+                    "name": "gc.run-operator",
+                    "env": {
+                        "GH_TOKEN": "$GH_TOKEN",
+                        "GITHUB_TOKEN": "",
+                    },
+                }
+            ],
         )
         local_global_fragments = {
             "command-glossary": (
@@ -685,11 +702,7 @@ class RootPortableCityTests(unittest.TestCase):
         self.assertEqual(codex["option_defaults"], {"model": ""})
         for key in ("args", "command", "env"):
             self.assertNotIn(key, codex)
-        for marker in (
-            "COPILOT_GITHUB_TOKEN",
-            "GH_TOKEN",
-        ):
-            self.assertNotIn(marker, text)
+        self.assertNotIn("COPILOT_GITHUB_TOKEN", text)
 
         expected_tiers = {
             "requirements-planner": "deep-thinker",
@@ -723,7 +736,6 @@ class RootPortableCityTests(unittest.TestCase):
         )
         for marker in (
             "secret",
-            "token",
             "guild",
             "channel",
             "role-allowlist",
@@ -732,6 +744,7 @@ class RootPortableCityTests(unittest.TestCase):
             "relay",
         ):
             self.assertNotIn(marker, text.lower())
+        self.assertNotRegex(text, r"(?i)(?:gh[pousr]_|github_pat_)[A-Za-z0-9_]+")
         self.assertIn("/gascity/roles", text)
         self.assertNotRegex(text.lower(), r"role[-_]id")
         self.assertEqual(
