@@ -513,6 +513,14 @@ approve workflows, use `--force-with-lease`, update branch currency, act on
 another PR, or bypass the pull-request handoff. Human owners retain merge
 ownership.
 
+The host may load the dedicated repair token into the native supervisor as
+`GH_TOKEN`, but the city pins both GitHub token variables empty for every
+managed session. Only the d2b `gc.run-operator` agent rehydrates `GH_TOKEN`
+from the controller environment. The babysitter remains read-only, the
+implementation worker commits locally without pushing, the independent
+reviewer does not mutate GitHub, and the run operator owns the single
+validated normal push.
+
 ### Rollout and evidence
 
 d2b is enabled first. The `city-source` rig remains suspended-on-start and
