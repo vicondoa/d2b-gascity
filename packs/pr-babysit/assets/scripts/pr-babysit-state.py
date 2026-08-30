@@ -165,6 +165,7 @@ SAFE_METADATA_KEYS = {
     "handoff_publication_bead",
     "handoff_route_status",
     "handoff_wake_status",
+    "gc.routed_to",
     "candidate_head_sha",
     "review_verdict",
     "review_verdict_action_id",
@@ -766,7 +767,10 @@ def metadata_from_issue(issue: dict[str, Any]) -> dict[str, str]:
     for key, value in raw.items():
         if isinstance(value, (dict, list, tuple)) or value is None:
             fail("Beads metadata values must be scalar strings", "unsafe-state")
-        result[str(key)] = str(value)
+        if isinstance(value, bool):
+            result[str(key)] = "true" if value else "false"
+        else:
+            result[str(key)] = str(value)
     return result
 
 

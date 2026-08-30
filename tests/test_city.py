@@ -4886,6 +4886,26 @@ if command == "close":
         spec.loader.exec_module(module)
         return module
 
+    def test_native_route_metadata_and_boolean_receipts_are_safe(self):
+        module = self._state_module()
+        metadata = module.metadata_from_issue(
+            {
+                "id": "d2b-pr-test",
+                "metadata": {
+                    "record_kind": "watch",
+                    "gc.routed_to": "d2b/pr-babysit.pr-babysitter",
+                    "handoff_verified": True,
+                    "handoff_route_status": "complete",
+                    "handoff_wake_status": "delivered",
+                },
+            }
+        )
+        self.assertEqual(
+            metadata["gc.routed_to"],
+            "d2b/pr-babysit.pr-babysitter",
+        )
+        self.assertEqual(metadata["handoff_verified"], "true")
+
     def test_subprocess_timeouts_fail_closed_with_existing_error_codes(self):
         module = self._state_module()
         timeout = subprocess.TimeoutExpired(["command"], 1)
