@@ -67,7 +67,7 @@ ACTIVE_BUDGET = timedelta(hours=8)
 BACKSTOP_BUDGET = timedelta(days=3)
 ORDER_TIMEOUT_SECONDS = 30
 BEADS_TIMEOUT_SECONDS = ORDER_TIMEOUT_SECONDS
-ROUTE_TIMEOUT_SECONDS = 5
+ROUTE_TIMEOUT_SECONDS = 20
 GAS_CITY_TIMEOUT_SECONDS = ROUTE_TIMEOUT_SECONDS
 FORMULA_TIMEOUT_SECONDS = ORDER_TIMEOUT_SECONDS
 GIT_VALIDATION_TIMEOUT_SECONDS = ORDER_TIMEOUT_SECONDS
@@ -2850,6 +2850,24 @@ def receipt_updates(
     }
 
 
+def route_timeout_seconds() -> int:
+    value = os.environ.get("PR_BABYSIT_ROUTE_TIMEOUT_SECONDS")
+    if value is None:
+        return ROUTE_TIMEOUT_SECONDS
+    if not re.fullmatch(r"[1-9][0-9]*", value):
+        fail(
+            "PR_BABYSIT_ROUTE_TIMEOUT_SECONDS must be between 1 and 29",
+            "configuration",
+        )
+    timeout = int(value)
+    if timeout >= ORDER_TIMEOUT_SECONDS:
+        fail(
+            "PR_BABYSIT_ROUTE_TIMEOUT_SECONDS must be between 1 and 29",
+            "configuration",
+        )
+    return timeout
+
+
 def existing_receipt_matches(
     metadata: dict[str, str],
     receipt: dict[str, str],
@@ -3060,7 +3078,7 @@ def route_watch(target: str, watch_id: str, *, wake: bool = True) -> None:
             capture_output=True,
             text=True,
             check=False,
-            timeout=ROUTE_TIMEOUT_SECONDS,
+            timeout=route_timeout_seconds(),
         )
     except subprocess.TimeoutExpired:
         fail("Gas City babysitter route timed out", "route-failed")

@@ -1668,7 +1668,15 @@ class RootPortableCityTests(unittest.TestCase):
 
     def test_gitignore_covers_native_runtime_state(self) -> None:
         text = (ROOT / ".gitignore").read_text(encoding="utf-8")
-        for marker in (".gc/", ".beads/", ".dolt/", ".runtime/", ".state/", "run/"):
+        for marker in (
+            ".gc/",
+            ".agents/",
+            ".beads/",
+            ".dolt/",
+            ".runtime/",
+            ".state/",
+            "run/",
+        ):
             self.assertIn(marker, text)
 
     def test_ci_downloads_and_verifies_the_pinned_gascity_binary(self) -> None:
@@ -4981,6 +4989,80 @@ if command == "close":
                 module.validate_git_ref("v3", "base_ref")
         self.assertEqual(raised.exception.code, "configuration")
 
+    def test_route_allows_twenty_seconds_for_session_startup(self):
+        module = self._state_module()
+
+        def complete_route(*args, **kwargs):
+            self.assertEqual(kwargs["timeout"], 20)
+            return subprocess.CompletedProcess(
+                args[0],
+                0,
+                stdout='{"ok":true}\n',
+                stderr="",
+            )
+
+        with mock.patch.dict(
+            os.environ,
+            {
+                "PR_BABYSIT_GC_BIN": "gc",
+                "PR_BABYSIT_BEADS_CWD": str(ROOT),
+            },
+            clear=False,
+        ), mock.patch.object(
+            module.subprocess,
+            "run",
+            side_effect=complete_route,
+        ):
+            module.route_watch(
+                "d2b/pr-babysit.pr-babysitter",
+                "d2b-watch",
+            )
+
+    def test_route_timeout_override_is_bounded_below_order_budget(self):
+        module = self._state_module()
+        completed = subprocess.CompletedProcess(
+            ["gc"],
+            0,
+            stdout='{"ok":true}\n',
+            stderr="",
+        )
+        with mock.patch.dict(
+            os.environ,
+            {
+                "PR_BABYSIT_GC_BIN": "gc",
+                "PR_BABYSIT_BEADS_CWD": str(ROOT),
+                "PR_BABYSIT_ROUTE_TIMEOUT_SECONDS": "1",
+            },
+            clear=False,
+        ), mock.patch.object(
+            module.subprocess,
+            "run",
+            return_value=completed,
+        ) as routed:
+            module.route_watch(
+                "d2b/pr-babysit.pr-babysitter",
+                "d2b-watch",
+            )
+        self.assertEqual(routed.call_args.kwargs["timeout"], 1)
+
+        for value in ("0", "30", "invalid"):
+            with self.subTest(value=value), mock.patch.dict(
+                os.environ,
+                {
+                    "PR_BABYSIT_GC_BIN": "gc",
+                    "PR_BABYSIT_BEADS_CWD": str(ROOT),
+                    "PR_BABYSIT_ROUTE_TIMEOUT_SECONDS": value,
+                },
+                clear=False,
+            ), mock.patch.object(module.subprocess, "run") as routed:
+                with self.assertRaises(module.StateError) as raised:
+                    module.route_watch(
+                        "d2b/pr-babysit.pr-babysitter",
+                        "d2b-watch",
+                    )
+                self.assertEqual(raised.exception.code, "configuration")
+                routed.assert_not_called()
+
     def test_handoff_is_idempotent_and_preserves_existing_state(self) -> None:
         root, env = self._fixture("handoff")
         try:
@@ -7283,10 +7365,16 @@ if os.environ.get("FAKE_GC_FAIL") == "1":
                 ),
             )
             started = time.monotonic()
-            result = self._run_sweep(env | {"FAKE_GC_SLEEP": "6"})
+            result = self._run_sweep(
+                env
+                | {
+                    "FAKE_GC_SLEEP": "2",
+                    "PR_BABYSIT_ROUTE_TIMEOUT_SECONDS": "1",
+                }
+            )
             elapsed = time.monotonic() - started
             self.assertNotEqual(result.returncode, 0)
-            self.assertLess(elapsed, 30)
+            self.assertLess(elapsed, 10)
             self.assertIn("route-failed", result.stdout)
             records = json.loads((root / "beads.json").read_text())
             watch = next(record for record in records if record["id"] == watch_id)

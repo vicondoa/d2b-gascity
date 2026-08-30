@@ -1,6 +1,8 @@
 # Native Gas City, Beads, Dolt, and other runtime state
 .gc/
 **/.gc/
+.agents/
+**/.agents/
 .beads/
 **/.beads/
 .dolt/

@@ -407,8 +407,11 @@ due time and applies the requested limit, so a large watch set cannot starve
 older due records. Each routed watch atomically advances its next snapshot
 time and takes a short wake lease under the watch lock; the lease is settled
 after routing so concurrent sweeps issue one nudge. The route timeout is
-shorter than the native 30-second order budget. The order is short-lived and
-owns no daemon, webhook, relay, or in-session watcher process.
+20 seconds, shorter than the native 30-second order budget but long enough for
+a fresh provider session to start. Operators may set
+`PR_BABYSIT_ROUTE_TIMEOUT_SECONDS` from 1 through 29 when the environment
+requires a different bound. The order is short-lived and owns no daemon,
+webhook, relay, or in-session watcher process.
 
 ### Bounded repair and stop behavior
 
