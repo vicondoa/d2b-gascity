@@ -480,10 +480,11 @@ sha256sum, and set `PR_BABYSIT_VALIDATOR_ATTESTED=credential-isolated-v1`.
 The workflow hashes that exact executable with `sha256sum` immediately before
 running it through `timeout --foreground --kill-after=5s`, using
 `PR_BABYSIT_VALIDATOR_TIMEOUT_SECONDS` from 1 through 900 seconds (default
-900). It must run `make check` in a credential- and network-isolated
-environment. A missing, mismatched, timed-out, or failed validator blocks
-repair and records a failed result; no branch update is attempted. There is
-no direct-make fallback.
+900). It must run `make check` in a credential-isolated environment. Public
+dependency access is allowed, but GitHub, Copilot, BuildBuddy, publication,
+and Discord credentials must be absent. A missing, mismatched, timed-out, or
+failed validator blocks repair and records a failed result; no branch update
+is attempted. There is no direct-make fallback.
 
 The reviewer is read-only with respect to GitHub and never resolves review
 threads. After a confirmed review repair, record each addressed thread,
@@ -512,6 +513,14 @@ credential. The babysitter and repair worker never merge, force-push, rebase,
 approve workflows, use `--force-with-lease`, update branch currency, act on
 another PR, or bypass the pull-request handoff. Human owners retain merge
 ownership.
+
+The host may load the dedicated repair token into the native supervisor as
+`GH_TOKEN`, but the city pins both GitHub token variables empty for every
+managed session. Only the d2b `gc.run-operator` agent rehydrates `GH_TOKEN`
+from the controller environment. The babysitter remains read-only, the
+implementation worker commits locally without pushing, the independent
+reviewer does not mutate GitHub, and the run operator owns the single
+validated normal push.
 
 ### Rollout and evidence
 

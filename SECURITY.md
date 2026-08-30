@@ -80,9 +80,11 @@ token is coupled to a Copilot token. Before repair, the operator must provide
 `PR_BABYSIT_VALIDATOR_ATTESTED=credential-isolated-v1`. The workflow hashes
 the selected executable with `sha256sum` and runs it through
 `timeout --foreground --kill-after=5s` with a positive timeout from 1 through
-900 seconds (default 900). It must run `make check` in a credential- and
-network-isolated environment. A missing, mismatched, timed-out, or failed
-validator blocks repair without a push. There is no direct-make fallback.
+900 seconds (default 900). It must run `make check` in a credential-isolated
+environment. Public dependency access is allowed, but GitHub, Copilot,
+BuildBuddy, publication, and Discord credentials must be absent. A missing,
+mismatched, timed-out, or failed validator blocks repair without a push. There
+is no direct-make fallback.
 
 The repair path uses only the existing PR head and normal push. Version 1 does
 not use `update-branch`; `BEHIND`, dirty, conflicting, stale-head, unknown
