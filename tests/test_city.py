@@ -4962,6 +4962,7 @@ if command == "close":
                 "metadata": {
                     "record_kind": "watch",
                     "gc.routed_to": "d2b/pr-babysit.pr-babysitter",
+                    "gc.session_name": "d2b--pr-babysit__pr-babysitter",
                     "handoff_verified": True,
                     "handoff_route_status": "complete",
                     "handoff_wake_status": "delivered",
@@ -4971,6 +4972,10 @@ if command == "close":
         self.assertEqual(
             metadata["gc.routed_to"],
             "d2b/pr-babysit.pr-babysitter",
+        )
+        self.assertEqual(
+            metadata["gc.session_name"],
+            "d2b--pr-babysit__pr-babysitter",
         )
         self.assertEqual(metadata["handoff_verified"], "true")
 

@@ -166,6 +166,7 @@ SAFE_METADATA_KEYS = {
     "handoff_route_status",
     "handoff_wake_status",
     "gc.routed_to",
+    "gc.session_name",
     "candidate_head_sha",
     "review_verdict",
     "review_verdict_action_id",
