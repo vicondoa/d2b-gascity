@@ -1499,13 +1499,9 @@ class RootPortableCityTests(unittest.TestCase):
             "handoff_wake_status=delivered",
             "base_ref=v3",
             "base_ref=main",
-            "pr_babysit_validator",
-            "pr_babysit_validator_sha256",
-            "validator timeout",
-            "credential-isolated-v1",
-            "absolute, non-symlink, executable",
-            "credential-isolated",
-            "missing, mismatched, timed-out, or failed validator blocks repair",
+            "worker_signoff_sha",
+            "sole repository-default `make check`",
+            "does not rerun `make check`",
             "same-repository-only",
             "fork or cross-repository prs are human blockers",
             "no live u8 acceptance is claimed",
@@ -4595,7 +4591,7 @@ with log_lock_path.open("a+", encoding="utf-8") as log_lock:
 records = load(state_path, [])
 command_index = next(
     (index for index, value in enumerate(argv)
-     if value in {"create", "show", "update", "close", "list", "dep"}),
+     if value in {"create", "show", "update", "unclaim", "close", "list", "dep"}),
     None,
 )
 if command_index is None:
@@ -4609,6 +4605,7 @@ KNOWN_FLAGS = {
     "create": {"--id", "--title", "--description", "--type", "--metadata", "--silent", "--json"},
     "show": {"--json"},
     "update": {"--claim", "--status", "--assignee", "--parent", "--set-metadata", "--json"},
+    "unclaim": {"--if-assignee", "--reason", "--json"},
     "close": {"--reason", "--json"},
     "list": {"--all", "--status", "--limit", "--sort", "--metadata-field", "--json"},
     "dep": {"--blocks", "--json"},
@@ -4623,6 +4620,7 @@ VALUE_FLAGS = {
     "--assignee",
     "--parent",
     "--set-metadata",
+    "--if-assignee",
     "--reason",
     "--limit",
     "--sort",
@@ -4865,6 +4863,7 @@ if command == "update":
             raise SystemExit(1)
         record["assignee"] = actor
         record["status"] = "in_progress"
+        record["started_at"] = "2026-08-29T19:00:00Z"
     if "--status" in values:
         record["status"] = value("--status")
     if "--assignee" in values:
@@ -4877,6 +4876,24 @@ if command == "update":
         if separator:
             metadata[key] = item_value
     record["metadata"] = metadata
+    save(state_path, records)
+    print(json.dumps([record], sort_keys=True))
+    raise SystemExit(0)
+
+
+if command == "unclaim":
+    issue_id = positional()
+    record = record_for(issue_id)
+    if record is None:
+        print("not found", file=sys.stderr)
+        raise SystemExit(1)
+    expected_assignee = value("--if-assignee")
+    if expected_assignee and record.get("assignee", "") != expected_assignee:
+        print("assignee mismatch", file=sys.stderr)
+        raise SystemExit(1)
+    record["status"] = "open"
+    record["assignee"] = ""
+    record.pop("started_at", None)
     save(state_path, records)
     print(json.dumps([record], sort_keys=True))
     raise SystemExit(0)
@@ -4963,6 +4980,26 @@ if command == "close":
         self.assertTrue(result.stdout, result.stderr)
         return json.loads(result.stdout)
 
+    def _worker_signoff(
+        self,
+        env: dict[str, str],
+        watch_id: str,
+        action_id: str,
+        generation: int,
+        worker_signoff_sha: str,
+    ) -> None:
+        result = self._run(
+            env,
+            "record-worker-signoff",
+            {
+                "watch_id": watch_id,
+                "action_id": action_id,
+                "generation": generation,
+                "worker_signoff_sha": worker_signoff_sha,
+            },
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     @staticmethod
     def _state_module():
         spec = importlib.util.spec_from_file_location(
@@ -4987,6 +5024,8 @@ if command == "close":
                     "record_kind": "watch",
                     "gc.routed_to": "d2b/pr-babysit.pr-babysitter",
                     "gc.session_name": "d2b--pr-babysit__pr-babysitter",
+                    "gc.continuation_group": "",
+                    "gc.session_affinity": "",
                     "handoff_verified": True,
                     "handoff_route_status": "complete",
                     "handoff_wake_status": "delivered",
@@ -5001,6 +5040,8 @@ if command == "close":
             metadata["gc.session_name"],
             "d2b--pr-babysit__pr-babysitter",
         )
+        self.assertEqual(metadata["gc.continuation_group"], "")
+        self.assertEqual(metadata["gc.session_affinity"], "")
         self.assertEqual(metadata["handoff_verified"], "true")
 
     def test_subprocess_timeouts_fail_closed_with_existing_error_codes(self):
@@ -5960,6 +6001,14 @@ if command == "close":
             claim_json = self._json(claim)
             self.assertNotIn(fingerprint, (root / "beads.json").read_text())
             self.assertNotIn(fingerprint, (root / "calls.json").read_text())
+            calls = json.loads((root / "calls.json").read_text(encoding="utf-8"))
+            self.assertFalse(
+                any(
+                    "--parent" in call["argv"]
+                    and claim_json["action_id"] in call["argv"]
+                    for call in calls
+                )
+            )
             other = self._run(
                 env,
                 "claim-action",
@@ -6109,6 +6158,7 @@ if command == "close":
             )
             self.assertEqual(claim.returncode, 0, claim.stderr)
             action_id = self._json(claim)["action_id"]
+            self._worker_signoff(env, watch_id, action_id, 2, "c" * 40)
             verdict = self._run(
                 env,
                 "record-review-verdict",
@@ -6283,6 +6333,7 @@ if command == "close":
             )
             self.assertEqual(claim.returncode, 0, claim.stderr)
             action_id = self._json(claim)["action_id"]
+            self._worker_signoff(env, watch_id, action_id, 1, "b" * 40)
             self.assertEqual(
                 self._run(
                     env,
@@ -6364,6 +6415,7 @@ if command == "close":
             )
             self.assertEqual(claim.returncode, 0, claim.stderr)
             action_id = self._json(claim)["action_id"]
+            self._worker_signoff(env, watch_id, action_id, 1, "b" * 40)
             self.assertEqual(
                 self._run(
                     env,
@@ -6443,6 +6495,7 @@ if command == "close":
                 json.dumps(records, sort_keys=True, separators=(",", ":")) + "\n",
                 encoding="utf-8",
             )
+            self._worker_signoff(env, watch_id, action_id, 1, "b" * 40)
             candidate = self._run(
                 env,
                 "record-candidate-head",
@@ -6786,6 +6839,26 @@ class PrBabysitCheckpointTests(unittest.TestCase):
         if not result.stdout:
             raise AssertionError(result.stderr)
         return json.loads(result.stdout)
+
+    def _worker_signoff(
+        self,
+        env: dict[str, str],
+        watch_id: str,
+        action_id: str,
+        generation: int,
+        worker_signoff_sha: str,
+    ) -> None:
+        result = self._run(
+            env,
+            "record-worker-signoff",
+            {
+                "watch_id": watch_id,
+                "action_id": action_id,
+                "generation": generation,
+                "worker_signoff_sha": worker_signoff_sha,
+            },
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
 
     def _watch_id(
         self,
@@ -8870,6 +8943,26 @@ class PrBabysitRepairTests(unittest.TestCase):
             raise AssertionError(result.stderr)
         return json.loads(result.stdout)
 
+    def _worker_signoff(
+        self,
+        env: dict[str, str],
+        watch_id: str,
+        action_id: str,
+        generation: int,
+        worker_signoff_sha: str,
+    ) -> None:
+        result = self._run(
+            env,
+            "record-worker-signoff",
+            {
+                "watch_id": watch_id,
+                "action_id": action_id,
+                "generation": generation,
+                "worker_signoff_sha": worker_signoff_sha,
+            },
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     @staticmethod
     def _fake_gc_script() -> str:
         return r"""#!/usr/bin/env python3
@@ -8968,6 +9061,17 @@ print(json.dumps({"ok": True, "root_id": "repair-root"}))
         )
         self.assertEqual(dispatched.returncode, 0, dispatched.stderr)
         action_id = self._json(dispatched)["action_id"]
+        signoff = self._run(
+            env,
+            "record-worker-signoff",
+            {
+                "watch_id": watch_id,
+                "action_id": action_id,
+                "generation": generation,
+                "worker_signoff_sha": new_sha,
+            },
+        )
+        self.assertEqual(signoff.returncode, 0, signoff.stderr)
         candidate = self._run(
             env,
             "record-candidate-head",
@@ -9251,6 +9355,10 @@ print(json.dumps({"ok": True, "root_id": "repair-root"}))
                 "action_fingerprint": "f" * 64,
                 "claim_status": claim_status,
                 "expected_old_head": old_sha,
+                "worker_signoff_sha": new_sha,
+                "make_check_result": (
+                    "failed" if make_check_failure else "passed"
+                ),
                 "candidate_head_sha": new_sha,
                 "review_verdict": review_verdict,
                 "review_verdict_action_id": verdict_action_id,
@@ -9882,7 +9990,7 @@ else:
             check=False,
         )
 
-    def test_validator_is_credential_isolated_before_a_push(self):
+    def test_worker_signoff_push_does_not_rerun_validator(self):
         root, env, _, new_sha, _ = self._validation_fixture(
             "isolated",
         )
@@ -9920,11 +10028,7 @@ else:
                 },
             )
             self.assertEqual(result.returncode, 0, result.stderr)
-            isolated = json.loads(
-                (root / "validator-env.json").read_text(encoding="utf-8")
-            )
-            self.assertTrue(isolated)
-            self.assertTrue(all(value is None for value in isolated.values()))
+            self.assertFalse((root / "validator-env.json").exists())
             self.assertEqual(
                 subprocess.check_output(
                     ["git", "--git-dir", str(root / "remote.git"), "rev-parse", "refs/heads/feature/u4"],
@@ -10091,7 +10195,7 @@ else:
         finally:
             shutil.rmtree(root, ignore_errors=True)
 
-    def test_validator_missing_bad_or_symlink_fails_closed(self):
+    def test_validator_configuration_is_not_required_for_push(self):
         for kind in ("missing", "bad", "symlink"):
             with self.subTest(kind=kind):
                 root, env, _, _, _ = self._validation_fixture("validator-" + kind)
@@ -10109,20 +10213,13 @@ else:
                         validator.unlink()
                         validator.symlink_to(target)
                     result = self._run_validation(root, env)
-                    self.assertNotEqual(result.returncode, 0, result.stderr)
-                    self.assertFalse((root / "push-called").exists())
-                    calls = json.loads((root / "gc-calls.json").read_text())
-                    self.assertTrue(
-                        any(
-                            "--validation-status" in call
-                            and "failed" in call
-                            for call in calls
-                        )
-                    )
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertFalse((root / "validator-env.json").exists())
+                    self.assertTrue((root / "push-called").exists())
                 finally:
                     shutil.rmtree(root, ignore_errors=True)
 
-    def test_validator_hash_must_be_lowercase_and_match_selected_executable(self):
+    def test_validator_hash_is_not_part_of_run_operator_signoff(self):
         for configured in ("", "A" * 64, "g" * 64, "f" * 63, "0" * 64):
             with self.subTest(configured=configured):
                 root, env, _, _, _ = self._validation_fixture(
@@ -10136,25 +10233,13 @@ else:
                             "PR_BABYSIT_VALIDATOR_SHA256": configured,
                         },
                     )
-                    self.assertNotEqual(result.returncode, 0, result.stderr)
+                    self.assertEqual(result.returncode, 0, result.stderr)
                     self.assertFalse((root / "validator-env.json").exists())
-                    self.assertFalse((root / "push-called").exists())
-                    calls = json.loads((root / "gc-calls.json").read_text())
-                    result_call = calls[-1]
-                    self.assertEqual(
-                        result_call[
-                            result_call.index("--validation-status") + 1
-                        ],
-                        "failed",
-                    )
-                    self.assertEqual(
-                        result_call[result_call.index("--reason") + 1],
-                        "validator-hash",
-                    )
+                    self.assertTrue((root / "push-called").exists())
                 finally:
                     shutil.rmtree(root, ignore_errors=True)
 
-    def test_validator_timeout_records_failed_without_push(self):
+    def test_validator_timeout_is_not_part_of_run_operator_signoff(self):
         root, env, _, _, _ = self._validation_fixture(
             "validator-timeout",
             validator_mode="sleep",
@@ -10167,22 +10252,13 @@ else:
                     "PR_BABYSIT_VALIDATOR_TIMEOUT_SECONDS": "1",
                 },
             )
-            self.assertNotEqual(result.returncode, 0, result.stderr)
-            self.assertFalse((root / "push-called").exists())
-            calls = json.loads((root / "gc-calls.json").read_text())
-            result_call = calls[-1]
-            self.assertEqual(
-                result_call[result_call.index("--validation-status") + 1],
-                "failed",
-            )
-            self.assertEqual(
-                result_call[result_call.index("--reason") + 1],
-                "validator-timeout",
-            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertFalse((root / "validator-env.json").exists())
+            self.assertTrue((root / "push-called").exists())
         finally:
             shutil.rmtree(root, ignore_errors=True)
 
-    def test_validator_timeout_must_be_positive_and_bounded(self):
+    def test_validator_timeout_configuration_is_ignored(self):
         for configured in ("0", "-1", "abc", "901"):
             with self.subTest(configured=configured):
                 root, env, _, _, _ = self._validation_fixture(
@@ -10196,13 +10272,13 @@ else:
                             "PR_BABYSIT_VALIDATOR_TIMEOUT_SECONDS": configured,
                         },
                     )
-                    self.assertNotEqual(result.returncode, 0, result.stderr)
+                    self.assertEqual(result.returncode, 0, result.stderr)
                     self.assertFalse((root / "validator-env.json").exists())
-                    self.assertFalse((root / "push-called").exists())
+                    self.assertTrue((root / "push-called").exists())
                 finally:
                     shutil.rmtree(root, ignore_errors=True)
 
-    def test_validator_mutations_block_push(self):
+    def test_unused_validator_cannot_mutate_candidate(self):
         for mode in ("head", "config", "origin", "status"):
             with self.subTest(mode=mode):
                 root, env, _, _, _ = self._validation_fixture(
@@ -10211,44 +10287,22 @@ else:
                 )
                 try:
                     result = self._run_validation(root, env)
-                    self.assertNotEqual(result.returncode, 0, result.stderr)
-                    self.assertFalse((root / "push-called").exists())
-                    calls = json.loads((root / "gc-calls.json").read_text())
-                    result_call = calls[-1]
-                    self.assertIn("--validation-status", result_call)
-                    self.assertEqual(
-                        result_call[
-                            result_call.index("--validation-status") + 1
-                        ],
-                        "failed",
-                    )
-                    self.assertIn("--reason", result_call)
-                    self.assertEqual(
-                        result_call[result_call.index("--reason") + 1],
-                        "validator-invariant",
-                    )
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertFalse((root / "validator-env.json").exists())
+                    self.assertTrue((root / "push-called").exists())
                 finally:
                     shutil.rmtree(root, ignore_errors=True)
 
-    def test_validator_failure_records_failed_without_push(self):
+    def test_unused_validator_failure_does_not_block_push(self):
         root, env, _, _, _ = self._validation_fixture(
             "validator-failure",
             validator_mode="fail",
         )
         try:
             result = self._run_validation(root, env)
-            self.assertNotEqual(result.returncode, 0, result.stderr)
-            self.assertFalse((root / "push-called").exists())
-            calls = json.loads((root / "gc-calls.json").read_text())
-            result_call = calls[-1]
-            self.assertEqual(
-                result_call[result_call.index("--validation-status") + 1],
-                "failed",
-            )
-            self.assertEqual(
-                result_call[result_call.index("--reason") + 1],
-                "validator-failed",
-            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertFalse((root / "validator-env.json").exists())
+            self.assertTrue((root / "push-called").exists())
         finally:
             shutil.rmtree(root, ignore_errors=True)
 
@@ -10273,7 +10327,7 @@ else:
             )
             self.assertEqual(
                 result_call[result_call.index("--reason") + 1],
-                "validator-failed",
+                "worker-signoff-missing",
             )
         finally:
             shutil.rmtree(root, ignore_errors=True)
@@ -10474,18 +10528,16 @@ else:
             "remote pull-request head changed after observation",
             "remote head is stale",
             "push outcome is ambiguous",
-            "credential-isolated-v1",
-            "pr_babysit_validator",
-            "pr_babysit_validator_sha256",
-            "pr_babysit_validator_timeout_seconds",
-            "sha256sum",
-            "timeout --foreground --kill-after=5s",
-            "validator-invariant",
+            "record-worker-signoff",
+            "worker_signoff_sha",
+            "worker-signoff-missing",
+            "worker-signoff-stale",
+            "candidate-invariant",
             "push-failed",
         ):
             self.assertIn(marker.lower(), prepare.lower() + "\n" + validate.lower())
         self.assertIn(
-            'git_post_validator -C "$WORKTREE" push --no-verify origin \\\n'
+            'git_guarded -C "$WORKTREE" push --no-verify origin \\\n'
             '    "HEAD:refs/heads/$HEAD_REF"',
             validate,
         )
@@ -10508,15 +10560,10 @@ else:
         self.assertNotIn("owning source checkout is dirty", prepare.lower())
         self.assertNotIn(".pr-babysit-state.json", validate)
         self.assertNotIn('(cd "$WORKTREE" && make check)', validate)
-        self.assertIn('"$VALIDATOR" "$WORKTREE"', validate)
+        self.assertNotIn('"$VALIDATOR" "$WORKTREE"', validate)
+        self.assertIn("It does not rerun `make check`.", validate)
         for marker in (
-            "git -C \"$WORKTREE\" config --local --list",
             "git -C \"$WORKTREE\" config --local --get remote.origin.url",
-            "remote\\..*\\.fetch",
-            "-u GH_TOKEN",
-            "-u GITHUB_TOKEN",
-            "-u COPILOT_TOKEN",
-            "-u PR_BABYSIT_GITHUB_CAPABILITY_ATTESTED",
             "core.hooksPath=/dev/null",
             "push --no-verify",
         ):
@@ -10527,7 +10574,7 @@ else:
             1,
         )
         for call in (
-            "record_result failed failed",
+            'record_result failed "${WORKER_MAKE_CHECK_RESULT:-failed}"',
             "record_result ambiguous passed",
             "record_result passed passed",
         ):
@@ -10771,6 +10818,17 @@ else:
             )
             self.assertEqual(dispatched.returncode, 0, dispatched.stderr)
             action_id = self._json(dispatched)["action_id"]
+            signoff = self._run(
+                env,
+                "record-worker-signoff",
+                {
+                    "watch_id": watch_id,
+                    "action_id": action_id,
+                    "generation": 1,
+                    "worker_signoff_sha": "b" * 40,
+                },
+            )
+            self.assertEqual(signoff.returncode, 0, signoff.stderr)
             result = self._run(
                 env,
                 "record-repair-result",
@@ -10788,6 +10846,68 @@ else:
             self.assertEqual(
                 self._json(result)["error"]["code"],
                 "review-verdict-required",
+            )
+            state = self._json(self._run(env, "show", {"watch_id": watch_id}))
+            self.assertEqual(state["metadata"]["state"], "blocked")
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
+
+    def test_passed_repair_result_requires_matching_worker_signoff(self):
+        root, env = self._repair_fixture("missing-worker-signoff-result")
+        try:
+            handoff = self._run(env, "handoff", self._HANDOFF)
+            self.assertEqual(handoff.returncode, 0, handoff.stderr)
+            watch_id = self._json(handoff)["watch_id"]
+            dispatched = self._dispatch(
+                env,
+                watch_id,
+                generation=1,
+                head_sha="a" * 40,
+                action_kind="ci",
+                fingerprint="missing worker signoff result",
+            )
+            self.assertEqual(dispatched.returncode, 0, dispatched.stderr)
+            action_id = self._json(dispatched)["action_id"]
+            candidate = self._run(
+                env,
+                "record-candidate-head",
+                {
+                    "watch_id": watch_id,
+                    "action_id": action_id,
+                    "generation": 1,
+                    "candidate_head_sha": "b" * 40,
+                },
+            )
+            self.assertEqual(candidate.returncode, 0, candidate.stderr)
+            verdict = self._run(
+                env,
+                "record-review-verdict",
+                {
+                    "watch_id": watch_id,
+                    "action_id": action_id,
+                    "generation": 1,
+                    "candidate_head_sha": "b" * 40,
+                    "verdict": "passed",
+                },
+            )
+            self.assertEqual(verdict.returncode, 0, verdict.stderr)
+            result = self._run(
+                env,
+                "record-repair-result",
+                {
+                    "watch_id": watch_id,
+                    "action_id": action_id,
+                    "generation": 1,
+                    "expected_old_sha": "a" * 40,
+                    "pushed_sha": "b" * 40,
+                    "validation_status": "passed",
+                    "make_check_result": "passed",
+                },
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(
+                self._json(result)["error"]["code"],
+                "worker-signoff-required",
             )
             state = self._json(self._run(env, "show", {"watch_id": watch_id}))
             self.assertEqual(state["metadata"]["state"], "blocked")
@@ -11004,6 +11124,7 @@ else:
             )
             self.assertEqual(dispatched.returncode, 0, dispatched.stderr)
             action_id = self._json(dispatched)["action_id"]
+            self._worker_signoff(env, watch_id, action_id, 1, "b" * 40)
             verdict = self._run(
                 env,
                 "record-review-verdict",
@@ -11084,6 +11205,7 @@ else:
             )
             self.assertEqual(dispatched.returncode, 0, dispatched.stderr)
             action_id = self._json(dispatched)["action_id"]
+            self._worker_signoff(env, watch_id, action_id, 1, "b" * 40)
             verdict = self._run(
                 env,
                 "record-review-verdict",
@@ -11445,6 +11567,13 @@ else:
                         )
                         self.assertEqual(recorded.returncode, 0, recorded.stderr)
                     elif scenario in {"result-recorded", "ambiguous"}:
+                        self._worker_signoff(
+                            env,
+                            watch_id,
+                            action_id,
+                            1,
+                            "b" * 40,
+                        )
                         verdict = self._run(
                             env,
                             "record-review-verdict",
@@ -11695,6 +11824,7 @@ else:
             )
             self.assertEqual(dispatched.returncode, 0, dispatched.stderr)
             action_id = self._json(dispatched)["action_id"]
+            self._worker_signoff(env, watch_id, action_id, 1, "b" * 40)
             verdict = self._run(
                 env,
                 "record-review-verdict",
@@ -11731,54 +11861,45 @@ else:
         finally:
             shutil.rmtree(root, ignore_errors=True)
 
-    def test_repair_dispatch_requires_validator_attestation(self):
+    def test_repair_dispatch_does_not_require_validator_attestation(self):
         root, env = self._repair_fixture("validator-attestation")
         try:
             handoff = self._run(env, "handoff", self._HANDOFF)
             self.assertEqual(handoff.returncode, 0, handoff.stderr)
             watch_id = self._json(handoff)["watch_id"]
-            missing = self._dispatch(
-                env | {"PR_BABYSIT_VALIDATOR_ATTESTED": ""},
+            dispatched = self._dispatch(
+                env
+                | {
+                    "PR_BABYSIT_VALIDATOR_ATTESTED": "",
+                    "PR_BABYSIT_VALIDATOR_SHA256": "",
+                },
                 watch_id,
                 generation=1,
                 head_sha="a" * 40,
                 action_kind="ci",
                 fingerprint="validator-attestation",
             )
-            self.assertNotEqual(missing.returncode, 0)
-            error = self._json(missing)["error"]
-            self.assertEqual(error["code"], "credential-validator")
-            self.assertEqual(
-                json.loads((root / "gc-calls.json").read_text()),
-                [],
-            )
+            self.assertEqual(dispatched.returncode, 0, dispatched.stderr)
             records = json.loads((root / "beads.json").read_text())
-            self.assertEqual(len(records), 1)
+            self.assertEqual(len(records), 2)
         finally:
             shutil.rmtree(root, ignore_errors=True)
 
-    def test_check_credentials_requires_validator_attestation(self):
+    def test_check_credentials_requires_only_operator_attestation(self):
         root, env = self._repair_fixture("check-credentials")
         try:
             valid = self._run(env, "check-credentials")
             self.assertEqual(valid.returncode, 0, valid.stderr)
-            self.assertTrue(self._json(valid)["validator_attested"])
+            self.assertTrue(self._json(valid)["operator_attested"])
             result = self._run(
-                env | {"PR_BABYSIT_VALIDATOR_ATTESTED": ""},
+                env
+                | {
+                    "PR_BABYSIT_VALIDATOR_ATTESTED": "",
+                    "PR_BABYSIT_VALIDATOR_SHA256": "",
+                },
                 "check-credentials",
             )
-            self.assertNotEqual(result.returncode, 0)
-            error = self._json(result)["error"]
-            self.assertEqual(error["code"], "credential-validator")
-            missing_hash = self._run(
-                env | {"PR_BABYSIT_VALIDATOR_SHA256": ""},
-                "check-credentials",
-            )
-            self.assertNotEqual(missing_hash.returncode, 0)
-            self.assertEqual(
-                self._json(missing_hash)["error"]["code"],
-                "credential-validator",
-            )
+            self.assertEqual(result.returncode, 0, result.stderr)
         finally:
             shutil.rmtree(root, ignore_errors=True)
 

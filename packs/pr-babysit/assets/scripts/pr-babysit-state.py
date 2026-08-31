@@ -62,7 +62,6 @@ TIME_BUDGET_REASON = "time-budget-exhausted"
 BACKSTOP_REASON = "backstop-expired"
 ATTEMPT_LIMITS = {"ci": 3, "review": 2}
 REPAIR_FORMULA = "mol-pr-babysit-repair"
-VALIDATOR_ATTESTATION = "credential-isolated-v1"
 ACTIVE_BUDGET = timedelta(hours=8)
 BACKSTOP_BUDGET = timedelta(days=3)
 ORDER_TIMEOUT_SECONDS = 30
@@ -77,7 +76,6 @@ WAKE_LEASE = timedelta(seconds=10)
 DEFAULT_DUE_LIMIT = 4
 MAX_DUE_LIMIT = 100
 SHA_RE = re.compile(r"^[0-9a-fA-F]{40}$")
-VALIDATOR_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 SLUG_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9_.-]*[A-Za-z0-9])?$")
 WATCH_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 BEAD_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
@@ -167,7 +165,10 @@ SAFE_METADATA_KEYS = {
     "handoff_wake_status",
     "gc.routed_to",
     "gc.session_name",
+    "gc.continuation_group",
+    "gc.session_affinity",
     "candidate_head_sha",
+    "worker_signoff_sha",
     "review_verdict",
     "review_verdict_action_id",
     "review_verdict_generation",
@@ -412,18 +413,6 @@ def require_repair_credentials() -> None:
             "Pull requests read capability",
             "credential-capability",
         )
-    if os.environ.get("PR_BABYSIT_VALIDATOR_ATTESTED", "") != VALIDATOR_ATTESTATION:
-        fail(
-            "repair requires an attested credential-isolated validator",
-            "credential-validator",
-        )
-    if not VALIDATOR_SHA256_RE.fullmatch(
-        os.environ.get("PR_BABYSIT_VALIDATOR_SHA256", ""),
-    ):
-        fail(
-            "repair requires a 64-character lowercase validator SHA-256",
-            "credential-validator",
-        )
 
 
 def check_repair_credentials() -> dict[str, Any]:
@@ -432,7 +421,6 @@ def check_repair_credentials() -> dict[str, Any]:
         "ok": True,
         "action": "check-credentials",
         "operator_attested": True,
-        "validator_attested": True,
     }
 
 
@@ -1278,6 +1266,42 @@ def metadata_updates(
     return require_beads(result, "metadata update")
 
 
+def normalize_watch_claim(
+    watch_id: str,
+    issue: dict[str, Any],
+    reason: str,
+) -> None:
+    holder = str(issue.get("assignee") or "")
+    actor = holder or f"pr-babysit-release-{watch_id}"
+    if not holder and not issue.get("started_at"):
+        return
+    if not holder:
+        if issue.get("status") not in {"open", "in_progress"}:
+            reopened = run_beads(
+                ["update", watch_id, "--status", "open", "--json"],
+                actor=actor,
+            )
+            require_beads(reopened, "watch claim reopen")
+        claimed = run_beads(
+            ["update", watch_id, "--claim", "--json"],
+            actor=actor,
+        )
+        require_beads(claimed, "watch claim normalization")
+    released = run_beads(
+        [
+            "unclaim",
+            watch_id,
+            "--if-assignee",
+            actor,
+            "--reason",
+            reason,
+            "--json",
+        ],
+        actor=actor,
+    )
+    require_beads(released, "watch claim release")
+
+
 def close_issue(issue_id: str, reason: str) -> dict[str, Any]:
     result = run_beads(["close", issue_id, "--reason", reason, "--json"])
     return require_beads(result, "close")
@@ -1558,16 +1582,6 @@ def create_action(
     if not result.ok:
         raise beads_error(result, "action create", atomic_conflict=False)
     require_beads(result, "action create")
-    parent_result = run_beads(
-        [
-            "update",
-            action_id,
-            "--parent",
-            watch_id,
-            "--json",
-        ]
-    )
-    require_beads(parent_result, "action parent")
     issue, current_metadata = show_issue(action_id)
     validate_action_identity(current_metadata)
     ensure_action_blocks_watch(action_id, watch_id)
@@ -2289,7 +2303,7 @@ def _handoff_locked(
     *,
     preserve_budget: bool = False,
 ) -> dict[str, Any]:
-    created, reused, _, metadata = create_watch(watch_id, initial, identity)
+    created, reused, issue, metadata = create_watch(watch_id, initial, identity)
     immutable_matches(metadata, identity)
     current_state = state_from_metadata(metadata)
     if current_state == "terminal":
@@ -2417,6 +2431,11 @@ def _handoff_locked(
         )
         _, metadata = show_issue(watch_id)
     elif head_changed or should_rearm:
+        normalize_watch_claim(
+            watch_id,
+            issue,
+            "Reset watch claim after head reconciliation or explicit rearm.",
+        )
         invalidate_action_claim(
             watch_id,
             metadata,
@@ -4316,6 +4335,54 @@ def record_review_verdict(payload: dict[str, Any]) -> dict[str, Any]:
         }
 
 
+def record_worker_signoff(payload: dict[str, Any]) -> dict[str, Any]:
+    watch_id = validate_watch_id(payload_value(payload, "watch_id", "id"))
+    with watch_lock(watch_id):
+        (
+            watch_id,
+            action_id,
+            _,
+            action_metadata_value,
+            generation,
+            _,
+        ) = action_context(payload)
+        worker_signoff_sha = sha_value(
+            payload_value(
+                payload,
+                "worker_signoff_sha",
+                "candidate_head_sha",
+                "head_sha",
+            ),
+            "worker_signoff_sha",
+        )
+        if worker_signoff_sha == action_metadata_value.get("expected_old_head"):
+            fail("worker signoff must identify a new repair commit")
+        recorded_signoff = action_metadata_value.get("worker_signoff_sha", "")
+        if recorded_signoff and recorded_signoff != worker_signoff_sha:
+            fail("worker signoff changed after it was recorded", "stale-signoff")
+        recorded_candidate = action_metadata_value.get("candidate_head_sha", "")
+        if recorded_candidate and recorded_candidate != worker_signoff_sha:
+            fail("worker signoff does not match the candidate head", "stale-signoff")
+        if not recorded_signoff:
+            metadata_updates(
+                action_id,
+                {
+                    "worker_signoff_sha": worker_signoff_sha,
+                    "make_check_result": "passed",
+                },
+            )
+        return {
+            "ok": True,
+            "action": "record-worker-signoff",
+            "watch_id": watch_id,
+            "action_id": action_id,
+            "generation": generation,
+            "worker_signoff_sha": worker_signoff_sha,
+            "make_check_result": "passed",
+            "reused": bool(recorded_signoff),
+        }
+
+
 def review_verdict_matches(
     metadata: dict[str, str],
     action_id: str,
@@ -4328,6 +4395,16 @@ def review_verdict_matches(
         and metadata.get("review_verdict_generation") == str(generation)
         and metadata.get("review_verdict_head_sha") == candidate_head_sha
         and metadata.get("candidate_head_sha") == candidate_head_sha
+    )
+
+
+def worker_signoff_matches(
+    metadata: dict[str, str],
+    candidate_head_sha: str,
+) -> bool:
+    return (
+        metadata.get("make_check_result") == "passed"
+        and metadata.get("worker_signoff_sha") == candidate_head_sha
     )
 
 
@@ -4411,6 +4488,19 @@ def _record_repair_result_locked(payload: dict[str, Any]) -> dict[str, Any]:
         )
     if validation_status == "passed" and not pushed_sha:
         fail("a passed repair result requires pushed_sha")
+    if validation_status == "passed" and not worker_signoff_matches(
+        action_metadata_value,
+        pushed_sha,
+    ):
+        block_repair_dispatch(
+            watch_id,
+            action_id,
+            "worker-signoff-required",
+        )
+        fail(
+            "a passed repair result requires the worker signoff for pushed_sha",
+            "worker-signoff-required",
+        )
     if validation_status == "passed" and not review_verdict_matches(
         action_metadata_value,
         action_id,
@@ -4550,14 +4640,24 @@ def _confirm_action_locked(payload: dict[str, Any]) -> dict[str, Any]:
             pushed_sha,
         )
     )
+    worker_signoff_ok = bool(
+        pushed_sha
+        and worker_signoff_matches(
+            action_metadata_value,
+            pushed_sha,
+        )
+    )
     if (
         not pushed_sha
         or validation_status != "passed"
         or make_check_result != "passed"
+        or not worker_signoff_ok
         or not review_verdict_ok
     ):
         reason = (
-            "review-verdict-failed"
+            "worker-signoff-required"
+            if not worker_signoff_ok
+            else "review-verdict-failed"
             if not review_verdict_ok
             else
             "repair-validation-failed"
@@ -4629,6 +4729,12 @@ def _confirm_action_locked(payload: dict[str, Any]) -> dict[str, Any]:
     addressed_thread_ids = action_metadata_value.get(
         "addressed_thread_ids",
         "",
+    )
+    watch_issue, _ = show_issue(watch_id)
+    normalize_watch_claim(
+        watch_id,
+        watch_issue,
+        "Release confirmed repair watch claim.",
     )
     close_action(action_id, "confirmed")
     updates = clear_claim_updates(
@@ -5431,6 +5537,12 @@ def parse_cli_request(argv: list[str]) -> dict[str, Any]:
                 "generation",
                 "candidate_head_sha",
             ),
+            "record-worker-signoff": (
+                "watch_id",
+                "action_id",
+                "generation",
+                "worker_signoff_sha",
+            ),
             "record-review-verdict": (
                 "watch_id",
                 "action_id",
@@ -5504,6 +5616,8 @@ def dispatch(payload: dict[str, Any]) -> dict[str, Any]:
         return dispatch_repair(payload)
     if action == "record-candidate-head":
         return record_candidate_head(payload)
+    if action == "record-worker-signoff":
+        return record_worker_signoff(payload)
     if action == "record-review-verdict":
         return record_review_verdict(payload)
     if action == "record-repair-result":

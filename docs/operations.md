@@ -484,18 +484,13 @@ human blockers. The repair identity is operator-attested with repository
 Contents write and Pull requests read only. It must not have Pull requests
 write, merge/admin, workflow-approval, or Copilot Requests authority. The
 agent cannot introspect fine-grained permissions, so it fails closed without
-the operator attestation. Before repair, provide
-`PR_BABYSIT_VALIDATOR` as an absolute, non-symlink, executable file,
-`PR_BABYSIT_VALIDATOR_SHA256` as its 64-character lowercase hexadecimal
-sha256sum, and set `PR_BABYSIT_VALIDATOR_ATTESTED=credential-isolated-v1`.
-The workflow hashes that exact executable with `sha256sum` immediately before
-running it through `timeout --foreground --kill-after=5s`, using
-`PR_BABYSIT_VALIDATOR_TIMEOUT_SECONDS` from 1 through 900 seconds (default
-900). It must run `make check` in a credential-isolated environment. Public
-dependency access is allowed, but GitHub, Copilot, BuildBuddy, publication,
-and Discord credentials must be absent. A missing, mismatched, timed-out, or
-failed validator blocks repair and records a failed result; no branch update
-is attempted. There is no direct-make fallback.
+the operator attestation. The implementation worker runs the sole
+repository-default `make check`, creates the local repair commit only after it
+passes, and records `worker_signoff_sha` on the action. The independent
+reviewer binds its verdict to the same candidate. Run-operator verifies the
+worker signoff, reviewer verdict, exact candidate, worktree cleanliness,
+origin identity, and unchanged remote head before one normal push. It does not
+rerun `make check`.
 
 The reviewer is read-only with respect to GitHub and never resolves review
 threads. After a confirmed review repair, record each addressed thread,
@@ -508,14 +503,10 @@ request:
 
 ```text
 PR_BABYSIT_GITHUB_CAPABILITY_ATTESTED=contents-write,pull-requests-read \
-PR_BABYSIT_VALIDATOR_SHA256=<64-lowercase-hex-sha256> \
-PR_BABYSIT_VALIDATOR_ATTESTED=credential-isolated-v1 \
   gc core-city pr-babysit check-credentials --json
 ```
 
-This command checks the operator attestations, validator SHA-256 format, and
-token separation only. The repair workflow separately validates the absolute,
-non-symlink executable `PR_BABYSIT_VALIDATOR`, binds its hash, and runs it.
+This command checks the operator attestation and token separation only.
 
 Publication credentials, repair GitHub credentials, Copilot Requests
 credentials, and Discord app credentials are separate. `GH_TOKEN` and
@@ -528,11 +519,11 @@ ownership.
 The host may load the dedicated repair token into the native supervisor as
 `GH_TOKEN`, but the city pins both GitHub token variables empty for every
 managed session. The d2b babysitter receives only the non-secret capability
-and validator attestations required to dispatch a repair; it never receives a
-GitHub token. Only the d2b `gc.run-operator` agent rehydrates `GH_TOKEN` from
-the controller environment. The implementation worker commits locally without
-pushing, the independent reviewer does not mutate GitHub, and the run operator
-owns the single validated normal push.
+attestation required to dispatch a repair; it never receives a GitHub token.
+Only the d2b `gc.run-operator` agent rehydrates `GH_TOKEN` from the controller
+environment. The implementation worker commits locally without pushing, the
+independent reviewer does not mutate GitHub, and the run operator owns the
+single validated normal push.
 
 ### Rollout and evidence
 

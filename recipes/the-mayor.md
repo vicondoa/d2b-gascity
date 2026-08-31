@@ -67,12 +67,9 @@ The mayor must not:
   the repair identity;
 - dispatch a fork or cross-repository repair. Repairs are
   same-repository-only and those PRs are human blockers in v1;
-- bypass the mandatory `PR_BABYSIT_VALIDATOR`, which must be an absolute,
-  non-symlink, executable file with a matching 64-character lowercase
-  `PR_BABYSIT_VALIDATOR_SHA256`, run `make check` in a credential- and
-  network-isolated environment through the bounded validator timeout, and use
-  `PR_BABYSIT_VALIDATOR_ATTESTED=credential-isolated-v1`. A missing,
-  mismatched, timed-out, or failed validator blocks repair.
+- bypass the implementation worker's repository-default `make check`, exact
+  worker signoff SHA, or independent reviewer verdict. Run-operator verifies
+  those records and does not rerun the repository gate.
 
 The `d2b-governance` global fragment remains the source of the PR-only
 publication rule and applies target-only behavior to babysitter and repair.

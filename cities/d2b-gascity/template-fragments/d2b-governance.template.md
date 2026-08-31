@@ -28,14 +28,13 @@ handoff. The handoff receipt's
 target-only: they may inspect and repair the named pull request on its
 existing head branch, but may not create a replacement pull request. Repairs
 are same-repository-only; fork or cross-repository PRs are human blockers in
-v1. Before repair, the operator must provide an absolute, non-symlink,
-executable `PR_BABYSIT_VALIDATOR`, its matching 64-character lowercase
-`PR_BABYSIT_VALIDATOR_SHA256`, and set
-`PR_BABYSIT_VALIDATOR_ATTESTED=credential-isolated-v1`; it runs `make check`
-in a credential- and network-isolated environment through the bounded
-validator timeout, and a missing, mismatched, timed-out, or failed validator
-blocks repair. It may never merge; it may never force-push or rebase, approve
-workflow runs, or update branch currency. Merge decisions remain human-owned.
+v1. The implementation worker owns the sole repository-default `make check`,
+records the exact worker signoff SHA, and commits only after it passes. The
+reviewer binds its verdict to that candidate. Run-operator verifies those
+records and the unchanged remote head before one normal push; it does not
+rerun `make check`. It may never merge; it may never force-push or rebase,
+approve workflow runs, or update branch currency. Merge decisions remain
+human-owned.
 The deterministic state CLI is exposed only through the city-scoped
 `core-city` pack as `gc core-city pr-babysit <action>`, delegating to the
 rig-imported helper without importing that pack city-wide or exposing a second
