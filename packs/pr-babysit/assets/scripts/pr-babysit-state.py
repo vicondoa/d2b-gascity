@@ -4365,6 +4365,16 @@ def review_verdict_matches(
     )
 
 
+def worker_signoff_matches(
+    metadata: dict[str, str],
+    candidate_head_sha: str,
+) -> bool:
+    return (
+        metadata.get("make_check_result") == "passed"
+        and metadata.get("worker_signoff_sha") == candidate_head_sha
+    )
+
+
 def record_repair_result(payload: dict[str, Any]) -> dict[str, Any]:
     watch_id = validate_watch_id(payload_value(payload, "watch_id", "id"))
     with watch_lock(watch_id):
@@ -4445,6 +4455,19 @@ def _record_repair_result_locked(payload: dict[str, Any]) -> dict[str, Any]:
         )
     if validation_status == "passed" and not pushed_sha:
         fail("a passed repair result requires pushed_sha")
+    if validation_status == "passed" and not worker_signoff_matches(
+        action_metadata_value,
+        pushed_sha,
+    ):
+        block_repair_dispatch(
+            watch_id,
+            action_id,
+            "worker-signoff-required",
+        )
+        fail(
+            "a passed repair result requires the worker signoff for pushed_sha",
+            "worker-signoff-required",
+        )
     if validation_status == "passed" and not review_verdict_matches(
         action_metadata_value,
         action_id,
@@ -4584,14 +4607,24 @@ def _confirm_action_locked(payload: dict[str, Any]) -> dict[str, Any]:
             pushed_sha,
         )
     )
+    worker_signoff_ok = bool(
+        pushed_sha
+        and worker_signoff_matches(
+            action_metadata_value,
+            pushed_sha,
+        )
+    )
     if (
         not pushed_sha
         or validation_status != "passed"
         or make_check_result != "passed"
+        or not worker_signoff_ok
         or not review_verdict_ok
     ):
         reason = (
-            "review-verdict-failed"
+            "worker-signoff-required"
+            if not worker_signoff_ok
+            else "review-verdict-failed"
             if not review_verdict_ok
             else
             "repair-validation-failed"

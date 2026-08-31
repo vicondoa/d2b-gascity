@@ -4959,6 +4959,26 @@ if command == "close":
         self.assertTrue(result.stdout, result.stderr)
         return json.loads(result.stdout)
 
+    def _worker_signoff(
+        self,
+        env: dict[str, str],
+        watch_id: str,
+        action_id: str,
+        generation: int,
+        worker_signoff_sha: str,
+    ) -> None:
+        result = self._run(
+            env,
+            "record-worker-signoff",
+            {
+                "watch_id": watch_id,
+                "action_id": action_id,
+                "generation": generation,
+                "worker_signoff_sha": worker_signoff_sha,
+            },
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     @staticmethod
     def _state_module():
         spec = importlib.util.spec_from_file_location(
@@ -6105,6 +6125,7 @@ if command == "close":
             )
             self.assertEqual(claim.returncode, 0, claim.stderr)
             action_id = self._json(claim)["action_id"]
+            self._worker_signoff(env, watch_id, action_id, 2, "c" * 40)
             verdict = self._run(
                 env,
                 "record-review-verdict",
@@ -6279,6 +6300,7 @@ if command == "close":
             )
             self.assertEqual(claim.returncode, 0, claim.stderr)
             action_id = self._json(claim)["action_id"]
+            self._worker_signoff(env, watch_id, action_id, 1, "b" * 40)
             self.assertEqual(
                 self._run(
                     env,
@@ -6360,6 +6382,7 @@ if command == "close":
             )
             self.assertEqual(claim.returncode, 0, claim.stderr)
             action_id = self._json(claim)["action_id"]
+            self._worker_signoff(env, watch_id, action_id, 1, "b" * 40)
             self.assertEqual(
                 self._run(
                     env,
@@ -6439,6 +6462,7 @@ if command == "close":
                 json.dumps(records, sort_keys=True, separators=(",", ":")) + "\n",
                 encoding="utf-8",
             )
+            self._worker_signoff(env, watch_id, action_id, 1, "b" * 40)
             candidate = self._run(
                 env,
                 "record-candidate-head",
@@ -6782,6 +6806,26 @@ class PrBabysitCheckpointTests(unittest.TestCase):
         if not result.stdout:
             raise AssertionError(result.stderr)
         return json.loads(result.stdout)
+
+    def _worker_signoff(
+        self,
+        env: dict[str, str],
+        watch_id: str,
+        action_id: str,
+        generation: int,
+        worker_signoff_sha: str,
+    ) -> None:
+        result = self._run(
+            env,
+            "record-worker-signoff",
+            {
+                "watch_id": watch_id,
+                "action_id": action_id,
+                "generation": generation,
+                "worker_signoff_sha": worker_signoff_sha,
+            },
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
 
     def _watch_id(
         self,
@@ -8866,6 +8910,26 @@ class PrBabysitRepairTests(unittest.TestCase):
             raise AssertionError(result.stderr)
         return json.loads(result.stdout)
 
+    def _worker_signoff(
+        self,
+        env: dict[str, str],
+        watch_id: str,
+        action_id: str,
+        generation: int,
+        worker_signoff_sha: str,
+    ) -> None:
+        result = self._run(
+            env,
+            "record-worker-signoff",
+            {
+                "watch_id": watch_id,
+                "action_id": action_id,
+                "generation": generation,
+                "worker_signoff_sha": worker_signoff_sha,
+            },
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     @staticmethod
     def _fake_gc_script() -> str:
         return r"""#!/usr/bin/env python3
@@ -10721,6 +10785,17 @@ else:
             )
             self.assertEqual(dispatched.returncode, 0, dispatched.stderr)
             action_id = self._json(dispatched)["action_id"]
+            signoff = self._run(
+                env,
+                "record-worker-signoff",
+                {
+                    "watch_id": watch_id,
+                    "action_id": action_id,
+                    "generation": 1,
+                    "worker_signoff_sha": "b" * 40,
+                },
+            )
+            self.assertEqual(signoff.returncode, 0, signoff.stderr)
             result = self._run(
                 env,
                 "record-repair-result",
@@ -10738,6 +10813,68 @@ else:
             self.assertEqual(
                 self._json(result)["error"]["code"],
                 "review-verdict-required",
+            )
+            state = self._json(self._run(env, "show", {"watch_id": watch_id}))
+            self.assertEqual(state["metadata"]["state"], "blocked")
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
+
+    def test_passed_repair_result_requires_matching_worker_signoff(self):
+        root, env = self._repair_fixture("missing-worker-signoff-result")
+        try:
+            handoff = self._run(env, "handoff", self._HANDOFF)
+            self.assertEqual(handoff.returncode, 0, handoff.stderr)
+            watch_id = self._json(handoff)["watch_id"]
+            dispatched = self._dispatch(
+                env,
+                watch_id,
+                generation=1,
+                head_sha="a" * 40,
+                action_kind="ci",
+                fingerprint="missing worker signoff result",
+            )
+            self.assertEqual(dispatched.returncode, 0, dispatched.stderr)
+            action_id = self._json(dispatched)["action_id"]
+            candidate = self._run(
+                env,
+                "record-candidate-head",
+                {
+                    "watch_id": watch_id,
+                    "action_id": action_id,
+                    "generation": 1,
+                    "candidate_head_sha": "b" * 40,
+                },
+            )
+            self.assertEqual(candidate.returncode, 0, candidate.stderr)
+            verdict = self._run(
+                env,
+                "record-review-verdict",
+                {
+                    "watch_id": watch_id,
+                    "action_id": action_id,
+                    "generation": 1,
+                    "candidate_head_sha": "b" * 40,
+                    "verdict": "passed",
+                },
+            )
+            self.assertEqual(verdict.returncode, 0, verdict.stderr)
+            result = self._run(
+                env,
+                "record-repair-result",
+                {
+                    "watch_id": watch_id,
+                    "action_id": action_id,
+                    "generation": 1,
+                    "expected_old_sha": "a" * 40,
+                    "pushed_sha": "b" * 40,
+                    "validation_status": "passed",
+                    "make_check_result": "passed",
+                },
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(
+                self._json(result)["error"]["code"],
+                "worker-signoff-required",
             )
             state = self._json(self._run(env, "show", {"watch_id": watch_id}))
             self.assertEqual(state["metadata"]["state"], "blocked")
@@ -10954,6 +11091,7 @@ else:
             )
             self.assertEqual(dispatched.returncode, 0, dispatched.stderr)
             action_id = self._json(dispatched)["action_id"]
+            self._worker_signoff(env, watch_id, action_id, 1, "b" * 40)
             verdict = self._run(
                 env,
                 "record-review-verdict",
@@ -11034,6 +11172,7 @@ else:
             )
             self.assertEqual(dispatched.returncode, 0, dispatched.stderr)
             action_id = self._json(dispatched)["action_id"]
+            self._worker_signoff(env, watch_id, action_id, 1, "b" * 40)
             verdict = self._run(
                 env,
                 "record-review-verdict",
@@ -11395,6 +11534,13 @@ else:
                         )
                         self.assertEqual(recorded.returncode, 0, recorded.stderr)
                     elif scenario in {"result-recorded", "ambiguous"}:
+                        self._worker_signoff(
+                            env,
+                            watch_id,
+                            action_id,
+                            1,
+                            "b" * 40,
+                        )
                         verdict = self._run(
                             env,
                             "record-review-verdict",
@@ -11645,6 +11791,7 @@ else:
             )
             self.assertEqual(dispatched.returncode, 0, dispatched.stderr)
             action_id = self._json(dispatched)["action_id"]
+            self._worker_signoff(env, watch_id, action_id, 1, "b" * 40)
             verdict = self._run(
                 env,
                 "record-review-verdict",

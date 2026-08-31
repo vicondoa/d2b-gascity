@@ -292,6 +292,9 @@ if [ "$CLAIM_STATUS" = 'result-recorded' ]; then
     MAKE_CHECK_RESULT="$(
         printf '%s\n' "$META" | jq -r '.make_check_result // empty'
     )"
+    WORKER_SIGNOFF_SHA="$(
+        printf '%s\n' "$META" | jq -r '.worker_signoff_sha // empty'
+    )"
     EXPECTED_NEW_SHA="$(
         printf '%s\n' "$META" | jq -r '.expected_new_sha // empty'
     )"
@@ -322,6 +325,8 @@ if [ "$CLAIM_STATUS" = 'result-recorded' ]; then
         blocker 'recorded validation did not pass'
     [ "$MAKE_CHECK_RESULT" = 'passed' ] ||
         blocker 'recorded make check did not pass'
+    [ "$WORKER_SIGNOFF_SHA" = "$CANDIDATE_HEAD_SHA" ] ||
+        blocker 'recorded worker signoff head is stale'
     [ -d "$WORKTREE" ] || blocker 'recorded action worktree is missing'
     [ ! -L "$WORKTREE" ] || blocker 'recorded action worktree is a symlink'
     [ "$WORKTREE" = "$GC_RIG_ROOT/.gc/agents/pr-babysitter/worktrees/$ACTION_ID" ] ||
