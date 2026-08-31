@@ -1264,13 +1264,27 @@ def metadata_updates(
     return require_beads(result, "metadata update")
 
 
-def release_watch_claim(watch_id: str, reason: str) -> None:
-    actor = f"pr-babysit-release-{watch_id}"
-    claimed = run_beads(
-        ["update", watch_id, "--claim", "--json"],
-        actor=actor,
-    )
-    require_beads(claimed, "watch claim normalization")
+def normalize_watch_claim(
+    watch_id: str,
+    issue: dict[str, Any],
+    reason: str,
+) -> None:
+    holder = str(issue.get("assignee") or "")
+    actor = holder or f"pr-babysit-release-{watch_id}"
+    if not holder and not issue.get("started_at"):
+        return
+    if not holder:
+        if issue.get("status") not in {"open", "in_progress"}:
+            reopened = run_beads(
+                ["update", watch_id, "--status", "open", "--json"],
+                actor=actor,
+            )
+            require_beads(reopened, "watch claim reopen")
+        claimed = run_beads(
+            ["update", watch_id, "--claim", "--json"],
+            actor=actor,
+        )
+        require_beads(claimed, "watch claim normalization")
     released = run_beads(
         [
             "unclaim",
@@ -1566,16 +1580,6 @@ def create_action(
     if not result.ok:
         raise beads_error(result, "action create", atomic_conflict=False)
     require_beads(result, "action create")
-    parent_result = run_beads(
-        [
-            "update",
-            action_id,
-            "--parent",
-            watch_id,
-            "--json",
-        ]
-    )
-    require_beads(parent_result, "action parent")
     issue, current_metadata = show_issue(action_id)
     validate_action_identity(current_metadata)
     ensure_action_blocks_watch(action_id, watch_id)
@@ -2297,7 +2301,7 @@ def _handoff_locked(
     *,
     preserve_budget: bool = False,
 ) -> dict[str, Any]:
-    created, reused, _, metadata = create_watch(watch_id, initial, identity)
+    created, reused, issue, metadata = create_watch(watch_id, initial, identity)
     immutable_matches(metadata, identity)
     current_state = state_from_metadata(metadata)
     if current_state == "terminal":
@@ -2425,6 +2429,11 @@ def _handoff_locked(
         )
         _, metadata = show_issue(watch_id)
     elif head_changed or should_rearm:
+        normalize_watch_claim(
+            watch_id,
+            issue,
+            "Reset watch claim after head reconciliation or explicit rearm.",
+        )
         invalidate_action_claim(
             watch_id,
             metadata,
@@ -2472,10 +2481,6 @@ def _handoff_locked(
             updates,
             status="open",
             assignee="",
-        )
-        release_watch_claim(
-            watch_id,
-            "Reset watch claim after head reconciliation or explicit rearm.",
         )
         _, metadata = show_issue(watch_id)
     return metadata_response(
@@ -4723,6 +4728,12 @@ def _confirm_action_locked(payload: dict[str, Any]) -> dict[str, Any]:
         "addressed_thread_ids",
         "",
     )
+    watch_issue, _ = show_issue(watch_id)
+    normalize_watch_claim(
+        watch_id,
+        watch_issue,
+        "Release confirmed repair watch claim.",
+    )
     close_action(action_id, "confirmed")
     updates = clear_claim_updates(
         "watching",
@@ -4757,10 +4768,6 @@ def _confirm_action_locked(payload: dict[str, Any]) -> dict[str, Any]:
         updates,
         status="open",
         assignee="",
-    )
-    release_watch_claim(
-        watch_id,
-        "Release confirmed repair watch claim.",
     )
     _, metadata = show_issue(watch_id)
     return metadata_response(

@@ -5997,6 +5997,14 @@ if command == "close":
             claim_json = self._json(claim)
             self.assertNotIn(fingerprint, (root / "beads.json").read_text())
             self.assertNotIn(fingerprint, (root / "calls.json").read_text())
+            calls = json.loads((root / "calls.json").read_text(encoding="utf-8"))
+            self.assertFalse(
+                any(
+                    "--parent" in call
+                    and claim_json["action_id"] in call
+                    for call in calls
+                )
+            )
             other = self._run(
                 env,
                 "claim-action",
