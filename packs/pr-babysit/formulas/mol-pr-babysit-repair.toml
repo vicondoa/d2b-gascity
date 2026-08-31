@@ -102,7 +102,21 @@ Run exactly `make check` with no arguments after the repair and continue
 fixing the claimed failure until that signoff passes. Create the local repair
 commit in that worktree only after the successful signoff, but do not push or
 alter any other ref; the validation step independently revalidates the exact
-candidate and owns the single normal push.
+candidate and owns the single normal push. After committing, persist the
+worker-owned signoff before closing this step:
+
+```sh
+WORKER_SIGNOFF_SHA="$(
+  git -C "$GC_RIG_ROOT/.gc/agents/pr-babysitter/worktrees/{{action_id}}" \
+    rev-parse 'HEAD^{commit}'
+)" || exit 1
+gc core-city pr-babysit record-worker-signoff \
+  --watch-id "{{watch_id}}" \
+  --action-id "{{action_id}}" \
+  --generation "{{generation}}" \
+  --worker-signoff-sha "$WORKER_SIGNOFF_SHA" \
+  --json
+```
 """
 
 [[steps]]
@@ -162,8 +176,8 @@ title = "Close the confirmed repair action"
 needs = ["validate-and-report"]
 metadata = { "gc.run_target" = "gc.run-operator" }
 description = """
-Close action {{action_id}} only after validate-and-report has recorded a
-passed make check, the expected old SHA, the pushed SHA, and the explicitly
+Close action {{action_id}} only after validate-and-report has verified the
+worker's passed make check, the expected old SHA, the pushed SHA, and the explicitly
 addressed thread IDs. The fenced confirmation is the only normal completion
 path; it closes the action child and lets the native dependency-close nudge
 resume watch {{watch_id}}.

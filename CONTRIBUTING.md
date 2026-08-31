@@ -83,16 +83,12 @@ state.
   persisted formula root blocks rearm, while closed or missing roots are
   cleaned first. Terminal watches stay terminal. Repairs are same-repository-only:
   `head_repository` must equal `owner/repository`; fork or cross-repository
-  PRs are human blockers in v1. Before repair, require
-  `PR_BABYSIT_VALIDATOR` as an absolute, non-symlink, executable file, its
-  64-character lowercase hexadecimal `PR_BABYSIT_VALIDATOR_SHA256`, and
-  `PR_BABYSIT_VALIDATOR_ATTESTED=credential-isolated-v1`. The workflow hashes
-  it with `sha256sum` and runs it through
-  `timeout --foreground --kill-after=5s` with
-  `PR_BABYSIT_VALIDATOR_TIMEOUT_SECONDS` from 1 through 900 (default 900).
-  It must run `make check` in a credential- and network-isolated environment.
-  A missing, mismatched, timed-out, or failed validator blocks repair without
-  a push.
+  PRs are human blockers in v1. The implementation worker owns the sole
+  repository-default `make check`, records the exact worker signoff SHA, and
+  commits only after the check passes. The independent reviewer binds its
+  verdict to that candidate. Run-operator verifies those records, worktree
+  cleanliness, origin, and the unchanged remote head before one normal push;
+  it does not rerun `make check`.
 - Preserve upstream licenses and notices. Use ASCII hyphens only.
 - Keep portable source in Git. Keep credentials, runtime state, logs,
   prompts, responses, mappings, bindings, and host configuration outside the

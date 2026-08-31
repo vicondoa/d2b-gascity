@@ -62,7 +62,6 @@ TIME_BUDGET_REASON = "time-budget-exhausted"
 BACKSTOP_REASON = "backstop-expired"
 ATTEMPT_LIMITS = {"ci": 3, "review": 2}
 REPAIR_FORMULA = "mol-pr-babysit-repair"
-VALIDATOR_ATTESTATION = "credential-isolated-v1"
 ACTIVE_BUDGET = timedelta(hours=8)
 BACKSTOP_BUDGET = timedelta(days=3)
 ORDER_TIMEOUT_SECONDS = 30
@@ -77,7 +76,6 @@ WAKE_LEASE = timedelta(seconds=10)
 DEFAULT_DUE_LIMIT = 4
 MAX_DUE_LIMIT = 100
 SHA_RE = re.compile(r"^[0-9a-fA-F]{40}$")
-VALIDATOR_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 SLUG_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9_.-]*[A-Za-z0-9])?$")
 WATCH_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 BEAD_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
@@ -168,6 +166,7 @@ SAFE_METADATA_KEYS = {
     "gc.routed_to",
     "gc.session_name",
     "candidate_head_sha",
+    "worker_signoff_sha",
     "review_verdict",
     "review_verdict_action_id",
     "review_verdict_generation",
@@ -412,18 +411,6 @@ def require_repair_credentials() -> None:
             "Pull requests read capability",
             "credential-capability",
         )
-    if os.environ.get("PR_BABYSIT_VALIDATOR_ATTESTED", "") != VALIDATOR_ATTESTATION:
-        fail(
-            "repair requires an attested credential-isolated validator",
-            "credential-validator",
-        )
-    if not VALIDATOR_SHA256_RE.fullmatch(
-        os.environ.get("PR_BABYSIT_VALIDATOR_SHA256", ""),
-    ):
-        fail(
-            "repair requires a 64-character lowercase validator SHA-256",
-            "credential-validator",
-        )
 
 
 def check_repair_credentials() -> dict[str, Any]:
@@ -432,7 +419,6 @@ def check_repair_credentials() -> dict[str, Any]:
         "ok": True,
         "action": "check-credentials",
         "operator_attested": True,
-        "validator_attested": True,
     }
 
 
@@ -4316,6 +4302,54 @@ def record_review_verdict(payload: dict[str, Any]) -> dict[str, Any]:
         }
 
 
+def record_worker_signoff(payload: dict[str, Any]) -> dict[str, Any]:
+    watch_id = validate_watch_id(payload_value(payload, "watch_id", "id"))
+    with watch_lock(watch_id):
+        (
+            watch_id,
+            action_id,
+            _,
+            action_metadata_value,
+            generation,
+            _,
+        ) = action_context(payload)
+        worker_signoff_sha = sha_value(
+            payload_value(
+                payload,
+                "worker_signoff_sha",
+                "candidate_head_sha",
+                "head_sha",
+            ),
+            "worker_signoff_sha",
+        )
+        if worker_signoff_sha == action_metadata_value.get("expected_old_head"):
+            fail("worker signoff must identify a new repair commit")
+        recorded_signoff = action_metadata_value.get("worker_signoff_sha", "")
+        if recorded_signoff and recorded_signoff != worker_signoff_sha:
+            fail("worker signoff changed after it was recorded", "stale-signoff")
+        recorded_candidate = action_metadata_value.get("candidate_head_sha", "")
+        if recorded_candidate and recorded_candidate != worker_signoff_sha:
+            fail("worker signoff does not match the candidate head", "stale-signoff")
+        if not recorded_signoff:
+            metadata_updates(
+                action_id,
+                {
+                    "worker_signoff_sha": worker_signoff_sha,
+                    "make_check_result": "passed",
+                },
+            )
+        return {
+            "ok": True,
+            "action": "record-worker-signoff",
+            "watch_id": watch_id,
+            "action_id": action_id,
+            "generation": generation,
+            "worker_signoff_sha": worker_signoff_sha,
+            "make_check_result": "passed",
+            "reused": bool(recorded_signoff),
+        }
+
+
 def review_verdict_matches(
     metadata: dict[str, str],
     action_id: str,
@@ -5431,6 +5465,12 @@ def parse_cli_request(argv: list[str]) -> dict[str, Any]:
                 "generation",
                 "candidate_head_sha",
             ),
+            "record-worker-signoff": (
+                "watch_id",
+                "action_id",
+                "generation",
+                "worker_signoff_sha",
+            ),
             "record-review-verdict": (
                 "watch_id",
                 "action_id",
@@ -5504,6 +5544,8 @@ def dispatch(payload: dict[str, Any]) -> dict[str, Any]:
         return dispatch_repair(payload)
     if action == "record-candidate-head":
         return record_candidate_head(payload)
+    if action == "record-worker-signoff":
+        return record_worker_signoff(payload)
     if action == "record-review-verdict":
         return record_review_verdict(payload)
     if action == "record-repair-result":

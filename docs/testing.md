@@ -191,17 +191,11 @@ the agent cannot introspect fine-grained permissions. Pull requests write,
 merge/admin, workflow-approval, and Copilot Requests authority are refused.
 Keep publication, repair GitHub, Copilot Requests, and Discord credentials
 separate, and never reuse a Copilot token for `GH_TOKEN` or `GITHUB_TOKEN`.
-Before a repair, require `PR_BABYSIT_VALIDATOR` as an absolute, non-symlink,
-executable file, `PR_BABYSIT_VALIDATOR_SHA256` as its 64-character lowercase
-hexadecimal sha256sum, and set
-`PR_BABYSIT_VALIDATOR_ATTESTED=credential-isolated-v1`. The workflow hashes
-the selected executable with `sha256sum` before running it through
-`timeout --foreground --kill-after=5s`;
-`PR_BABYSIT_VALIDATOR_TIMEOUT_SECONDS` must be 1 through 900 seconds (default
-900). It must run `make check` in a credential-isolated environment. Public
-dependency access is allowed, but GitHub, Copilot, BuildBuddy, publication,
-and Discord credentials must be absent. A missing, mismatched, timed-out, or
-failed validator records a failed result, blocks repair, and does not push.
+The implementation worker runs the sole repository-default `make check`,
+commits after it passes, and records the exact worker signoff SHA. The
+independent reviewer binds its verdict to that candidate. Run-operator verifies
+those records, worktree cleanliness, origin identity, and the unchanged remote
+head before one normal push; it does not rerun `make check`.
 Fork or cross-repository PRs are human blockers in v1.
 Before credentialed fetch or push, the repair workflow verifies that `origin`
 and any configured push URL map exactly to the recorded GitHub

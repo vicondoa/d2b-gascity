@@ -105,17 +105,14 @@ Watch `claim_status` values written by state code are `none`, `claimed`,
 `claim_status` and is written when a confirmed action child closes or a watch
 reaches terminal. Repairs are same-repository-only:
 `head_repository` must equal `owner/repository`.
-Fork or cross-repository PRs are human blockers in v1. Before repair, provide
-`PR_BABYSIT_VALIDATOR` as an absolute, non-symlink, executable file, its
-64-character lowercase hexadecimal `PR_BABYSIT_VALIDATOR_SHA256`, and set
-`PR_BABYSIT_VALIDATOR_ATTESTED=credential-isolated-v1`. The workflow hashes
-that executable with `sha256sum` and runs it through
-`timeout --foreground --kill-after=5s` using a positive
-`PR_BABYSIT_VALIDATOR_TIMEOUT_SECONDS` no greater than 900 (default 900). It
-must run `make check` in a credential- and network-isolated environment; a
-missing, mismatched, timed-out, or failed validator blocks repair without a
-push. Keep the operator-attested `contents-write,pull-requests-read` GitHub
-capability and all Copilot, GitHub, and Discord credentials separate.
+Fork or cross-repository PRs are human blockers in v1. The implementation
+worker runs the sole repository-default `make check`, commits only after it
+passes, and records the exact worker signoff SHA. The independent reviewer
+binds its verdict to that candidate. Run-operator verifies those records,
+worktree cleanliness, origin, and the unchanged remote head before one normal
+push; it does not rerun `make check`. Keep the operator-attested
+`contents-write,pull-requests-read` GitHub capability and all Copilot, GitHub,
+and Discord credentials separate.
 
 Enable d2b first. The `city-source` rig remains suspended-on-start and must
 not be enabled for live repair until the U8 disposable d2b acceptance passes.
