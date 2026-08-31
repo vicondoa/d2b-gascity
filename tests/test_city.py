@@ -10455,6 +10455,14 @@ else:
             '    "HEAD:refs/heads/$HEAD_REF"',
             validate,
         )
+        self.assertNotIn("record-candidate-head", validate)
+        formula = tomllib.loads(
+            PR_BABYSIT_REPAIR_FORMULA.read_text(encoding="utf-8")
+        )
+        review = next(
+            step for step in formula["steps"] if step["id"] == "review"
+        )
+        self.assertIn("record-candidate-head", review["description"])
         self.assertIn("GIT_TIMEOUT_SECONDS", prepare + "\n" + validate)
         self.assertIn("git_bounded", prepare + "\n" + validate)
         self.assertIn(
