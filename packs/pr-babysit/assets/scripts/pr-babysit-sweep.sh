@@ -9,4 +9,5 @@ state_runner="${PR_BABYSIT_STATE_RUNNER:-$packs_root/core-city/commands/pr-babys
 rig="${GC_RIG:-}"
 limit="${PR_BABYSIT_SWEEP_LIMIT:-4}"
 
-exec "$state_runner" sweep --rig "$rig" --limit "$limit" --json
+exec env -u GC_PACK_DIR \
+  "$state_runner" sweep --rig "$rig" --limit "$limit" --json

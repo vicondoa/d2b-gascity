@@ -413,16 +413,6 @@ if ! BEFORE_HEAD="$(
     record_validation_failure validator-invariant \
         'cannot resolve repair worktree head before validation'
 fi
-if ! gc core-city pr-babysit record-candidate-head \
-    --watch-id "$WATCH_ID" \
-    --action-id "$ACTION_ID" \
-    --generation "$GENERATION" \
-    --candidate-head-sha "$BEFORE_HEAD" \
-    --json >/dev/null 2>&1
-then
-    record_validation_failure candidate-head-failed \
-        'could not persist the candidate head before validation'
-fi
 REVIEW_VERDICT="$(
     printf '%s\n' "$META" | jq -r '.review_verdict // empty'
 )"

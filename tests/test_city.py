@@ -620,7 +620,25 @@ class RootPortableCityTests(unittest.TestCase):
                         "PR_BABYSIT_VALIDATOR_TIMEOUT_SECONDS":
                             "$PR_BABYSIT_VALIDATOR_TIMEOUT_SECONDS",
                     },
-                }
+                },
+                {
+                    "dir": "d2b",
+                    "name": "pr-babysit.pr-babysitter",
+                    "env": {
+                        "GH_TOKEN": "",
+                        "GITHUB_TOKEN": "",
+                        "PR_BABYSIT_GITHUB_CAPABILITY_ATTESTED":
+                            "$PR_BABYSIT_GITHUB_CAPABILITY_ATTESTED",
+                        "PR_BABYSIT_VALIDATOR":
+                            "$PR_BABYSIT_VALIDATOR",
+                        "PR_BABYSIT_VALIDATOR_SHA256":
+                            "$PR_BABYSIT_VALIDATOR_SHA256",
+                        "PR_BABYSIT_VALIDATOR_ATTESTED":
+                            "$PR_BABYSIT_VALIDATOR_ATTESTED",
+                        "PR_BABYSIT_VALIDATOR_TIMEOUT_SECONDS":
+                            "$PR_BABYSIT_VALIDATOR_TIMEOUT_SECONDS",
+                    },
+                },
             ],
         )
         local_global_fragments = {
@@ -4944,6 +4962,7 @@ if command == "close":
                 "metadata": {
                     "record_kind": "watch",
                     "gc.routed_to": "d2b/pr-babysit.pr-babysitter",
+                    "gc.session_name": "d2b--pr-babysit__pr-babysitter",
                     "handoff_verified": True,
                     "handoff_route_status": "complete",
                     "handoff_wake_status": "delivered",
@@ -4953,6 +4972,10 @@ if command == "close":
         self.assertEqual(
             metadata["gc.routed_to"],
             "d2b/pr-babysit.pr-babysitter",
+        )
+        self.assertEqual(
+            metadata["gc.session_name"],
+            "d2b--pr-babysit__pr-babysitter",
         )
         self.assertEqual(metadata["handoff_verified"], "true")
 
@@ -7128,7 +7151,7 @@ if os.environ.get("FAKE_GC_FAIL") == "1":
         return subprocess.run(
             [str(self._SWEEP)],
             cwd=ROOT,
-            env=os.environ | env,
+            env=os.environ | env | {"GC_PACK_DIR": str(PR_BABYSIT_ROOT)},
             capture_output=True,
             text=True,
             check=False,
@@ -7592,7 +7615,8 @@ if os.environ.get("FAKE_GC_FAIL") == "1":
                 / "settle.md"
             ).read_text(encoding="utf-8"),
         ]).lower()
-        self.assertIn("exec \"$state_runner\" sweep", script)
+        self.assertIn("exec env -u GC_PACK_DIR", script)
+        self.assertIn("\"$state_runner\" sweep", script)
         self.assertNotIn("list-due", script)
         self.assertNotIn("while true", script)
         self.assertNotIn("sleep ", script)
@@ -10431,6 +10455,14 @@ else:
             '    "HEAD:refs/heads/$HEAD_REF"',
             validate,
         )
+        self.assertNotIn("record-candidate-head", validate)
+        formula = tomllib.loads(
+            PR_BABYSIT_REPAIR_FORMULA.read_text(encoding="utf-8")
+        )
+        review = next(
+            step for step in formula["steps"] if step["id"] == "review"
+        )
+        self.assertIn("record-candidate-head", review["description"])
         self.assertIn("GIT_TIMEOUT_SECONDS", prepare + "\n" + validate)
         self.assertIn("git_bounded", prepare + "\n" + validate)
         self.assertIn(
