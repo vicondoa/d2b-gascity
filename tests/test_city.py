@@ -5024,6 +5024,8 @@ if command == "close":
                     "record_kind": "watch",
                     "gc.routed_to": "d2b/pr-babysit.pr-babysitter",
                     "gc.session_name": "d2b--pr-babysit__pr-babysitter",
+                    "gc.continuation_group": "",
+                    "gc.session_affinity": "",
                     "handoff_verified": True,
                     "handoff_route_status": "complete",
                     "handoff_wake_status": "delivered",
@@ -5038,6 +5040,8 @@ if command == "close":
             metadata["gc.session_name"],
             "d2b--pr-babysit__pr-babysitter",
         )
+        self.assertEqual(metadata["gc.continuation_group"], "")
+        self.assertEqual(metadata["gc.session_affinity"], "")
         self.assertEqual(metadata["handoff_verified"], "true")
 
     def test_subprocess_timeouts_fail_closed_with_existing_error_codes(self):

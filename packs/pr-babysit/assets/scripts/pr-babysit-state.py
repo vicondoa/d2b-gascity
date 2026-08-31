@@ -165,6 +165,8 @@ SAFE_METADATA_KEYS = {
     "handoff_wake_status",
     "gc.routed_to",
     "gc.session_name",
+    "gc.continuation_group",
+    "gc.session_affinity",
     "candidate_head_sha",
     "worker_signoff_sha",
     "review_verdict",
