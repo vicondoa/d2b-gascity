@@ -76,6 +76,13 @@ PR_BABYSIT_VALIDATOR_SHA256 = "$PR_BABYSIT_VALIDATOR_SHA256"
 PR_BABYSIT_VALIDATOR_ATTESTED = "$PR_BABYSIT_VALIDATOR_ATTESTED"
 PR_BABYSIT_VALIDATOR_TIMEOUT_SECONDS = "$PR_BABYSIT_VALIDATOR_TIMEOUT_SECONDS"
 
+[[patches.agent]]
+name = "bd.dog"
+provider = "fast-worker"
+
+[patches.agent.pool]
+max = 1
+
 [daemon]
 patrol_interval = "30s"
 max_restarts = 5
