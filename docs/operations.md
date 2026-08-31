@@ -12,10 +12,13 @@ checkout or bind mount under this repository. Bind it through native
 
 ## Install and initialize
 
-Install the pinned `gc`, `copilot`, and `gh` runtimes, plus optional `codex`
-and ingress tooling, through the separate private `vicondoa/gascity.nix`
-repository or another compatible host source. The city defaults to Gas
-City's stock builtin Copilot CLI provider and keeps stock Codex available.
+Install the pinned `gc`, `copilot`, and `gh` runtimes, plus `herdr` 0.7.1+
+and optional `codex` and ingress tooling, through the separate private
+`vicondoa/gascity.nix` repository or another compatible host source. This city
+requires `herdr` 0.7.1+ on `PATH`; Gas City's builtin herdr session provider
+is verified upstream against that version. Runtime installation remains owned
+by the separate host source. The city uses Gas City's stock builtin Copilot
+CLI provider for agent models and keeps stock Codex available.
 The exact four model tiers are documented below and in
 [recipes/model-tiers.md](../recipes/model-tiers.md).
 

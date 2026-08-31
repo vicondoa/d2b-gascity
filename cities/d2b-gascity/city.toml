@@ -1,5 +1,8 @@
 include = ["model-tiers.toml"]
 
+[session]
+provider = "herdr"
+
 [workspace]
 provider = "deep-thinker"
 global_fragments = [
