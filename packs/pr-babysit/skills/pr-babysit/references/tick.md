@@ -33,9 +33,11 @@ gc core-city pr-babysit checkpoint --watch-id <watch-id> \
    feedback candidate in one bounded pass.
 5. **Current-head CI.** Handle only failing checks for the captured SHA.
    Running checks are waiting evidence, not repair work.
-6. **Exact branch currency.** Consume only the emitted item. `BEHIND`,
-   `DIRTY`, `CONFLICTING`, and unknown capability are human blockers; do not
-   invoke a branch update operation.
+6. **Exact branch currency.** Consume only the emitted item. When
+   `branch_currency=null`, branch-update capability is irrelevant and must not
+   prevent CI or review repair. When a branch-currency item is present,
+   `BEHIND`, `DIRTY`, `CONFLICTING`, and unknown capability are human blockers;
+   do not invoke a branch update operation.
 7. **Settle or wait.** Re-show the watch immediately before the checkpoint
    and use that fresh generation and head as its expected values. Evaluate the
    current snapshot, then persist one

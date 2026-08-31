@@ -194,7 +194,7 @@ PR_BABYSIT_FILES = {
             "9752325ede820c"
         ),
         "local_sha256": (
-            "eaeb7899f2647c0e448d8a23657bab741d4a28aacbc693e44100b46862ceb9d9"
+            "12b5d100ab2d96b1e14900e1b1b43f789965f26e8bd5ce183f961206b8facd85"
         ),
     },
     "skills/pr-babysit/references/watch-loop.md": {
@@ -3043,6 +3043,9 @@ class VendoredPrBabysitTests(unittest.TestCase):
             / "pr-babysitter"
             / "prompt.template.md"
         ).read_text(encoding="utf-8")
+        tick = (
+            PR_BABYSIT_SKILL_ROOT / "references" / "tick.md"
+        ).read_text(encoding="utf-8")
         glossary = (
             CORE_PACK_ROOT
             / "template-fragments"
@@ -3092,6 +3095,13 @@ class VendoredPrBabysitTests(unittest.TestCase):
         self.assertGreater(prompt.index(show), gate_end)
         self.assertIn("$GC_DIR/state/<watch-id>", prompt)
         self.assertIn("current branch", prompt.lower())
+        for text in (prompt, tick):
+            normalized = " ".join(text.lower().split())
+            self.assertIn("branch_currency=null", normalized)
+            self.assertIn(
+                "must not prevent ci or review repair",
+                normalized,
+            )
 
     @staticmethod
     def _snapshot_fixture(
