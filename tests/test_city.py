@@ -6004,8 +6004,8 @@ if command == "close":
             calls = json.loads((root / "calls.json").read_text(encoding="utf-8"))
             self.assertFalse(
                 any(
-                    "--parent" in call
-                    and claim_json["action_id"] in call
+                    "--parent" in call["argv"]
+                    and claim_json["action_id"] in call["argv"]
                     for call in calls
                 )
             )
