@@ -70,7 +70,7 @@ verify_projection() {
   verify_file '31d79d87f9e63940714656cb35af5746aed53cc6f263de17a60b4f0e04e6362f' 'references/report.md'
   verify_file '325165b26f0945dc988df09bc8ba6dbc1baad1311a0d39d946b60f3253923e1f' 'references/settle.md'
   verify_file '674b73e99093531d925b0ffe349a651e3ad4dc31ff029777c53175e4df730c3c' 'references/setup.md'
-  verify_file 'eaeb7899f2647c0e448d8a23657bab741d4a28aacbc693e44100b46862ceb9d9' 'references/tick.md'
+  verify_file '12b5d100ab2d96b1e14900e1b1b43f789965f26e8bd5ce183f961206b8facd85' 'references/tick.md'
   verify_file 'ffa2bbb69316326c9d6f52a6834008c77e095607678292e228f6cd99ad748932' 'references/watch-loop.md'
   verify_file 'e1baf200b8fed443ef997f03600a42cfaee7bf301b70f48373217c9d554a97e4' 'scripts/pr-snapshot'
 }
@@ -304,7 +304,11 @@ the eight-hour and three-day budgets remain in force. Follow the vendored
 current-head checks, review-before-CI handling, exact branch-currency evidence,
 and bounded handoff. `snapshot.base.identity` must be `current`; unknown,
 stale, or wrong-base identity, cross-repository head identity, dirty state,
-conflicting state, and unknown capability are human blockers.
+and conflicting state are human blockers. Branch-update capability is relevant
+only when `snapshot.branch_currency` is non-null.
+`host_branch_update_capability=unknown` with `branch_currency=null` is not a
+blocker and must not prevent CI or review repair. When a branch-currency item
+is present, block instead of invoking a branch update operation.
 
 The repair credential is Pull requests read only. Never resolve or close
 GitHub review threads. After `confirm-action` succeeds for a review repair, the watch preserves the
