@@ -1264,6 +1264,28 @@ def metadata_updates(
     return require_beads(result, "metadata update")
 
 
+def release_watch_claim(watch_id: str, reason: str) -> None:
+    actor = f"pr-babysit-release-{watch_id}"
+    claimed = run_beads(
+        ["update", watch_id, "--claim", "--json"],
+        actor=actor,
+    )
+    require_beads(claimed, "watch claim normalization")
+    released = run_beads(
+        [
+            "unclaim",
+            watch_id,
+            "--if-assignee",
+            actor,
+            "--reason",
+            reason,
+            "--json",
+        ],
+        actor=actor,
+    )
+    require_beads(released, "watch claim release")
+
+
 def close_issue(issue_id: str, reason: str) -> dict[str, Any]:
     result = run_beads(["close", issue_id, "--reason", reason, "--json"])
     return require_beads(result, "close")
@@ -2450,6 +2472,10 @@ def _handoff_locked(
             updates,
             status="open",
             assignee="",
+        )
+        release_watch_claim(
+            watch_id,
+            "Reset watch claim after head reconciliation or explicit rearm.",
         )
         _, metadata = show_issue(watch_id)
     return metadata_response(
@@ -4731,6 +4757,10 @@ def _confirm_action_locked(payload: dict[str, Any]) -> dict[str, Any]:
         updates,
         status="open",
         assignee="",
+    )
+    release_watch_claim(
+        watch_id,
+        "Release confirmed repair watch claim.",
     )
     _, metadata = show_issue(watch_id)
     return metadata_response(

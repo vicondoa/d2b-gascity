@@ -4591,7 +4591,7 @@ with log_lock_path.open("a+", encoding="utf-8") as log_lock:
 records = load(state_path, [])
 command_index = next(
     (index for index, value in enumerate(argv)
-     if value in {"create", "show", "update", "close", "list", "dep"}),
+     if value in {"create", "show", "update", "unclaim", "close", "list", "dep"}),
     None,
 )
 if command_index is None:
@@ -4605,6 +4605,7 @@ KNOWN_FLAGS = {
     "create": {"--id", "--title", "--description", "--type", "--metadata", "--silent", "--json"},
     "show": {"--json"},
     "update": {"--claim", "--status", "--assignee", "--parent", "--set-metadata", "--json"},
+    "unclaim": {"--if-assignee", "--reason", "--json"},
     "close": {"--reason", "--json"},
     "list": {"--all", "--status", "--limit", "--sort", "--metadata-field", "--json"},
     "dep": {"--blocks", "--json"},
@@ -4619,6 +4620,7 @@ VALUE_FLAGS = {
     "--assignee",
     "--parent",
     "--set-metadata",
+    "--if-assignee",
     "--reason",
     "--limit",
     "--sort",
@@ -4861,6 +4863,7 @@ if command == "update":
             raise SystemExit(1)
         record["assignee"] = actor
         record["status"] = "in_progress"
+        record["started_at"] = "2026-08-29T19:00:00Z"
     if "--status" in values:
         record["status"] = value("--status")
     if "--assignee" in values:
@@ -4873,6 +4876,24 @@ if command == "update":
         if separator:
             metadata[key] = item_value
     record["metadata"] = metadata
+    save(state_path, records)
+    print(json.dumps([record], sort_keys=True))
+    raise SystemExit(0)
+
+
+if command == "unclaim":
+    issue_id = positional()
+    record = record_for(issue_id)
+    if record is None:
+        print("not found", file=sys.stderr)
+        raise SystemExit(1)
+    expected_assignee = value("--if-assignee")
+    if expected_assignee and record.get("assignee", "") != expected_assignee:
+        print("assignee mismatch", file=sys.stderr)
+        raise SystemExit(1)
+    record["status"] = "open"
+    record["assignee"] = ""
+    record.pop("started_at", None)
     save(state_path, records)
     print(json.dumps([record], sort_keys=True))
     raise SystemExit(0)
