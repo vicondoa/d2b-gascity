@@ -95,9 +95,11 @@ Human operators own publication and merge decisions. See
 
 ## Initialize the nested city
 
-Install the pinned `gc`, `copilot`, and `gh` runtimes, plus optional `codex`
-and ingress tooling, from the separate host source. From the nested city
-directory, initialize in place:
+Install the pinned `gc`, `copilot`, and `gh` runtimes, plus `herdr` 0.7.1+
+and optional `codex` and ingress tooling, from the separate host source. This
+city requires `herdr` 0.7.1+ on `PATH`; Gas City's builtin herdr provider is
+verified upstream against that version. Runtime installation remains owned by
+the separate host source. From the nested city directory, initialize in place:
 
 ```text
 cd cities/d2b-gascity

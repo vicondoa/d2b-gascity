@@ -15,6 +15,7 @@ The standard-library test module validates:
   copied city, service, relay, binary, site, or runtime state;
 - the pathless d2b `v3` and city-source `main` declarations, machine-local
   bindings, and native `gc rig add` provisioning contract;
+- the city-wide `[session]` selector contract with `provider = "herdr"`;
 - exactly four model tiers: `deep-thinker` with `gpt-5.6-sol` medium and
   `long_context`, `reviewer` with `grok-4.6` high and `long_context`,
   `solid-worker` with `gpt-5.6-luna` max and `long_context`, and

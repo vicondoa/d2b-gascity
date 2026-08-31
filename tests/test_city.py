@@ -500,8 +500,7 @@ class RootPortableCityTests(unittest.TestCase):
         self.assertEqual(config["include"], ["model-tiers.toml"])
         self.assertNotIn("api", config)
         self.assertNotIn("suspended_on_start", config)
-        self.assertNotIn("[[session]]", text.lower())
-        self.assertNotIn("[session]", text.lower())
+        self.assertEqual(config["session"], {"provider": "herdr"})
         self.assertEqual(
             config.get("named_session"),
             [
@@ -962,8 +961,6 @@ class RootPortableCityTests(unittest.TestCase):
             "delivery-verification",
         ):
             self.assertNotIn(marker, text)
-        self.assertNotIn("[[session]]", text)
-        self.assertNotIn("[session]", text)
 
     def test_pack_pins_canonical_sources_and_uses_imported_services(
         self,
