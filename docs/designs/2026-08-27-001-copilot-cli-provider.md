@@ -43,10 +43,12 @@ provider = "copilot-planning-grok"
 
 [providers.copilot-planning-grok]
 base = "builtin:copilot"
+session_id_flag = "--session-id"
 args = ["--yolo", "--model", "grok-4.6", "--context", "long_context", "--effort", "high"]
 
 [providers.copilot-code-luna]
 base = "builtin:copilot"
+session_id_flag = "--session-id"
 args = ["--yolo", "--model", "gpt-5.6-luna", "--context", "default", "--effort", "max"]
 
 [providers.codex]
@@ -63,8 +65,10 @@ provider = "copilot-code-luna"
 
 Copilot lane flags live in `args` because builtin Copilot has no model
 `option_defaults` schema. Copilot provider blocks omit `env`, `command`, and
-`option_defaults`. Codex keeps its empty model option so a host router or
-Codex default can supply the model.
+`option_defaults`. `session_id_flag` lets Gas City assign a fresh,
+deterministic Copilot session UUID and prevents the unbound `--resume` picker
+on restart without adding a custom adapter. Codex keeps its empty model option
+so a host router or Codex default can supply the model.
 
 The `implementation-worker` patch is the only coding-lane override. It
 selects Luna on the Copilot default path.

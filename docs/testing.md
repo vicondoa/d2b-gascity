@@ -20,6 +20,16 @@ The standard-library test module validates:
   `long_context`, `reviewer` with `grok-4.6` high and `long_context`,
   `solid-worker` with `gpt-5.6-luna` max and `long_context`, and
   `fast-worker` with `gpt-5.6-luna` medium and `default`;
+- the static and optional native session-ID binding contract
+  (`session_id_flag` / `SessionIDFlag == "--session-id"`) for all four
+  reusable Copilot providers;
+- the `bd.dog` pool workaround for
+  [gastownhall/gascity#5716](https://github.com/gastownhall/gascity/issues/5716):
+  static TOML requires `provider = "fast-worker"` and `pool.max = 1`, and
+  optional native resolved config requires `Provider = "fast-worker"` and
+  `MaxActiveSessions = 1` for the city-scoped dog. This serializes Dolt
+  maintenance on the inexpensive fast-worker tier; remove it only after the
+  pinned Gas City version includes the upstream fix.
 - all twelve role assignments on both rigs, the single city-local mayor, stock
   `builtin:codex` availability, and the absence of excluded providers and
   workflows;
@@ -82,6 +92,11 @@ and Dolt `2.1.7`, verifies their SHA-256 values, and runs the focused test.
 The workflow is [`.github/workflows/check.yml`](../.github/workflows/check.yml).
 It does not require credentials, private network access, or live model or
 GitHub activity.
+
+The optional real-`bd` contract accepts source Beads `1.2.2` or the exact host
+pseudo-version `1.1.1-0.20260805093327-bf97b73749ac`, tied to the pinned
+Herdr-capable Gas City `go.mod`; archive, hash, and native-smoke checks remain
+pinned to the source fixture release.
 
 ## Manual live smokes
 

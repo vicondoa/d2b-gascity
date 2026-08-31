@@ -7,16 +7,20 @@ description = "Reusable Copilot model providers and mayor coordination fragments
 [providers]
 [providers.copilot-deep-sol]
 base = "builtin:copilot"
+session_id_flag = "--session-id"
 args = ["--yolo", "--model", "gpt-5.6-sol", "--context", "long_context", "--effort", "medium"]
 
 [providers.copilot-review-grok]
 base = "builtin:copilot"
+session_id_flag = "--session-id"
 args = ["--yolo", "--model", "grok-4.6", "--context", "long_context", "--effort", "high"]
 
 [providers.copilot-solid-luna]
 base = "builtin:copilot"
+session_id_flag = "--session-id"
 args = ["--yolo", "--model", "gpt-5.6-luna", "--context", "long_context", "--effort", "max"]
 
 [providers.copilot-fast-luna]
 base = "builtin:copilot"
+session_id_flag = "--session-id"
 args = ["--yolo", "--model", "gpt-5.6-luna", "--context", "default", "--effort", "medium"]

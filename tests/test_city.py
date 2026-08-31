@@ -64,6 +64,7 @@ GASCITY_ARCHIVE_SHA256 = (
     "8d8c8b511db3fc44931445aab5cb9f212509c0867105c880d6c3d0e6e5d33e42"
 )
 BEADS_VERSION = "1.2.2"
+GASCITY_HOST_BEADS_VERSION = "1.1.1-0.20260805093327-bf97b73749ac"
 BEADS_ARCHIVE_SHA256 = (
     "8140098a51d3b81d5548d1c5e6db1a2d9930e5d141efe2a4bff7d079c4d321e8"
 )
@@ -638,6 +639,11 @@ class RootPortableCityTests(unittest.TestCase):
                             "$PR_BABYSIT_VALIDATOR_TIMEOUT_SECONDS",
                     },
                 },
+                {
+                    "name": "bd.dog",
+                    "provider": "fast-worker",
+                    "pool": {"max": 1},
+                },
             ],
         )
         local_global_fragments = {
@@ -708,6 +714,7 @@ class RootPortableCityTests(unittest.TestCase):
             provider = core_pack["providers"][name]
             self.assertEqual(provider["base"], "builtin:copilot")
             self.assertEqual(provider["args"], args)
+            self.assertEqual(provider["session_id_flag"], "--session-id")
             for key in ("command", "env", "option_defaults"):
                 self.assertNotIn(key, provider)
         self.assertEqual(
@@ -2567,6 +2574,7 @@ class RootPortableCityTests(unittest.TestCase):
                     provider = resolved_providers[provider_name]
                     self.assertEqual(provider["Base"], "builtin:copilot")
                     self.assertEqual(provider["Args"], provider_args)
+                    self.assertEqual(provider["SessionIDFlag"], "--session-id")
                 self.assertEqual(
                     {
                         name: resolved_providers[name]["Base"]
@@ -2604,6 +2612,15 @@ class RootPortableCityTests(unittest.TestCase):
                 )
                 self.assertEqual(mayors[0]["WakeMode"], "fresh")
                 self.assertEqual(mayors[0]["MaxActiveSessions"], 1)
+                dogs = [
+                    agent
+                    for agent in agents
+                    if agent.get("Name") == "dog"
+                    and agent.get("Scope") == "city"
+                ]
+                self.assertEqual(len(dogs), 1)
+                self.assertEqual(dogs[0]["Provider"], "fast-worker")
+                self.assertEqual(dogs[0]["MaxActiveSessions"], 1)
                 self.assertEqual(
                     resolved_config["config"]["NamedSessions"],
                     [
@@ -5662,7 +5679,11 @@ if command == "close":
         self.assertEqual(version.returncode, 0, version.stderr)
         self.assertRegex(
             version.stdout,
-            rf"^bd version {re.escape(BEADS_VERSION)} \(",
+            rf"^bd version (?:{re.escape(BEADS_VERSION)}|"
+            rf"{re.escape(GASCITY_HOST_BEADS_VERSION)}) \(",
+        )
+        host_version = version.stdout.startswith(
+            f"bd version {GASCITY_HOST_BEADS_VERSION} ("
         )
         root = _temporary_root("u3-real-bd-")
         try:
@@ -5764,7 +5785,10 @@ if command == "close":
             self.assertEqual(updated[0]["status"], "in_progress")
             self.assertEqual(updated[0]["assignee"], "contract-test")
             self.assertEqual(updated[0]["metadata"]["state"], "repairing")
-            self.assertEqual(updated[0]["metadata"]["attempts"], 1)
+            self.assertEqual(
+                updated[0]["metadata"]["attempts"],
+                "1" if host_version else 1,
+            )
 
             run_json(
                 "create",
@@ -5812,7 +5836,10 @@ if command == "close":
                 "--json",
             )
             self.assertNotEqual(blocked_close.returncode, 0)
-            self.assertIn("blocked by open issues", blocked_close.stderr)
+            self.assertIn(
+                "is blocked by" if host_version else "blocked by open issues",
+                blocked_close.stderr,
+            )
             self.assertEqual(run_json("close", "d2b-action")[0]["status"], "closed")
             self.assertEqual(run_json("close", "d2b-watch")[0]["status"], "closed")
 

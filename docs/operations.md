@@ -77,6 +77,14 @@ The principal formulas include:
 - the rig-imported `pr-babysit-sweep` order and
   `mol-pr-babysit-repair` Formula v2 for target-only pull-request work.
 
+The standalone `bd.dog` pool patch is a configuration workaround for
+[gastownhall/gascity#5716](https://github.com/gastownhall/gascity/issues/5716).
+With `max = 1`, Gas City treats the imported city-scoped dog as one stable
+canonical singleton, so claim and actor identity use the same alias while
+Dolt maintenance is serialized. The maintenance dog uses the inexpensive
+`fast-worker` tier. Remove this patch only after the pinned Gas City version
+includes the upstream fix; the linked issue is the durable removal tracker.
+
 The d2b rig formula defaults set `base_branch = "v3"` and
 `target_branch = "v3"`; city-source uses `main` for both. Publication must
 persist `metadata.merge_strategy=pr` plus `metadata.target=v3` for d2b or
@@ -679,6 +687,10 @@ Stock `providers.codex` remains available as `builtin:codex` for an explicit
 alternate agent patch only. It is not a tier or a default role assignment.
 See [the cookbook layout and model-tier design](designs/2026-08-28-001-cookbook-layout-and-model-tiers.md)
 and [the model-tier recipe](../recipes/model-tiers.md).
+
+Gas City assigns each Copilot-backed session a unique UUID at fresh launch and
+resumes that exact ID on restart rather than opening Copilot's interrupted
+session selector.
 
 The host supplies the Copilot CLI binary and may export `COPILOT_GITHUB_TOKEN`
 in the operator environment. Optional `codex` and Codex Router are host
