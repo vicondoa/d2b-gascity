@@ -3184,6 +3184,42 @@ def route_watch(target: str, watch_id: str, *, wake: bool = True) -> None:
         fail("could not execute Gas City executable", "route-exec")
     if result.returncode:
         fail("Gas City babysitter route failed", "route-failed")
+    try:
+        route_result = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        fail("Gas City babysitter route returned invalid JSON", "route-failed")
+    if not isinstance(route_result, dict):
+        fail("Gas City babysitter route returned invalid JSON", "route-failed")
+    if (
+        wake
+        and route_result.get("queued") is True
+        and route_result.get("routed") is False
+    ):
+        nudge_command = gc_command() + [
+            "session",
+            "nudge",
+            target,
+            f"Work is queued for Beads record {watch_id}. Run gc hook and claim it.",
+            "--delivery",
+            "wait-idle",
+            "--json",
+        ]
+        try:
+            nudge_result = subprocess.run(
+                nudge_command,
+                cwd=beads_cwd(),
+                env=os.environ.copy(),
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=route_timeout_seconds(),
+            )
+        except subprocess.TimeoutExpired:
+            fail("Gas City babysitter nudge timed out", "route-failed")
+        except OSError:
+            fail("could not execute Gas City executable", "route-exec")
+        if nudge_result.returncode:
+            fail("Gas City babysitter nudge failed", "route-failed")
 
 
 def template_remediation_id_for(watch_id: str, generation: int) -> str:

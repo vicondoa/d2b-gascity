@@ -7357,6 +7357,14 @@ if os.environ.get("FAKE_GC_SLEEP"):
 if os.environ.get("FAKE_GC_FAIL") == "1":
     print("route failed", file=sys.stderr)
     raise SystemExit(1)
+if "sling" in sys.argv:
+    print(json.dumps({
+        "ok": True,
+        "queued": True,
+        "routed": os.environ.get("FAKE_GC_ALREADY_ROUTED") != "1",
+    }))
+else:
+    print(json.dumps({"ok": True}))
 """
 
     def _fixture(self, name: str) -> tuple[pathlib.Path, dict[str, str]]:
@@ -7539,6 +7547,43 @@ if os.environ.get("FAKE_GC_FAIL") == "1":
                         "--json",
                     ],
                 ],
+            )
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
+
+    def test_sweep_nudges_existing_babysitter_route(self) -> None:
+        root, env = self._fixture("existing-route-nudge")
+        try:
+            watch_id = self._handoff(
+                env,
+                dict(
+                    self._HANDOFF,
+                    next_snapshot_at="2026-08-29T18:00:00Z",
+                ),
+            )
+            swept = self._run_state(
+                env | {"FAKE_GC_ALREADY_ROUTED": "1"},
+                "sweep",
+                {
+                    "rig": "d2b",
+                    "now": "2026-08-29T19:00:00Z",
+                    "limit": 1,
+                },
+            )
+            self.assertEqual(swept.returncode, 0, swept.stderr)
+            calls = json.loads(
+                (root / "gc-calls.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(len(calls), 2)
+            self.assertIn("sling", calls[0])
+            self.assertIn("session", calls[1])
+            self.assertIn("nudge", calls[1])
+            self.assertIn(
+                "d2b/pr-babysit.pr-babysitter",
+                calls[1],
+            )
+            self.assertTrue(
+                any(watch_id in argument for argument in calls[1])
             )
         finally:
             shutil.rmtree(root, ignore_errors=True)
