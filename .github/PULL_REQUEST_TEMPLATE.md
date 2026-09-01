@@ -10,8 +10,7 @@
 
 - [ ] **Focused tests for the changed components** were run; list exact
       commands and results.
-- [ ] **Repository gate passed:** run exact `make check` with no arguments and
-      record the successful result.
+- [ ] **Exact `make check`:** result=`<result>`; evidence=`<workflow URL or concise local run summary>`.
 - [ ] **Wider lanes are conditional.** Run the applicable public lane when the
       changed surface needs it, and explain any deliberate omission.
 - [ ] **Changed tests are owner-local:** wire new tests into their owning test

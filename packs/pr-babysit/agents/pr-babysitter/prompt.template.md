@@ -63,16 +63,16 @@ verify_projection() {
   marker_value="$(cat "$marker")" || blocker "cannot read $marker"
   [ "$marker_value" = "$commit" ] || blocker "wrong commit in $marker"
 
-  verify_file 'cd1091716c85248e13b5a705fbebaa0408512645daa60da4be4547aa10d599be' 'SKILL.md'
+  verify_file '7e939f05b7e0ea4a4496d379fdf6c158ed08945b10e7d04f42f89f7b52e7b82b' 'SKILL.md'
   verify_file '158a3624dd0150de39bdaba507a7685bb887c6f28899b38b1c268492a5a66ceb' 'references/branch-currency.md'
   verify_file 'ae949804f6491ac65bddb4cbacbcbc52f9877e8df6d782febb8fdb2bdfc4c241' 'references/envelope.md'
   verify_file 'aebd3a9955d7fb53e94512e4bdc998dfe7e1ca725fbfde6f902fde8382903034' 'references/pipeline.md'
   verify_file '31d79d87f9e63940714656cb35af5746aed53cc6f263de17a60b4f0e04e6362f' 'references/report.md'
-  verify_file '325165b26f0945dc988df09bc8ba6dbc1baad1311a0d39d946b60f3253923e1f' 'references/settle.md'
+  verify_file '718a6f31a11af8147166dea2273bbe54541e4bcac562ae09559c690f6efd233a' 'references/settle.md'
   verify_file '674b73e99093531d925b0ffe349a651e3ad4dc31ff029777c53175e4df730c3c' 'references/setup.md'
-  verify_file '934b939276fc06b93405b8768db4ab2db4c2cde435bc043e439269934f302559' 'references/tick.md'
-  verify_file 'ffa2bbb69316326c9d6f52a6834008c77e095607678292e228f6cd99ad748932' 'references/watch-loop.md'
-  verify_file 'dde148a13409b3748e4ad66ff8d114963bbe54b6d039f5d381e43d8e819dd2ff' 'scripts/pr-snapshot'
+  verify_file '692f9ddc861e0663ce6fcf7dceb5c210d9abda9d5d875f1817b4e97fc5fff883' 'references/tick.md'
+  verify_file 'cba5e2009e7571a754a24bbf51ba114b27c4ea87ada04ba8b8402a8b99853fdb' 'references/watch-loop.md'
+  verify_file 'a4f68cea8b7f9e2e1e096d26ca962721d67cffd03060d6299d0f38f53b1667f0' 'scripts/pr-snapshot'
 }
 
 for projection in \

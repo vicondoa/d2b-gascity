@@ -133,7 +133,7 @@ PR_BABYSIT_FILES = {
             "7c26c66c4cf4bd90"
         ),
         "local_sha256": (
-            "cd1091716c85248e13b5a705fbebaa0408512645daa60da4be4547aa10d599be"
+            "7e939f05b7e0ea4a4496d379fdf6c158ed08945b10e7d04f42f89f7b52e7b82b"
         ),
     },
     "skills/pr-babysit/references/branch-currency.md": {
@@ -177,7 +177,7 @@ PR_BABYSIT_FILES = {
             "cba40b99fc1759"
         ),
         "local_sha256": (
-            "325165b26f0945dc988df09bc8ba6dbc1baad1311a0d39d946b60f3253923e1f"
+            "718a6f31a11af8147166dea2273bbe54541e4bcac562ae09559c690f6efd233a"
         ),
     },
     "skills/pr-babysit/references/setup.md": {
@@ -197,7 +197,7 @@ PR_BABYSIT_FILES = {
             "9752325ede820c"
         ),
         "local_sha256": (
-            "934b939276fc06b93405b8768db4ab2db4c2cde435bc043e439269934f302559"
+            "692f9ddc861e0663ce6fcf7dceb5c210d9abda9d5d875f1817b4e97fc5fff883"
         ),
     },
     "skills/pr-babysit/references/watch-loop.md": {
@@ -205,6 +205,9 @@ PR_BABYSIT_FILES = {
         "sha256": (
             "f2abb846f4a5fd20468c7e5a4eefa4bf2929d7dcd6256da9442b"
             "751b96213f67"
+        ),
+        "local_sha256": (
+            "cba5e2009e7571a754a24bbf51ba114b27c4ea87ada04ba8b8402a8b99853fdb"
         ),
     },
     "skills/pr-babysit/scripts/pr-snapshot": {
@@ -214,7 +217,7 @@ PR_BABYSIT_FILES = {
             "b8850439d980e7"
         ),
         "local_sha256": (
-            "dde148a13409b3748e4ad66ff8d114963bbe54b6d039f5d381e43d8e819dd2ff"
+            "a4f68cea8b7f9e2e1e096d26ca962721d67cffd03060d6299d0f38f53b1667f0"
         ),
     },
 }
@@ -458,7 +461,8 @@ class RootPortableCityTests(unittest.TestCase):
             "## notes",
             "focused tests",
             "make check",
-            "successful result",
+            "result=`<result>`",
+            "evidence=`<workflow url or concise local run summary>`",
             "wider lanes",
             "changed tests are owner-local",
             "changelog updated",
@@ -3245,7 +3249,7 @@ Template-compliant change.
 ## Validation evidence
 
 - [x] **Focused tests for the changed components** were run.
-- [x] **Repository gate passed:** `make check` completed successfully.
+- [x] **Exact `make check`:** result=`passed`; evidence=`make check: exit 0`.
 - [x] **Wider lanes are conditional.**
 - [x] **Changed tests are owner-local.**
 - [x] **Changelog updated.**
@@ -3260,7 +3264,7 @@ No additional notes.
             (
                 "missing-make-check",
                 valid_body.replace(
-                    "- [x] **Repository gate passed:** `make check` completed successfully.\n",
+                    "- [x] **Exact `make check`:** result=`passed`; evidence=`make check: exit 0`.\n",
                     "",
                 ),
                 False,
@@ -3274,6 +3278,15 @@ No additional notes.
                 ),
                 False,
                 ["unchecked-changelog"],
+            ),
+            (
+                "placeholder-evidence",
+                valid_body.replace(
+                    "evidence=`make check: exit 0`",
+                    "evidence=`<workflow URL or concise local run summary>`",
+                ),
+                False,
+                ["make-check-not-successful"],
             ),
         )
         for name, body, valid, expected_errors in cases:
@@ -3302,6 +3315,31 @@ No additional notes.
                     )
                 finally:
                     shutil.rmtree(root, ignore_errors=True)
+
+    def test_checked_stock_template_does_not_self_attest_make_check(self):
+        body = (
+            ROOT / ".github" / "PULL_REQUEST_TEMPLATE.md"
+        ).read_text(encoding="utf-8").replace("- [ ]", "- [x]")
+        root = _temporary_root("snapshot-template-stock-")
+        try:
+            result, _ = self._snapshot_fixture(
+                root,
+                base={
+                    "ref": "main",
+                    "oid": "b" * 40,
+                    "current_oid": "b" * 40,
+                },
+                extra={"body": body},
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            snapshot = json.loads(result.stdout)
+            self.assertFalse(snapshot["template"]["valid"])
+            self.assertEqual(
+                snapshot["template"]["errors"],
+                ["make-check-not-successful"],
+            )
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
 
     def test_pr_snapshot_live_base_identity_compares_repository_ref(self):
         page = {
@@ -12144,6 +12182,71 @@ else:
             self.assertEqual(resumed_metadata["template_errors"], "")
             self.assertEqual(resumed_metadata["action_kind"], "")
             self.assertEqual(resumed_metadata["terminal_reason"], "")
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
+
+    def test_closed_invalid_template_remediation_blocks_for_rearm(self):
+        root, env = self._repair_fixture("template-remediation-closed")
+        try:
+            handoff = self._run(env, "handoff", self._HANDOFF)
+            self.assertEqual(handoff.returncode, 0, handoff.stderr)
+            watch_id = self._json(handoff)["watch_id"]
+            payload = {
+                "watch_id": watch_id,
+                "generation": 1,
+                "head_sha": "a" * 40,
+                "template_errors": ["missing-make-check"],
+            }
+            dispatched = self._run(
+                env,
+                "dispatch-template-remediation",
+                payload,
+            )
+            self.assertEqual(dispatched.returncode, 0, dispatched.stderr)
+            remediation_id = self._json(dispatched)["remediation_id"]
+            closed = subprocess.run(
+                [
+                    env["PR_BABYSIT_BEADS_BIN"],
+                    "close",
+                    remediation_id,
+                    "--reason",
+                    "Publisher stopped without correcting the body",
+                    "--json",
+                ],
+                cwd=ROOT,
+                env=os.environ | env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(closed.returncode, 0, closed.stderr)
+            repeated = self._run(
+                env,
+                "dispatch-template-remediation",
+                payload,
+            )
+            self.assertNotEqual(repeated.returncode, 0)
+            self.assertEqual(
+                self._json(repeated)["error"]["code"],
+                "template-remediation-incomplete",
+            )
+            state = self._json(
+                self._run(env, "show", {"watch_id": watch_id})
+            )
+            self.assertEqual(state["metadata"]["state"], "blocked")
+            self.assertEqual(
+                state["metadata"]["claim_status"],
+                "blocked",
+            )
+            self.assertEqual(
+                state["metadata"]["terminal_reason"],
+                "template-remediation-incomplete",
+            )
+            records = json.loads((root / "beads.json").read_text())
+            watch = next(
+                record for record in records if record["id"] == watch_id
+            )
+            self.assertEqual(watch["status"], "blocked")
         finally:
             shutil.rmtree(root, ignore_errors=True)
 

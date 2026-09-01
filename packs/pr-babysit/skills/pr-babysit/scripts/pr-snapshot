@@ -69,6 +69,8 @@ REQUIRED_TEMPLATE_ITEMS = (
     ("changelog", "changelog updated"),
     ("docs-ci", "docs + ci updated in lockstep"),
 )
+MAKE_CHECK_RESULT_MARKER = "result=`passed`"
+MAKE_CHECK_EVIDENCE_RE = re.compile(r"\bevidence=`([^`]+)`")
 
 
 def _error(message: str) -> NoReturn:
@@ -633,11 +635,21 @@ def _template_status(raw: dict[str, Any]) -> dict[str, Any]:
         if not checked_matches:
             errors.append(f"unchecked-{code}")
             continue
-        if code == "make-check" and not any(
-            "success" in label or "passed" in label
-            for label in checked_matches
-        ):
-            errors.append("make-check-not-successful")
+        if code == "make-check":
+            evidence_is_valid = False
+            for label in checked_matches:
+                evidence_match = MAKE_CHECK_EVIDENCE_RE.search(label)
+                if (
+                    MAKE_CHECK_RESULT_MARKER in label
+                    and evidence_match is not None
+                    and "<" not in evidence_match.group(1)
+                    and ">" not in evidence_match.group(1)
+                    and evidence_match.group(1).strip()
+                ):
+                    evidence_is_valid = True
+                    break
+            if not evidence_is_valid:
+                errors.append("make-check-not-successful")
     return {"valid": not errors, "errors": errors}
 
 

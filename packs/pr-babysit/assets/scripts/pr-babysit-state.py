@@ -3231,6 +3231,19 @@ def dispatch_template_remediation(payload: dict[str, Any]) -> dict[str, Any]:
         else:
             remediation_issue, current_metadata = existing
             if remediation_issue.get("status") == "closed":
+                metadata_updates(
+                    watch_id,
+                    {
+                        "state": "blocked",
+                        "claim_status": "blocked",
+                        "template_remediation_id": remediation_id,
+                        "template_errors": template_errors,
+                        "blocker_emitted": "true",
+                        "terminal_reason": "template-remediation-incomplete",
+                    },
+                    status="blocked",
+                    assignee="",
+                )
                 fail(
                     "closed template remediation did not correct the PR body",
                     "template-remediation-incomplete",

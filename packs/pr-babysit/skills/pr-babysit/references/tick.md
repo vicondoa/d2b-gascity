@@ -72,7 +72,10 @@ Only `watching` and `waiting` watches with no action claim are eligible for a
 checkpoint sweep; a confirmed review action may carry its action kind and
 addressed IDs as pending dispositions without losing eligibility. `repairing`
 watches with an open or unconfirmed child wait for the native
-dependency-close wake. The next fresh snapshot must match those IDs to
+dependency-close wake. A `waiting` watch with an open template remediation
+also waits for dependency closure; the routed wake takes a fresh snapshot and
+returns the watch to `watching` only after `template.valid=true`. The next
+fresh snapshot after a confirmed review action must match carried IDs to
 current content identities, run `pr-snapshot mark` for every match, and then
 call `acknowledge-dispositions`; missing or edited IDs remain actionable or
 block.

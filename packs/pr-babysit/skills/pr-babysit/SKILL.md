@@ -221,9 +221,11 @@ It may update only the PR body from truthful evidence. A missing successful
 Only `watching` and `waiting` records without an action claim are eligible for
 the cooldown sweep; a confirmed review carryover may retain its action kind and
 addressed IDs while remaining eligible. A `repairing` record with an open or
-unconfirmed child waits for native dependency closure. A changed head
-invalidates stale claims and evidence. Confirmed repair actions resume from a
-fresh snapshot.
+unconfirmed child waits for native dependency closure. A `waiting` record with
+an open template remediation also waits for dependency closure; its routed
+wake takes a fresh snapshot and checkpoints back to `watching` only after the
+template is valid. A changed head invalidates stale claims and evidence.
+Confirmed repair actions resume from a fresh snapshot.
 
 ## Bounded repair dispatch
 
