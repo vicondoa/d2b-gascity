@@ -144,6 +144,8 @@ SAFE_METADATA_KEYS = {
     "pending_disposition_ids",
     "pending_disposition_head_sha",
     "pending_disposition_generation",
+    "template_remediation_id",
+    "template_errors",
     "formula_attached",
     "formula_root",
     "blocker_emitted",
@@ -1376,6 +1378,8 @@ def initial_watch_metadata(
         "pending_disposition_ids": "",
         "pending_disposition_head_sha": "",
         "pending_disposition_generation": "",
+        "template_remediation_id": "",
+        "template_errors": "",
         "formula_attached": "false",
         "formula_root": "",
         "blocker_emitted": "false",
@@ -1634,6 +1638,8 @@ def clear_claim_updates(
         "pending_disposition_ids": "",
         "pending_disposition_head_sha": "",
         "pending_disposition_generation": "",
+        "template_remediation_id": "",
+        "template_errors": "",
         "formula_attached": "false",
         "formula_root": "",
         "blocker_emitted": "false",
@@ -2276,6 +2282,8 @@ def block_claim_setup_failure(
         "pending_disposition_ids": "",
         "pending_disposition_head_sha": "",
         "pending_disposition_generation": "",
+        "template_remediation_id": "",
+        "template_errors": "",
         "formula_attached": "false",
         "formula_root": "",
         "blocker_emitted": "true",
@@ -3119,6 +3127,171 @@ def route_watch(target: str, watch_id: str, *, wake: bool = True) -> None:
         fail("could not execute Gas City executable", "route-exec")
     if result.returncode:
         fail("Gas City babysitter route failed", "route-failed")
+
+
+def template_remediation_id_for(watch_id: str, generation: int) -> str:
+    return validate_bead_id(
+        f"{watch_id}-template-{generation}",
+        "template_remediation_id",
+    )
+
+
+def dispatch_template_remediation(payload: dict[str, Any]) -> dict[str, Any]:
+    watch_id = validate_watch_id(payload_value(payload, "watch_id", "id"))
+    with watch_lock(watch_id):
+        issue, metadata = show_issue(watch_id)
+        if metadata.get("record_kind") != "watch":
+            fail("requested Beads record is not a watch", "identity-mismatch")
+        require_watch_receipt(metadata, watch_id)
+        current = state_from_metadata(metadata)
+        if current not in {"watching", "waiting"}:
+            fail(
+                f"cannot route template remediation while watch is {current}",
+                "not-claimable",
+            )
+        generation = integer_value(
+            payload_value(payload, "generation", "expected_generation"),
+            "generation",
+        )
+        head_sha = sha_value(
+            payload_value(payload, "head_sha", "expected_head_sha"),
+            "head_sha",
+        )
+        if (
+            generation != generation_from_metadata(metadata)
+            or head_sha != metadata.get("head_sha")
+        ):
+            fail(
+                "template remediation is stale for the current watch",
+                "stale-claim",
+            )
+        if metadata.get("claim_status", "none") in {
+            "claimed",
+            "result-recorded",
+        }:
+            fail(
+                "watch has an unconfirmed action claim",
+                "already-claimed",
+            )
+        template_errors = safe_identifier_list(
+            payload_value(
+                payload,
+                "template_errors",
+                "errors",
+                "error_codes",
+            ),
+            "template_errors",
+        )
+        if not template_errors:
+            fail("template_errors is required", "invalid-request")
+        remediation_id = template_remediation_id_for(watch_id, generation)
+        target = f"{metadata.get('rig', '')}/gc.publisher"
+        remediation_metadata = {
+            "record_kind": "template-remediation",
+            "watch_id": watch_id,
+            "rig": metadata.get("rig", ""),
+            "generation": str(generation),
+            "head_sha": head_sha,
+            "pr_number": metadata.get("pr_number", ""),
+            "url": metadata.get("url", ""),
+            "template_errors": template_errors,
+            "gc.routed_to": target,
+        }
+        existing = show_issue_if_present(remediation_id)
+        created = existing is None
+        if existing is None:
+            description = (
+                f"Update pull request {metadata.get('url', '')} to follow the "
+                "repository pull-request template. Preserve the Summary, "
+                "Validation evidence, and Notes sections; check every required "
+                "item only with truthful evidence, including a successful exact "
+                "`make check`. If that evidence is unavailable, route the work "
+                "back to implementation instead of fabricating it. This is a "
+                "PR-body-only remediation: do not change source, push, merge, "
+                "rebase, or force-push. Template error codes: "
+                f"{template_errors}."
+            )
+            result = run_beads(
+                [
+                    "create",
+                    "--id",
+                    remediation_id,
+                    "--title",
+                    "Correct pull-request template evidence",
+                    "--description",
+                    description,
+                    "--type",
+                    "task",
+                    "--metadata",
+                    canonical_json(remediation_metadata),
+                    "--silent",
+                    "--json",
+                ]
+            )
+            require_beads(result, "template remediation create")
+        else:
+            remediation_issue, current_metadata = existing
+            if remediation_issue.get("status") == "closed":
+                fail(
+                    "closed template remediation did not correct the PR body",
+                    "template-remediation-incomplete",
+                )
+            for key, value in remediation_metadata.items():
+                if current_metadata.get(key) != value:
+                    fail(
+                        "template remediation identity changed",
+                        "identity-mismatch",
+                    )
+        normalize_watch_claim(
+            watch_id,
+            issue,
+            "Hand template remediation to the publisher.",
+        )
+        ensure_action_blocks_watch(remediation_id, watch_id)
+        if created:
+            try:
+                route_watch(target, remediation_id)
+            except StateError:
+                metadata_updates(
+                    watch_id,
+                    {
+                        "state": "blocked",
+                        "claim_status": "blocked",
+                        "template_remediation_id": remediation_id,
+                        "template_errors": template_errors,
+                        "blocker_emitted": "true",
+                        "terminal_reason": "template-route-failed",
+                    },
+                    status="blocked",
+                    assignee="",
+                )
+                raise
+        metadata_updates(
+            watch_id,
+            {
+                "state": "waiting",
+                "claim_status": "none",
+                "action_kind": "template",
+                "template_remediation_id": remediation_id,
+                "template_errors": template_errors,
+                "blocker_emitted": "false",
+                "terminal_reason": "pr-template-invalid",
+            },
+            status="open",
+            assignee="",
+        )
+        return {
+            "ok": True,
+            "action": "dispatch-template-remediation",
+            "watch_id": watch_id,
+            "remediation_id": remediation_id,
+            "generation": generation,
+            "state": "waiting",
+            "target": target,
+            "created": created,
+            "reused": not created,
+            "template_errors": template_errors.split(","),
+        }
 
 
 def publication_handoff(payload: dict[str, Any]) -> dict[str, Any]:
@@ -5162,6 +5335,9 @@ def _checkpoint_locked(
             )
     else:
         updates["claim_status"] = "none"
+    if desired != "waiting":
+        updates["template_remediation_id"] = ""
+        updates["template_errors"] = ""
     updates["terminal_reason"] = (
         reason
         if desired in {"blocked", "exhausted", "terminal"}
@@ -5544,6 +5720,12 @@ def parse_cli_request(argv: list[str]) -> dict[str, Any]:
                 "head_sha",
                 "addressed_thread_ids",
             ),
+            "dispatch-template-remediation": (
+                "watch_id",
+                "generation",
+                "head_sha",
+                "template_errors",
+            ),
             "record-candidate-head": (
                 "watch_id",
                 "action_id",
@@ -5627,6 +5809,8 @@ def dispatch(payload: dict[str, Any]) -> dict[str, Any]:
         return claim_action(payload)
     if action == "dispatch-repair":
         return dispatch_repair(payload)
+    if action == "dispatch-template-remediation":
+        return dispatch_template_remediation(payload)
     if action == "record-candidate-head":
         return record_candidate_head(payload)
     if action == "record-worker-signoff":

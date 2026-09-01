@@ -114,6 +114,13 @@ push; it does not rerun `make check`. Keep the operator-attested
 `contents-write,pull-requests-read` GitHub capability and all Copilot, GitHub,
 and Discord credentials separate.
 
+- Require every watched PR body to follow the canonical template before
+  review or CI babysitting. The required evidence includes a successful exact
+  `make check`. Persist only safe template error codes, never the body.
+  `dispatch-template-remediation` creates one publisher-owned correction bead
+  that blocks the watch; the publisher must route back to implementation when
+  successful gate evidence is missing.
+
 Enable d2b first. The `city-source` rig remains suspended-on-start and must
 not be enabled for live repair until the U8 disposable d2b acceptance passes.
 Static and native credential-free tests cover both targets without mutating

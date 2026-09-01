@@ -63,14 +63,14 @@ verify_projection() {
   marker_value="$(cat "$marker")" || blocker "cannot read $marker"
   [ "$marker_value" = "$commit" ] || blocker "wrong commit in $marker"
 
-  verify_file '50de66f88f3c8ae0f7f416b48af1b19322281fbeccfcdfa90682079c6b535be6' 'SKILL.md'
+  verify_file 'cd1091716c85248e13b5a705fbebaa0408512645daa60da4be4547aa10d599be' 'SKILL.md'
   verify_file '158a3624dd0150de39bdaba507a7685bb887c6f28899b38b1c268492a5a66ceb' 'references/branch-currency.md'
   verify_file 'ae949804f6491ac65bddb4cbacbcbc52f9877e8df6d782febb8fdb2bdfc4c241' 'references/envelope.md'
   verify_file 'aebd3a9955d7fb53e94512e4bdc998dfe7e1ca725fbfde6f902fde8382903034' 'references/pipeline.md'
   verify_file '31d79d87f9e63940714656cb35af5746aed53cc6f263de17a60b4f0e04e6362f' 'references/report.md'
   verify_file '325165b26f0945dc988df09bc8ba6dbc1baad1311a0d39d946b60f3253923e1f' 'references/settle.md'
   verify_file '674b73e99093531d925b0ffe349a651e3ad4dc31ff029777c53175e4df730c3c' 'references/setup.md'
-  verify_file '12b5d100ab2d96b1e14900e1b1b43f789965f26e8bd5ce183f961206b8facd85' 'references/tick.md'
+  verify_file '934b939276fc06b93405b8768db4ab2db4c2cde435bc043e439269934f302559' 'references/tick.md'
   verify_file 'ffa2bbb69316326c9d6f52a6834008c77e095607678292e228f6cd99ad748932' 'references/watch-loop.md'
   verify_file 'dde148a13409b3748e4ad66ff8d114963bbe54b6d039f5d381e43d8e819dd2ff' 'scripts/pr-snapshot'
 }
@@ -213,6 +213,30 @@ INVOCATION_BUDGET_SECONDS="$(
   --invocation-budget-seconds "$INVOCATION_BUDGET_SECONDS"
 ```
 
+Before review feedback, CI, or branch currency, require
+`snapshot.template.valid=true`. The snapshot returns only safe template error
+codes; never persist or execute the PR body. If the template is invalid,
+re-show the watch, join `snapshot.template.errors` with commas, and run:
+
+```text
+gc core-city pr-babysit dispatch-template-remediation \
+  --watch-id <watch-id> \
+  --generation <fresh-show.metadata.generation> \
+  --head-sha <fresh-show.metadata.head_sha> \
+  --template-errors <comma-separated-safe-error-codes> \
+  --json
+```
+
+This creates one deterministic remediation bead, makes it block the watch, and
+slings it to `<rig>/gc.publisher`. Stop after successful dispatch. Do not
+inspect or repair CI in the same checkpoint. The publisher may check the
+`make check` item only from truthful workflow evidence; it must route back to
+implementation when that evidence is absent.
+
+When a waiting watch has `template_remediation_id` and the fresh snapshot now
+reports `template.valid=true`, checkpoint it to `watching` and stop. The next
+checkpoint resumes ordinary review-before-CI ordering.
+
 Every checkpoint is read-only with respect to GitHub and the target source.
 After the fresh snapshot, re-show the watch and take the expected generation
 and head from that fresh response:
@@ -250,7 +274,7 @@ current-snapshot `merge_ready_evidence` object with exact
 `current_head_sha`, `mergeability_certain`, `branch_clean`,
 `required_checks_terminal`, `required_checks_successful`,
 `no_actionable_feedback`, `no_pending_human_interaction`, `no_currency_item`,
-and `quiet_window_satisfied`; its head must match the snapshot's
+`template_followed`, and `quiet_window_satisfied`; its head must match the snapshot's
 `merge_ready_evidence.current_head_sha` and all booleans must be true. Pass
 the `merge_ready_evidence` object emitted by that same snapshot. Use `reason`
 when the state command requires it. Do

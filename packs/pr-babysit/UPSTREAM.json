@@ -15,7 +15,7 @@
       "local": "skills/pr-babysit/SKILL.md",
       "source": "skills/ce-babysit-pr/SKILL.md",
       "sha256": "a611e493ae6979063d71f4990c2f6cda9c9f1a4b114a83717c26c66c4cf4bd90",
-      "local_sha256": "50de66f88f3c8ae0f7f416b48af1b19322281fbeccfcdfa90682079c6b535be6"
+      "local_sha256": "cd1091716c85248e13b5a705fbebaa0408512645daa60da4be4547aa10d599be"
     },
     {
       "local": "skills/pr-babysit/references/branch-currency.md",
@@ -55,7 +55,7 @@
       "local": "skills/pr-babysit/references/tick.md",
       "source": "skills/ce-babysit-pr/references/tick.md",
       "sha256": "cf1fc87e87a3520c9446d997ff09ba2cccacb4a5e0a33f33fb9752325ede820c",
-      "local_sha256": "12b5d100ab2d96b1e14900e1b1b43f789965f26e8bd5ce183f961206b8facd85"
+      "local_sha256": "934b939276fc06b93405b8768db4ab2db4c2cde435bc043e439269934f302559"
     },
     {
       "local": "skills/pr-babysit/references/watch-loop.md",

@@ -151,10 +151,13 @@ Read `references/tick.md` before the first checkpoint. The fixed ordering is:
 1. Take one fresh `pr-snapshot` snapshot with the verified watch identity.
 2. Handle terminal state (`MERGED` or `CLOSED`) first.
 3. Reconcile the observed head before consuming any evidence.
-4. Process all actionable review threads and feedback before CI.
-5. Process only failing checks attached to the current head.
-6. Consume the exact emitted branch-currency item, if any.
-7. Settle or wait, then persist one legal state transition.
+4. Require the pull-request template before all other babysitting work. An
+   invalid template dispatches one deterministic publisher remediation and
+   stops the checkpoint.
+5. Process all actionable review threads and feedback before CI.
+6. Process only failing checks attached to the current head.
+7. Consume the exact emitted branch-currency item, if any.
+8. Settle or wait, then persist one legal state transition.
 
 The canonical checkpoint command is:
 
@@ -192,12 +195,28 @@ When `to=merge-ready`, also provide structured current-snapshot evidence with
 exact fields `current_head_sha`, `mergeability_certain`, `branch_clean`,
 `required_checks_terminal`, `required_checks_successful`,
 `no_actionable_feedback`, `no_pending_human_interaction`,
-`no_currency_item`, and `quiet_window_satisfied`; the head must match the
+`no_currency_item`, `template_followed`, and `quiet_window_satisfied`; the head must match the
 snapshot's `merge_ready_evidence.current_head_sha` and every boolean must be
 true. Pass the `merge_ready_evidence` object emitted by that same snapshot.
 Use `reason` for `blocked` or
 `exhausted` when the command contract requires one. The command is read-only
 with respect to the PR and writes only the durable watch record.
+
+When `snapshot.template.valid=false`, re-show the watch and dispatch exactly
+one remediation before review or CI:
+
+```text
+gc core-city pr-babysit dispatch-template-remediation \
+  --watch-id <watch-id> \
+  --generation <fresh-show.metadata.generation> \
+  --head-sha <fresh-show.metadata.head_sha> \
+  --template-errors <comma-separated-safe-error-codes> \
+  --json
+```
+
+The remediation bead blocks the watch and is slung to `<rig>/gc.publisher`.
+It may update only the PR body from truthful evidence. A missing successful
+`make check` must be routed back to implementation rather than fabricated.
 
 Only `watching` and `waiting` records without an action claim are eligible for
 the cooldown sweep; a confirmed review carryover may retain its action kind and

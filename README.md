@@ -278,10 +278,18 @@ content remains actionable. A claim-free `watching` or `waiting` watch with
 pending dispositions remains eligible for the next sweep, while checkpoints
 still require acknowledgement before another transition.
 
+Every watched pull request must follow the canonical template: `Summary`,
+`Validation evidence`, `Notes`, all required evidence items checked, and a
+truthful successful exact `make check`. Template validation runs before review,
+CI, or branch currency. An invalid body creates one deterministic remediation
+bead, makes it block the watch, and slings it to the owning rig's publisher.
+The publisher may update only the PR body and must route back to implementation
+rather than fabricate missing gate evidence.
+
 The non-network credential check is
 `gc core-city pr-babysit check-credentials --json` with the operator
-attestation `contents-write,pull-requests-read` and the validator attestation;
-it verifies separation but does not introspect fine-grained permissions.
+attestation `contents-write,pull-requests-read`; it verifies separation but
+does not introspect fine-grained permissions.
 
 The d2b rig accepts only `v3`; city-source accepts only `main` and remains
 suspended-on-start. d2b is enabled first. Do not enable city-source for live

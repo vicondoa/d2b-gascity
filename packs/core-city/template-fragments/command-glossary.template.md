@@ -21,6 +21,12 @@ The mutating action-scoped repair dispatch is
 identity and timing flags. `dispatch-repair` requires a complete handoff receipt:
 `handoff_verified=true`, the self watch ID, the binding-qualified target, and
 the publication bead.
+When `pr-snapshot` reports an invalid pull-request template, use
+`gc core-city pr-babysit dispatch-template-remediation --watch-id <watch-id>
+--generation <generation> --head-sha <head-sha>
+--template-errors <comma-separated-safe-error-codes> --json`. It creates one
+deterministic remediation bead, makes it block the watch, and routes it to the
+owning rig's publisher.
 After a confirmed review repair, use
 `gc core-city pr-babysit acknowledge-dispositions --watch-id <watch-id>
 --action-kind <pending-action-kind> --generation <fresh-show-generation>

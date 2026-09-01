@@ -39,6 +39,10 @@ The deterministic state CLI is exposed only through the city-scoped
 `core-city` pack as `gc core-city pr-babysit <action>`, delegating to the
 rig-imported helper without importing that pack city-wide or exposing a second
 command entrypoint.
+Every PR must follow the canonical template and include truthful successful
+`make check` evidence. The babysitter validates the body before review or CI;
+invalid bodies are reduced to safe error codes and slung to the owning
+publisher through one blocking remediation bead.
 Host branch protection for `v3` is defense-in-depth: it must require pull
 requests and apply to administrators. This repository does not claim that the
 current host is already configured that way.
