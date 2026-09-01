@@ -66,7 +66,7 @@
       "local": "skills/pr-babysit/scripts/pr-snapshot",
       "source": "skills/ce-babysit-pr/scripts/pr-snapshot",
       "sha256": "fd8a0b403703714a1257530e7053461e437b662b0ef381f780b8850439d980e7",
-      "local_sha256": "e1baf200b8fed443ef997f03600a42cfaee7bf301b70f48373217c9d554a97e4"
+      "local_sha256": "dde148a13409b3748e4ad66ff8d114963bbe54b6d039f5d381e43d8e819dd2ff"
     }
   ],
   "excluded_surfaces": [

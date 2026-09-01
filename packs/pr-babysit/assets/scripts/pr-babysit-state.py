@@ -1786,6 +1786,9 @@ def _merge_ready_evidence(
             "currency_item",
             "currency",
             "branch_currency",
+            "template_followed",
+            "template_valid",
+            "template",
             "quiet_window_satisfied",
             "quiet_window",
             "quiet_seconds",
@@ -1999,6 +2002,11 @@ def _merge_ready_evidence(
         )
     if "currency_item" not in raw and "branch_currency" in raw:
         raw["currency_item"] = raw.get("branch_currency") is not None
+    if "template_followed" not in raw:
+        if "template_valid" in raw:
+            raw["template_followed"] = raw["template_valid"]
+        elif isinstance(raw.get("template"), dict):
+            raw["template_followed"] = raw["template"].get("valid")
     quiet_window = raw.get("quiet_window")
     if isinstance(quiet_window, dict):
         raw["quiet_window"] = quiet_window.get("satisfied")
@@ -2112,6 +2120,10 @@ def _merge_ready_evidence(
         "no_currency_item",
     )
     require_true(
+        ("template_followed", "template_valid"),
+        "template_followed",
+    )
+    require_true(
         ("quiet_window_satisfied", "quiet_window"),
         "quiet_window_satisfied",
     )
@@ -2124,6 +2136,7 @@ def _merge_ready_evidence(
         "no_actionable_feedback": True,
         "no_pending_human_interaction": True,
         "no_currency_item": True,
+        "template_followed": True,
         "quiet_window_satisfied": True,
     }
 

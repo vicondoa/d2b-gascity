@@ -72,7 +72,7 @@ verify_projection() {
   verify_file '674b73e99093531d925b0ffe349a651e3ad4dc31ff029777c53175e4df730c3c' 'references/setup.md'
   verify_file '12b5d100ab2d96b1e14900e1b1b43f789965f26e8bd5ce183f961206b8facd85' 'references/tick.md'
   verify_file 'ffa2bbb69316326c9d6f52a6834008c77e095607678292e228f6cd99ad748932' 'references/watch-loop.md'
-  verify_file 'e1baf200b8fed443ef997f03600a42cfaee7bf301b70f48373217c9d554a97e4' 'scripts/pr-snapshot'
+  verify_file 'dde148a13409b3748e4ad66ff8d114963bbe54b6d039f5d381e43d8e819dd2ff' 'scripts/pr-snapshot'
 }
 
 for projection in \

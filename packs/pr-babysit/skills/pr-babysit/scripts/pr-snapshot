@@ -51,10 +51,23 @@ SAFE_COMPONENT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
 SAFE_REF = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]*$")
 BASE_IDENTITIES = {"current", "stale", "unknown", "wrong-base"}
 GITHUB_PR_VIEW_JSON_FIELDS = (
-    "state,isDraft,mergeable,mergeStateStatus,reviewDecision,"
+    "state,isDraft,body,mergeable,mergeStateStatus,reviewDecision,"
     "headRefName,headRefOid,baseRefName,baseRefOid,url,"
     "statusCheckRollup,comments,reviews,isCrossRepository,"
     "headRepository,headRepositoryOwner"
+)
+REQUIRED_TEMPLATE_SECTIONS = (
+    ("summary", "summary"),
+    ("validation-evidence", "validation evidence"),
+    ("notes", "notes"),
+)
+REQUIRED_TEMPLATE_ITEMS = (
+    ("focused-tests", "focused tests"),
+    ("make-check", "make check"),
+    ("wider-lanes", "wider lanes"),
+    ("owner-local-tests", "changed tests are owner-local"),
+    ("changelog", "changelog updated"),
+    ("docs-ci", "docs + ci updated in lockstep"),
 )
 
 
@@ -545,6 +558,7 @@ def _normalize(
     base = _normalize_base(raw, expected_base=expected_base)
     head_identity = _normalize_head_identity(raw, repo=repo)
 
+    template = _template_status(raw)
     result = {
         "pr": pr,
         "repo": repo,
@@ -562,6 +576,7 @@ def _normalize(
         ),
         "review_in_progress": bool(raw.get("review_in_progress", False)),
         "review_signal_count": int(raw.get("review_signal_count", 0) or 0),
+        "template": template,
         "awaiting_approval": raw.get("awaiting_approval", 0),
         "host_branch_update_capability": raw.get(
             "host_branch_update_capability", "unknown"
@@ -581,6 +596,49 @@ def _normalize(
                 f"https://{host or 'github.com'}/{owner}/{name}/pull/{pr}"
             )
     return result
+
+
+def _template_status(raw: dict[str, Any]) -> dict[str, Any]:
+    if "body" not in raw:
+        return {"valid": True, "errors": []}
+    body = str(raw.get("body") or "")
+    errors: list[str] = []
+    headings = {
+        match.group(1).strip().casefold()
+        for match in re.finditer(r"(?m)^##[ \t]+(.+?)[ \t]*$", body)
+    }
+    for code, heading in REQUIRED_TEMPLATE_SECTIONS:
+        if heading not in headings:
+            errors.append(f"missing-{code}")
+    checkboxes = [
+        (
+            match.group(1).casefold() == "x",
+            " ".join(match.group(2).casefold().split()),
+        )
+        for match in re.finditer(
+            r"(?mi)^[ \t]*[-*][ \t]+\[([ x])\][ \t]+(.+)$",
+            body,
+        )
+    ]
+    for code, marker in REQUIRED_TEMPLATE_ITEMS:
+        matches = [
+            (checked, label)
+            for checked, label in checkboxes
+            if marker in label
+        ]
+        if not matches:
+            errors.append(f"missing-{code}")
+            continue
+        checked_matches = [label for checked, label in matches if checked]
+        if not checked_matches:
+            errors.append(f"unchecked-{code}")
+            continue
+        if code == "make-check" and not any(
+            "success" in label or "passed" in label
+            for label in checked_matches
+        ):
+            errors.append("make-check-not-successful")
+    return {"valid": not errors, "errors": errors}
 
 
 def _fetch(args: argparse.Namespace) -> dict[str, Any]:
@@ -1332,6 +1390,7 @@ def _snapshot(
         "merge_state_status": current.get("merge_state_status"),
         "review_decision": current.get("review_decision"),
         "review_in_progress": current.get("review_in_progress"),
+        "template": current.get("template"),
         "base": current.get("base"),
         "head_ref": current.get("head_ref"),
         "head_repository": current.get("head_repository"),
@@ -1425,6 +1484,9 @@ def _snapshot(
             and not current.get("review_in_progress", False)
         ),
         "no_currency_item": currency is None,
+        "template_followed": bool(
+            (current.get("template") or {}).get("valid", False)
+        ),
         "quiet_window_satisfied": (
             _elapsed(state.get("last_change_at")) >= QUIET_WINDOW_SECONDS
             and not current.get("review_in_progress", False)

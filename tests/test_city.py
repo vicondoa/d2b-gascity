@@ -33,6 +33,7 @@ MERGE_READY_EVIDENCE = {
     "no_actionable_feedback": True,
     "no_pending_human_interaction": True,
     "no_currency_item": True,
+    "template_followed": True,
     "quiet_window_satisfied": True,
 }
 
@@ -96,6 +97,7 @@ CORE_PACK_FILES = (
     "template-fragments/sdlc-mayor-coding-rules.template.md",
 )
 AUTHORED_FILES = (
+    ".github/PULL_REQUEST_TEMPLATE.md",
     *(str(CITY_RELATIVE / relative) for relative in CITY_AUTHORED_FILES),
     *(str(CORE_PACK_RELATIVE / relative) for relative in CORE_PACK_FILES),
 )
@@ -212,7 +214,7 @@ PR_BABYSIT_FILES = {
             "b8850439d980e7"
         ),
         "local_sha256": (
-            "e1baf200b8fed443ef997f03600a42cfaee7bf301b70f48373217c9d554a97e4"
+            "dde148a13409b3748e4ad66ff8d114963bbe54b6d039f5d381e43d8e819dd2ff"
         ),
     },
 }
@@ -445,6 +447,25 @@ def _complete_test_receipt(
 
 
 class RootPortableCityTests(unittest.TestCase):
+    def test_pull_request_template_requires_successful_make_check(self) -> None:
+        template = (
+            ROOT / ".github" / "PULL_REQUEST_TEMPLATE.md"
+        ).read_text(encoding="utf-8")
+        normalized = " ".join(template.lower().split())
+        for marker in (
+            "## summary",
+            "## validation evidence",
+            "## notes",
+            "focused tests",
+            "make check",
+            "successful result",
+            "wider lanes",
+            "changed tests are owner-local",
+            "changelog updated",
+            "docs + ci updated in lockstep",
+        ):
+            self.assertIn(marker, normalized)
+
     def test_nested_layout_has_only_authored_city_files(self) -> None:
         for relative in AUTHORED_FILES:
             self.assertTrue((ROOT / relative).is_file(), relative)
@@ -3197,8 +3218,75 @@ class VendoredPrBabysitTests(unittest.TestCase):
                             "no_actionable_feedback",
                             "no_pending_human_interaction",
                             "no_currency_item",
+                            "template_followed",
                             "quiet_window_satisfied",
                         },
+                    )
+                finally:
+                    shutil.rmtree(root, ignore_errors=True)
+
+    def test_pr_snapshot_validates_required_pull_request_template(self):
+        valid_body = """## Summary
+
+Template-compliant change.
+
+## Validation evidence
+
+- [x] **Focused tests for the changed components** were run.
+- [x] **Repository gate passed:** `make check` completed successfully.
+- [x] **Wider lanes are conditional.**
+- [x] **Changed tests are owner-local.**
+- [x] **Changelog updated.**
+- [x] **Docs + CI updated in lockstep.**
+
+## Notes
+
+No additional notes.
+"""
+        cases = (
+            ("valid", valid_body, True, []),
+            (
+                "missing-make-check",
+                valid_body.replace(
+                    "- [x] **Repository gate passed:** `make check` completed successfully.\n",
+                    "",
+                ),
+                False,
+                ["missing-make-check"],
+            ),
+            (
+                "unchecked",
+                valid_body.replace(
+                    "- [x] **Changelog updated.**",
+                    "- [ ] **Changelog updated.**",
+                ),
+                False,
+                ["unchecked-changelog"],
+            ),
+        )
+        for name, body, valid, expected_errors in cases:
+            with self.subTest(name=name):
+                root = _temporary_root(f"snapshot-template-{name}-")
+                try:
+                    result, _ = self._snapshot_fixture(
+                        root,
+                        base={
+                            "ref": "main",
+                            "oid": "b" * 40,
+                            "current_oid": "b" * 40,
+                        },
+                        extra={"body": body},
+                    )
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    snapshot = json.loads(result.stdout)
+                    self.assertEqual(snapshot["template"]["valid"], valid)
+                    self.assertEqual(
+                        snapshot["template"]["errors"],
+                        expected_errors,
+                    )
+                    self.assertEqual(
+                        snapshot["merge_ready_evidence"]["template_followed"],
+                        valid,
                     )
                 finally:
                     shutil.rmtree(root, ignore_errors=True)
