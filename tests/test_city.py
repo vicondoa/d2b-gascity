@@ -12159,6 +12159,23 @@ else:
                 check=False,
             )
             self.assertEqual(closed.returncode, 0, closed.stderr)
+            due_after_close = self._run(
+                env | {"PR_BABYSIT_NOW": "2026-08-29T19:06:00Z"},
+                "list-due",
+                {"rig": "d2b"},
+            )
+            self.assertEqual(
+                due_after_close.returncode,
+                0,
+                due_after_close.stderr,
+            )
+            self.assertEqual(
+                [
+                    item["watch_id"]
+                    for item in self._json(due_after_close)["watches"]
+                ],
+                [watch_id],
+            )
             resumed = self._run(
                 env,
                 "checkpoint",
@@ -12220,6 +12237,23 @@ else:
                 check=False,
             )
             self.assertEqual(closed.returncode, 0, closed.stderr)
+            due_after_close = self._run(
+                env | {"PR_BABYSIT_NOW": "2026-08-29T19:06:00Z"},
+                "list-due",
+                {"rig": "d2b"},
+            )
+            self.assertEqual(
+                due_after_close.returncode,
+                0,
+                due_after_close.stderr,
+            )
+            self.assertEqual(
+                [
+                    item["watch_id"]
+                    for item in self._json(due_after_close)["watches"]
+                ],
+                [watch_id],
+            )
             repeated = self._run(
                 env,
                 "dispatch-template-remediation",

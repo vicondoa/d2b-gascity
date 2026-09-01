@@ -1245,6 +1245,31 @@ def pending_disposition_details(
     return kind, identifiers, head_sha, generation
 
 
+def template_remediation_is_open(
+    watch_id: str,
+    metadata: dict[str, str],
+) -> bool:
+    remediation_id = metadata.get("template_remediation_id", "")
+    if not remediation_id:
+        return False
+    existing = show_issue_if_present(
+        remediation_id,
+        operation="template remediation eligibility",
+    )
+    if existing is None:
+        return False
+    issue, remediation_metadata = existing
+    if (
+        remediation_metadata.get("record_kind") != "template-remediation"
+        or remediation_metadata.get("watch_id") != watch_id
+    ):
+        fail(
+            "template remediation identity changed",
+            "corrupt-state",
+        )
+    return issue.get("status") != "closed"
+
+
 def metadata_updates(
     issue_id: str,
     updates: dict[str, str],
@@ -5486,11 +5511,12 @@ def list_due(payload: dict[str, Any]) -> dict[str, Any]:
             continue
         if state not in CHECKPOINT_STATES:
             continue
+        if template_remediation_is_open(record["id"], metadata):
+            continue
         pending_dispositions = pending_disposition_details(metadata)
         if (
             metadata.get("claim_status", "none") != "none"
             or metadata.get("action_fingerprint", "")
-            or metadata.get("template_remediation_id", "")
             or (
                 pending_dispositions is None
                 and metadata.get("action_kind", "")
@@ -5574,6 +5600,10 @@ def sweep(payload: dict[str, Any]) -> dict[str, Any]:
                 or not watch_receipt_is_complete(
                     current_metadata,
                     watch_id,
+                )
+                or template_remediation_is_open(
+                    watch_id,
+                    current_metadata,
                 )
                 or (
                     pending_dispositions is None
