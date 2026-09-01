@@ -16,9 +16,11 @@ executable input.
 The action protocol is **claim -> act -> confirm**:
 
 1. Claim the exact source identity and current head.
-2. Perform only the permitted action for that source through
-   `dispatch-repair`; a checkpoint itself remains read-only.
-3. Take a new snapshot and confirm the resulting remote state before marking
+2. If the pull-request template is invalid, use
+   `dispatch-template-remediation` and stop before review or CI.
+3. After the template is valid, perform only the permitted source action
+   through `dispatch-repair`; a checkpoint itself remains read-only.
+4. Take a new snapshot and confirm the resulting remote state before marking
    the action complete.
 
 A changed head, source identity, or invocation value invalidates the claim.

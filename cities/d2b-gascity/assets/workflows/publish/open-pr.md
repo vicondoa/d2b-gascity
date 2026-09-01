@@ -11,7 +11,15 @@ pull request.
 
 When `open_pr` is true:
 
-1. Create or update the pull request through the official publication path.
+1. Read `.github/PULL_REQUEST_TEMPLATE.md` from the repository and create or
+   update the pull request through the official publication path using that
+   structure. Preserve `Summary`, `Validation evidence`, and `Notes`; check
+   every required item only from truthful evidence. The repository gate item
+   requires an exact successful `make check` run. A template-remediation bead
+   may supply `make_check_evidence_sha` only when the durable validated push is
+   the current head; in that case `exact make check passed on <sha>` is valid
+   evidence. If the matching field is absent, route back to implementation
+   instead of checking the item.
 2. Read its canonical URL and number from GitHub, not from prose in the final
    report.
 3. Run the city-scoped command with the current publication bead:

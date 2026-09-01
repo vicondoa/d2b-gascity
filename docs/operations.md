@@ -351,6 +351,21 @@ Publication may close only after
 gc core-city pr-babysit show --watch-id <watch-id> --json
 ```
 
+Additional source work on an already watched pull request must stay on its
+current head and use the existing repair fence:
+
+```text
+gc core-city pr-babysit dispatch-requested-repair \
+  --watch-id <watch-id> --generation <generation> \
+  --head-sha <current-head-sha> --work-bead-id <work-bead-id> \
+  --rearm true --json
+```
+
+Do not sling that bead through generic `do-work`; that workflow starts from the
+repository target branch and does not bind the current PR head. The requested
+repair command creates one action child, exact-head detached worktree,
+implementation-worker signoff, Grok reviewer verdict, and normal-push fence.
+
 The handoff result carries
 `target=<rig>/pr-babysit.pr-babysitter`, stored as `handoff_target` in the
 receipt metadata. The watch record carries
@@ -497,6 +512,30 @@ threads. After a confirmed review repair, record each addressed thread,
 comment, or review locally with `pr-snapshot mark` and its current
 content identity using `handled` or `ignored`; changed content reopens the
 item.
+
+### Pull-request template gate
+
+Before review feedback, CI, or branch currency, the snapshot validates the PR
+body against the canonical template. It requires `Summary`, `Validation
+evidence`, and `Notes`, plus checked entries for focused tests, successful
+exact `make check`, wider lanes, owner-local tests, changelog, and docs/CI.
+Only safe error codes leave the snapshot; body text is never persisted.
+
+For an invalid body, the babysitter runs:
+
+```text
+gc core-city pr-babysit dispatch-template-remediation \
+  --watch-id <watch-id> --generation <generation> \
+  --head-sha <head-sha> \
+  --template-errors <comma-separated-safe-error-codes> --json
+```
+
+The command creates one deterministic remediation bead, links it as a blocker
+of the watch, and slings it to `<rig>/gc.publisher`. The publisher changes only
+the PR body. It checks the `make check` item only from actual successful
+workflow evidence and routes back to implementation when evidence is absent.
+Closing the remediation wakes the waiting watch; a valid fresh snapshot
+returns it to `watching`.
 
 The operator may verify the attestation and token separation without a GitHub
 request:

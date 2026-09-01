@@ -29,16 +29,21 @@ gc core-city pr-babysit checkpoint --watch-id <watch-id> \
    absorbing `terminal` state.
 3. **Reconcile head.** Capture the current head SHA; stale-SHA cancellation
    invalidates stale claims and all evidence from the previous head.
-4. **Review feedback.** Handle every actionable thread and non-thread
+4. **Pull-request template.** Require `snapshot.template.valid=true` before
+   review, CI, or branch currency. An invalid template dispatches one
+   deterministic publisher remediation bead that blocks the watch. Stop that
+   checkpoint after dispatch. When the body becomes valid, transition the
+   waiting watch to `watching` before resuming other work.
+5. **Review feedback.** Handle every actionable thread and non-thread
    feedback candidate in one bounded pass.
-5. **Current-head CI.** Handle only failing checks for the captured SHA.
+6. **Current-head CI.** Handle only failing checks for the captured SHA.
    Running checks are waiting evidence, not repair work.
-6. **Exact branch currency.** Consume only the emitted item. When
+7. **Exact branch currency.** Consume only the emitted item. When
    `branch_currency=null`, branch-update capability is irrelevant and must not
    prevent CI or review repair. When a branch-currency item is present,
    `BEHIND`, `DIRTY`, `CONFLICTING`, and unknown capability are human blockers;
    do not invoke a branch update operation.
-7. **Settle or wait.** Re-show the watch immediately before the checkpoint
+8. **Settle or wait.** Re-show the watch immediately before the checkpoint
    and use that fresh generation and head as its expected values. Evaluate the
    current snapshot, then persist one
    checkpoint with the expected generation and head, observed head, last
@@ -47,7 +52,7 @@ gc core-city pr-babysit checkpoint --watch-id <watch-id> \
    `current_head_sha`, `mergeability_certain`, `branch_clean`,
    `required_checks_terminal`, `required_checks_successful`,
    `no_actionable_feedback`, `no_pending_human_interaction`,
-   `no_currency_item`, and `quiet_window_satisfied`, all true with the head
+   `no_currency_item`, `template_followed`, and `quiet_window_satisfied`, all true with the head
    matching the snapshot. Pass the `merge_ready_evidence` object emitted by
    that same snapshot.
 
@@ -67,10 +72,17 @@ Only `watching` and `waiting` watches with no action claim are eligible for a
 checkpoint sweep; a confirmed review action may carry its action kind and
 addressed IDs as pending dispositions without losing eligibility. `repairing`
 watches with an open or unconfirmed child wait for the native
-dependency-close wake. The next fresh snapshot must match those IDs to
-current content identities, run `pr-snapshot mark` for every match, and then
-call `acknowledge-dispositions`; missing or edited IDs remain actionable or
-block.
+dependency-close wake. A `waiting` watch with an open template remediation
+also waits for dependency closure; the routed wake takes a fresh snapshot and
+returns the watch to `watching` only after `template.valid=true`. The next
+cooldown sweep queues one leased nudge when that publisher remediation remains
+open and unclaimed for a full interval; it does not inspect or persist the PR
+body. A due watch receives one queued session nudge rather than a sling reminder
+plus a second message. Its five-minute delivery lease stays set until this
+checkpoint clears it. The next fresh snapshot after a confirmed review action
+must match carried IDs to current content identities, run `pr-snapshot mark`
+for every match, and then call `acknowledge-dispositions`; missing or edited
+IDs remain actionable or block.
 A confirmed action starts the next checkpoint from a fresh snapshot.
 
 `waiting` may settle to `merge-ready` or `blocked`, or return to `watching`.

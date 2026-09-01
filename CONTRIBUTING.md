@@ -93,6 +93,11 @@ state.
 - Keep portable source in Git. Keep credentials, runtime state, logs,
   prompts, responses, mappings, bindings, and host configuration outside the
   repository.
+- Keep PR bodies on the canonical `Summary` / `Validation evidence` / `Notes`
+  template. All required evidence items must be checked truthfully, including
+  an exact successful `make check`. The babysitter validates this before
+  review or CI and routes invalid bodies back through a publisher remediation
+  bead.
 - Use native Gas City lifecycle and imported pack services; do not add a
   wrapper, relay, duplicate service, or publication helper.
 

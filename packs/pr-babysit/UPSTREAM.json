@@ -15,7 +15,7 @@
       "local": "skills/pr-babysit/SKILL.md",
       "source": "skills/ce-babysit-pr/SKILL.md",
       "sha256": "a611e493ae6979063d71f4990c2f6cda9c9f1a4b114a83717c26c66c4cf4bd90",
-      "local_sha256": "50de66f88f3c8ae0f7f416b48af1b19322281fbeccfcdfa90682079c6b535be6"
+      "local_sha256": "fa6e211b9dd84a4346be02aa76ed55a9121c2dd1584b712c1c51239362d9d9a6"
     },
     {
       "local": "skills/pr-babysit/references/branch-currency.md",
@@ -43,7 +43,7 @@
       "local": "skills/pr-babysit/references/settle.md",
       "source": "skills/ce-babysit-pr/references/settle.md",
       "sha256": "e83f49cb2511f68cf9131584737b73a91ae9a2a92435f7fd70cba40b99fc1759",
-      "local_sha256": "325165b26f0945dc988df09bc8ba6dbc1baad1311a0d39d946b60f3253923e1f"
+      "local_sha256": "718a6f31a11af8147166dea2273bbe54541e4bcac562ae09559c690f6efd233a"
     },
     {
       "local": "skills/pr-babysit/references/setup.md",
@@ -55,18 +55,19 @@
       "local": "skills/pr-babysit/references/tick.md",
       "source": "skills/ce-babysit-pr/references/tick.md",
       "sha256": "cf1fc87e87a3520c9446d997ff09ba2cccacb4a5e0a33f33fb9752325ede820c",
-      "local_sha256": "12b5d100ab2d96b1e14900e1b1b43f789965f26e8bd5ce183f961206b8facd85"
+      "local_sha256": "9b4850ed8f0148c008f3889b5aa8f6d1e5a8b113a07db119a0f96e55feed7c40"
     },
     {
       "local": "skills/pr-babysit/references/watch-loop.md",
       "source": "skills/ce-babysit-pr/references/watch-loop.md",
-      "sha256": "f2abb846f4a5fd20468c7e5a4eefa4bf2929d7dcd6256da9442b751b96213f67"
+      "sha256": "f2abb846f4a5fd20468c7e5a4eefa4bf2929d7dcd6256da9442b751b96213f67",
+      "local_sha256": "cba5e2009e7571a754a24bbf51ba114b27c4ea87ada04ba8b8402a8b99853fdb"
     },
     {
       "local": "skills/pr-babysit/scripts/pr-snapshot",
       "source": "skills/ce-babysit-pr/scripts/pr-snapshot",
       "sha256": "fd8a0b403703714a1257530e7053461e437b662b0ef381f780b8850439d980e7",
-      "local_sha256": "e1baf200b8fed443ef997f03600a42cfaee7bf301b70f48373217c9d554a97e4"
+      "local_sha256": "a4f68cea8b7f9e2e1e096d26ca962721d67cffd03060d6299d0f38f53b1667f0"
     }
   ],
   "excluded_surfaces": [
@@ -93,6 +94,8 @@
     "Key repair attempt budgets by action kind, fingerprint, and observed head SHA.",
     "Bind repair validation to a persisted candidate head and independent reviewer verdict.",
     "Require structured current-snapshot merge-ready evidence and use crash-safe same-directory state writes.",
-    "Expose the deterministic state CLI through the city-scoped core-city pack and keep the rig-imported pack command-free."
+    "Expose the deterministic state CLI through the city-scoped core-city pack and keep the rig-imported pack command-free.",
+    "Require canonical pull-request template evidence before review or CI and route invalid bodies to a publisher-only remediation.",
+    "Carry current-head validated make-check evidence into remediation, recover native session delivery through the cooldown sweep, and bind requested existing-PR work to the exact-head repair formula."
   ]
 }

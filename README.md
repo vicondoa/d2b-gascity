@@ -170,6 +170,20 @@ The deterministic state CLI is exposed by the already city-scoped
 `core-city` pack as `gc core-city pr-babysit <action>` and delegates to the
 rig pack's sibling state helper; the rig pack has no second command
 entrypoint.
+When an operator adds source work to an already watched pull request, bind the
+requested-work bead to the watch instead of starting generic branch work:
+
+```text
+gc core-city pr-babysit dispatch-requested-repair \
+  --watch-id <watch-id> --generation <generation> \
+  --head-sha <current-head-sha> --work-bead-id <work-bead-id> \
+  --rearm true --json
+```
+
+The command explicitly rearms stopped watches, then reuses the current PR head,
+single action child, configured implementation worker and reviewer, and one
+normal push. The `1m` sweep also recovers drained named babysitters and stale
+unclaimed publisher remediations through native session reset/nudge APIs.
 The binding-qualified native identities are
 `d2b/pr-babysit.pr-babysitter` and
 `city-source/pr-babysit.pr-babysitter`; each is a fresh, on-demand
@@ -278,10 +292,18 @@ content remains actionable. A claim-free `watching` or `waiting` watch with
 pending dispositions remains eligible for the next sweep, while checkpoints
 still require acknowledgement before another transition.
 
+Every watched pull request must follow the canonical template: `Summary`,
+`Validation evidence`, `Notes`, all required evidence items checked, and a
+truthful successful exact `make check`. Template validation runs before review,
+CI, or branch currency. An invalid body creates one deterministic remediation
+bead, makes it block the watch, and slings it to the owning rig's publisher.
+The publisher may update only the PR body and must route back to implementation
+rather than fabricate missing gate evidence.
+
 The non-network credential check is
 `gc core-city pr-babysit check-credentials --json` with the operator
-attestation `contents-write,pull-requests-read` and the validator attestation;
-it verifies separation but does not introspect fine-grained permissions.
+attestation `contents-write,pull-requests-read`; it verifies separation but
+does not introspect fine-grained permissions.
 
 The d2b rig accepts only `v3`; city-source accepts only `main` and remains
 suspended-on-start. d2b is enabled first. Do not enable city-source for live

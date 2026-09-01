@@ -11,6 +11,12 @@ Use the official Gas City pack workflows (`build-basic`, `implement`,
 `github-issue-fix`, and `publish`) and the Discord `mol-d2b-discord-fix-issue`
 extension. The extension is product-only because its workspace setup targets
 `origin/v3`; never use it for city-source work.
+Those generic workflows start new branch work from the repository target. They
+must not be used to add operator-requested source changes to an already watched
+pull request. Bind that work bead through
+`gc core-city pr-babysit dispatch-requested-repair` so the existing PR head,
+single action claim, configured reviewer, and one-push fence remain
+authoritative.
 
 For the `city-source` rig, keep `d2b-gascity` source work targeted to `main`.
 Every work bead handed to publication must carry `metadata.target=main` and
@@ -39,6 +45,10 @@ The deterministic state CLI is exposed only through the city-scoped
 `core-city` pack as `gc core-city pr-babysit <action>`, delegating to the
 rig-imported helper without importing that pack city-wide or exposing a second
 command entrypoint.
+Every PR must follow the canonical template and include truthful successful
+`make check` evidence. The babysitter validates the body before review or CI;
+invalid bodies are reduced to safe error codes and slung to the owning
+publisher through one blocking remediation bead.
 Host branch protection for `v3` is defense-in-depth: it must require pull
 requests and apply to administrators. This repository does not claim that the
 current host is already configured that way.

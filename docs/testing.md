@@ -197,14 +197,19 @@ independent reviewer binds its verdict to that candidate. Run-operator verifies
 those records, worktree cleanliness, origin identity, and the unchanged remote
 head before one normal push; it does not rerun `make check`.
 Fork or cross-repository PRs are human blockers in v1.
+
+Template coverage proves that PR bodies expose the canonical three sections,
+all required checklist items, and successful exact `make check` evidence.
+Invalid bodies must produce only safe error codes and one idempotent publisher
+remediation bead that blocks the watch until closed. A valid follow-up
+snapshot clears remediation state before review or CI resumes.
+
 Before credentialed fetch or push, the repair workflow verifies that `origin`
 and any configured push URL map exactly to the recorded GitHub
 host/owner/repository, disables Git hooks with
 `-c core.hooksPath=/dev/null`, and pushes with `--no-verify`.
 The credential-free `gc core-city pr-babysit check-credentials --json`
-command verifies the operator capability, validator attestation, lowercase
-SHA-256 format, and token separation only; it does not replace binding the
-hash to the executable or running the validator.
+command verifies the operator capability and token separation only.
 
 d2b is enabled first. The `city-source` rig remains suspended-on-start and
 must not be enabled for live repair until the U8 disposable d2b acceptance

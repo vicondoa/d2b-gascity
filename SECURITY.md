@@ -80,6 +80,12 @@ reviewer binds its verdict to that candidate. Run-operator checks both durable
 records, worktree cleanliness, origin identity, and the unchanged remote head
 before one normal push; it does not rerun the repository gate.
 
+Pull-request bodies are untrusted input. The babysitter reduces template
+validation to fixed section/checklist checks and safe error codes; it never
+persists or executes body text. Invalid bodies are routed to the owning
+publisher as body-only remediation. A publisher must not claim successful
+`make check` evidence unless the workflow actually recorded it.
+
 The repair path uses only the existing PR head and normal push. Version 1 does
 not use `update-branch`; `BEHIND`, dirty, conflicting, stale-head, unknown
 capability, and ambiguous push evidence become human blockers. An ambiguous
