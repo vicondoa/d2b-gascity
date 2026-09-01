@@ -1080,6 +1080,39 @@ def show_issue_if_present(
         raise
 
 
+def raw_metadata_from_issue(issue: dict[str, Any]) -> dict[str, Any]:
+    raw = issue.get("metadata", {})
+    if raw is None:
+        return {}
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except json.JSONDecodeError:
+            fail("Beads metadata is not valid JSON", "corrupt-state")
+    if not isinstance(raw, dict):
+        fail("Beads metadata must be an object", "corrupt-state")
+    return raw
+
+
+def show_bead_record_if_present(
+    bead_id: str,
+    *,
+    operation: str,
+) -> dict[str, Any] | None:
+    bead_id = validate_bead_id(bead_id)
+    result = run_beads(["show", bead_id, "--json"])
+    if not result.ok:
+        error = beads_error(result, operation)
+        if error.code == "beads-not-found":
+            return None
+        raise error
+    payload = require_beads(result, operation)
+    issue = issue_from_payload(payload)
+    if issue.get("id") != bead_id:
+        fail("Beads returned a different issue ID", "beads-invalid-response")
+    return issue
+
+
 def action_records_for_watch(watch_id: str) -> list[tuple[dict[str, Any], dict[str, str]]]:
     """Return every durable action recorded for a watch.
 
@@ -1252,13 +1285,13 @@ def template_remediation_is_open(
     remediation_id = metadata.get("template_remediation_id", "")
     if not remediation_id:
         return False
-    existing = show_issue_if_present(
+    issue = show_bead_record_if_present(
         remediation_id,
         operation="template remediation eligibility",
     )
-    if existing is None:
+    if issue is None:
         return False
-    issue, remediation_metadata = existing
+    remediation_metadata = raw_metadata_from_issue(issue)
     if (
         remediation_metadata.get("record_kind") != "template-remediation"
         or remediation_metadata.get("watch_id") != watch_id
@@ -3221,9 +3254,12 @@ def dispatch_template_remediation(payload: dict[str, Any]) -> dict[str, Any]:
             "template_errors": template_errors,
             "gc.routed_to": target,
         }
-        existing = show_issue_if_present(remediation_id)
-        created = existing is None
-        if existing is None:
+        remediation_issue = show_bead_record_if_present(
+            remediation_id,
+            operation="template remediation show",
+        )
+        created = remediation_issue is None
+        if remediation_issue is None:
             description = (
                 f"Update pull request {metadata.get('url', '')} to follow the "
                 "repository pull-request template. Preserve the Summary, "
@@ -3254,7 +3290,7 @@ def dispatch_template_remediation(payload: dict[str, Any]) -> dict[str, Any]:
             )
             require_beads(result, "template remediation create")
         else:
-            remediation_issue, current_metadata = existing
+            current_metadata = raw_metadata_from_issue(remediation_issue)
             if remediation_issue.get("status") == "closed":
                 metadata_updates(
                     watch_id,

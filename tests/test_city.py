@@ -12237,6 +12237,23 @@ else:
                 check=False,
             )
             self.assertEqual(closed.returncode, 0, closed.stderr)
+            records = json.loads((root / "beads.json").read_text())
+            remediation = next(
+                record for record in records if record["id"] == remediation_id
+            )
+            remediation["metadata"].update(
+                {
+                    "gc.failure_class": "missing-make-check-evidence",
+                    "gc.failure_reason": "No truthful evidence is available.",
+                    "gc.outcome": "fail",
+                    "gc.work_outcome": "blocked",
+                }
+            )
+            (root / "beads.json").write_text(
+                json.dumps(records, sort_keys=True, separators=(",", ":"))
+                + "\n",
+                encoding="utf-8",
+            )
             due_after_close = self._run(
                 env | {"PR_BABYSIT_NOW": "2026-08-29T19:06:00Z"},
                 "list-due",
