@@ -3201,7 +3201,7 @@ def route_watch(target: str, watch_id: str, *, wake: bool = True) -> None:
             target,
             f"Work is queued for Beads record {watch_id}. Run gc hook and claim it.",
             "--delivery",
-            "wait-idle",
+            "queue",
             "--json",
         ]
         try:

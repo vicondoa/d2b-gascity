@@ -7582,6 +7582,7 @@ else:
                 "d2b/pr-babysit.pr-babysitter",
                 calls[1],
             )
+            self.assertIn("queue", calls[1])
             self.assertTrue(
                 any(watch_id in argument for argument in calls[1])
             )
