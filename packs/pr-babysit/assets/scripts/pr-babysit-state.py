@@ -1793,7 +1793,6 @@ def _merge_ready_evidence(
             "currency",
             "branch_currency",
             "template_followed",
-            "template_valid",
             "template",
             "quiet_window_satisfied",
             "quiet_window",
@@ -2008,11 +2007,11 @@ def _merge_ready_evidence(
         )
     if "currency_item" not in raw and "branch_currency" in raw:
         raw["currency_item"] = raw.get("branch_currency") is not None
-    if "template_followed" not in raw:
-        if "template_valid" in raw:
-            raw["template_followed"] = raw["template_valid"]
-        elif isinstance(raw.get("template"), dict):
-            raw["template_followed"] = raw["template"].get("valid")
+    if (
+        "template_followed" not in raw
+        and isinstance(raw.get("template"), dict)
+    ):
+        raw["template_followed"] = raw["template"].get("valid")
     quiet_window = raw.get("quiet_window")
     if isinstance(quiet_window, dict):
         raw["quiet_window"] = quiet_window.get("satisfied")
@@ -2126,7 +2125,7 @@ def _merge_ready_evidence(
         "no_currency_item",
     )
     require_true(
-        ("template_followed", "template_valid"),
+        ("template_followed",),
         "template_followed",
     )
     require_true(
@@ -3266,20 +3265,21 @@ def dispatch_template_remediation(payload: dict[str, Any]) -> dict[str, Any]:
                     assignee="",
                 )
                 raise
-        metadata_updates(
-            watch_id,
-            {
-                "state": "waiting",
-                "claim_status": "none",
-                "action_kind": "template",
-                "template_remediation_id": remediation_id,
-                "template_errors": template_errors,
-                "blocker_emitted": "false",
-                "terminal_reason": "pr-template-invalid",
-            },
-            status="open",
-            assignee="",
-        )
+        updates = {
+            "state": "waiting",
+            "claim_status": "none",
+            "template_remediation_id": remediation_id,
+            "template_errors": template_errors,
+            "blocker_emitted": "false",
+            "terminal_reason": "",
+        }
+        if any(metadata.get(key) != value for key, value in updates.items()):
+            metadata_updates(
+                watch_id,
+                updates,
+                status="open",
+                assignee="",
+            )
         return {
             "ok": True,
             "action": "dispatch-template-remediation",
@@ -5477,6 +5477,7 @@ def list_due(payload: dict[str, Any]) -> dict[str, Any]:
         if (
             metadata.get("claim_status", "none") != "none"
             or metadata.get("action_fingerprint", "")
+            or metadata.get("template_remediation_id", "")
             or (
                 pending_dispositions is None
                 and metadata.get("action_kind", "")

@@ -12037,6 +12037,14 @@ else:
                 "dispatch-template-remediation",
                 payload,
             )
+            calls_after_first = json.loads(
+                (root / "calls.json").read_text(encoding="utf-8")
+            )
+            watch_updates_after_first = [
+                call
+                for call in calls_after_first
+                if "update" in call["argv"] and watch_id in call["argv"]
+            ]
             second = self._run(
                 env,
                 "dispatch-template-remediation",
@@ -12053,6 +12061,18 @@ else:
             )
             self.assertTrue(first_json["created"])
             self.assertTrue(second_json["reused"])
+            calls_after_second = json.loads(
+                (root / "calls.json").read_text(encoding="utf-8")
+            )
+            watch_updates_after_second = [
+                call
+                for call in calls_after_second
+                if "update" in call["argv"] and watch_id in call["argv"]
+            ]
+            self.assertEqual(
+                watch_updates_after_second,
+                watch_updates_after_first,
+            )
             records = json.loads((root / "beads.json").read_text())
             remediation = next(
                 record
@@ -12071,6 +12091,16 @@ else:
                 "missing-make-check,unchecked-changelog",
             )
             self.assertIn(remediation["id"], watch["blocked_by"])
+            waiting_metadata = watch["metadata"]
+            self.assertEqual(waiting_metadata["action_kind"], "")
+            self.assertEqual(waiting_metadata["terminal_reason"], "")
+            due = self._run(
+                env | {"PR_BABYSIT_NOW": "2026-08-29T19:06:00Z"},
+                "list-due",
+                {"rig": "d2b"},
+            )
+            self.assertEqual(due.returncode, 0, due.stderr)
+            self.assertEqual(self._json(due)["watches"], [])
             calls = json.loads((root / "gc-calls.json").read_text())
             routes = [call for call in calls if "sling" in call]
             self.assertEqual(len(routes), 1)
@@ -12112,6 +12142,8 @@ else:
                 "",
             )
             self.assertEqual(resumed_metadata["template_errors"], "")
+            self.assertEqual(resumed_metadata["action_kind"], "")
+            self.assertEqual(resumed_metadata["terminal_reason"], "")
         finally:
             shutil.rmtree(root, ignore_errors=True)
 
