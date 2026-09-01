@@ -15,7 +15,7 @@
       "local": "skills/pr-babysit/SKILL.md",
       "source": "skills/ce-babysit-pr/SKILL.md",
       "sha256": "a611e493ae6979063d71f4990c2f6cda9c9f1a4b114a83717c26c66c4cf4bd90",
-      "local_sha256": "7e939f05b7e0ea4a4496d379fdf6c158ed08945b10e7d04f42f89f7b52e7b82b"
+      "local_sha256": "fa6e211b9dd84a4346be02aa76ed55a9121c2dd1584b712c1c51239362d9d9a6"
     },
     {
       "local": "skills/pr-babysit/references/branch-currency.md",
@@ -55,7 +55,7 @@
       "local": "skills/pr-babysit/references/tick.md",
       "source": "skills/ce-babysit-pr/references/tick.md",
       "sha256": "cf1fc87e87a3520c9446d997ff09ba2cccacb4a5e0a33f33fb9752325ede820c",
-      "local_sha256": "692f9ddc861e0663ce6fcf7dceb5c210d9abda9d5d875f1817b4e97fc5fff883"
+      "local_sha256": "9b4850ed8f0148c008f3889b5aa8f6d1e5a8b113a07db119a0f96e55feed7c40"
     },
     {
       "local": "skills/pr-babysit/references/watch-loop.md",
@@ -95,6 +95,7 @@
     "Bind repair validation to a persisted candidate head and independent reviewer verdict.",
     "Require structured current-snapshot merge-ready evidence and use crash-safe same-directory state writes.",
     "Expose the deterministic state CLI through the city-scoped core-city pack and keep the rig-imported pack command-free.",
-    "Require canonical pull-request template evidence before review or CI and route invalid bodies to a publisher-only remediation."
+    "Require canonical pull-request template evidence before review or CI and route invalid bodies to a publisher-only remediation.",
+    "Carry current-head validated make-check evidence into remediation, recover native session delivery through the cooldown sweep, and bind requested existing-PR work to the exact-head repair formula."
   ]
 }

@@ -30,6 +30,11 @@ and this project follows semantic versioning where releases are published.
 - Added a canonical PR template with required successful `make check`
   evidence and a pre-babysitting template gate that routes invalid bodies to
   one deterministic publisher remediation bead.
+- Added SHA-bound template evidence, native delivery recovery for drained
+  babysitter and unclaimed publisher sessions, and
+  `dispatch-requested-repair` so additional work on an existing PR reuses the
+  exact-head action, Grok review, and one-push fences instead of generic
+  `do-work`.
 - Recorded the EveryInc `compound-engineering-plugin`
   `compound-engineering-v3.23.4`
   source and commit provenance for the selected MIT-licensed target-only

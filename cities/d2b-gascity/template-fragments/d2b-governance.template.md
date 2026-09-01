@@ -11,6 +11,12 @@ Use the official Gas City pack workflows (`build-basic`, `implement`,
 `github-issue-fix`, and `publish`) and the Discord `mol-d2b-discord-fix-issue`
 extension. The extension is product-only because its workspace setup targets
 `origin/v3`; never use it for city-source work.
+Those generic workflows start new branch work from the repository target. They
+must not be used to add operator-requested source changes to an already watched
+pull request. Bind that work bead through
+`gc core-city pr-babysit dispatch-requested-repair` so the existing PR head,
+single action claim, configured reviewer, and one-push fence remain
+authoritative.
 
 For the `city-source` rig, keep `d2b-gascity` source work targeted to `main`.
 Every work bead handed to publication must carry `metadata.target=main` and

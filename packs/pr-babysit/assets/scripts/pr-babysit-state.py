@@ -67,12 +67,14 @@ BACKSTOP_BUDGET = timedelta(days=3)
 ORDER_TIMEOUT_SECONDS = 30
 BEADS_TIMEOUT_SECONDS = ORDER_TIMEOUT_SECONDS
 ROUTE_TIMEOUT_SECONDS = 20
+SESSION_DELIVERY_TIMEOUT_SECONDS = 3
 GAS_CITY_TIMEOUT_SECONDS = ROUTE_TIMEOUT_SECONDS
 FORMULA_TIMEOUT_SECONDS = ORDER_TIMEOUT_SECONDS
 GIT_VALIDATION_TIMEOUT_SECONDS = ORDER_TIMEOUT_SECONDS
 GITHUB_TIMEOUT_SECONDS = 60
 SWEEP_INTERVAL = timedelta(minutes=1)
 WAKE_LEASE = timedelta(seconds=10)
+DELIVERY_ACK_LEASE = timedelta(minutes=5)
 DEFAULT_DUE_LIMIT = 4
 MAX_DUE_LIMIT = 100
 SHA_RE = re.compile(r"^[0-9a-fA-F]{40}$")
@@ -146,6 +148,7 @@ SAFE_METADATA_KEYS = {
     "pending_disposition_generation",
     "template_remediation_id",
     "template_errors",
+    "make_check_evidence_sha",
     "formula_attached",
     "formula_root",
     "blocker_emitted",
@@ -175,6 +178,7 @@ SAFE_METADATA_KEYS = {
     "review_verdict_action_id",
     "review_verdict_generation",
     "review_verdict_head_sha",
+    "work_bead_id",
 }
 
 
@@ -415,6 +419,13 @@ def require_repair_credentials() -> None:
             "Pull requests read capability",
             "credential-capability",
         )
+
+
+def session_delivery_timeout_seconds() -> int:
+    return min(
+        route_timeout_seconds(),
+        SESSION_DELIVERY_TIMEOUT_SECONDS,
+    )
 
 
 def check_repair_credentials() -> dict[str, Any]:
@@ -3190,36 +3201,48 @@ def route_watch(target: str, watch_id: str, *, wake: bool = True) -> None:
         fail("Gas City babysitter route returned invalid JSON", "route-failed")
     if not isinstance(route_result, dict):
         fail("Gas City babysitter route returned invalid JSON", "route-failed")
-    if (
-        wake
-        and route_result.get("queued") is True
-        and route_result.get("routed") is False
-    ):
-        nudge_command = gc_command() + [
-            "session",
-            "nudge",
-            target,
-            f"Work is queued for Beads record {watch_id}. Run gc hook and claim it.",
-            "--delivery",
-            "queue",
-            "--json",
-        ]
-        try:
-            nudge_result = subprocess.run(
-                nudge_command,
-                cwd=beads_cwd(),
-                env=os.environ.copy(),
-                capture_output=True,
-                text=True,
-                check=False,
-                timeout=route_timeout_seconds(),
-            )
-        except subprocess.TimeoutExpired:
-            fail("Gas City babysitter nudge timed out", "route-failed")
-        except OSError:
-            fail("could not execute Gas City executable", "route-exec")
-        if nudge_result.returncode:
-            fail("Gas City babysitter nudge failed", "route-failed")
+
+
+def wake_watch_session(target: str, watch_id: str) -> None:
+    if target not in {
+        handoff_target(rig)
+        for rig in RIGS
+    }:
+        fail("watch wake target is not a babysitter session", "route-failed")
+    try:
+        nudge_session(target, watch_id)
+        return
+    except StateError:
+        pass
+    reset_command = gc_command() + [
+        "session",
+        "reset",
+        target,
+        "--json",
+    ]
+    try:
+        reset_result = subprocess.run(
+            reset_command,
+            cwd=beads_cwd(),
+            env=os.environ.copy(),
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=session_delivery_timeout_seconds(),
+        )
+    except subprocess.TimeoutExpired:
+        fail(
+            "Gas City babysitter session reset timed out",
+            "route-failed",
+        )
+    except OSError:
+        fail("could not execute Gas City executable", "route-exec")
+    if reset_result.returncode:
+        fail(
+            "Gas City babysitter session reset failed",
+            "route-failed",
+        )
+    nudge_session(target, watch_id)
 
 
 def template_remediation_id_for(watch_id: str, generation: int) -> str:
@@ -3279,6 +3302,11 @@ def dispatch_template_remediation(payload: dict[str, Any]) -> dict[str, Any]:
             fail("template_errors is required", "invalid-request")
         remediation_id = template_remediation_id_for(watch_id, generation)
         target = f"{metadata.get('rig', '')}/gc.publisher"
+        make_check_evidence_sha = (
+            head_sha
+            if metadata.get("last_pushed_sha", "") == head_sha
+            else ""
+        )
         remediation_metadata = {
             "record_kind": "template-remediation",
             "watch_id": watch_id,
@@ -3290,6 +3318,10 @@ def dispatch_template_remediation(payload: dict[str, Any]) -> dict[str, Any]:
             "template_errors": template_errors,
             "gc.routed_to": target,
         }
+        if make_check_evidence_sha:
+            remediation_metadata["make_check_evidence_sha"] = (
+                make_check_evidence_sha
+            )
         remediation_issue = show_bead_record_if_present(
             remediation_id,
             operation="template remediation show",
@@ -3301,10 +3333,17 @@ def dispatch_template_remediation(payload: dict[str, Any]) -> dict[str, Any]:
                 "repository pull-request template. Preserve the Summary, "
                 "Validation evidence, and Notes sections; check every required "
                 "item only with truthful evidence, including a successful exact "
-                "`make check`. If that evidence is unavailable, route the work "
-                "back to implementation instead of fabricating it. This is a "
-                "PR-body-only remediation: do not change source, push, merge, "
-                "rebase, or force-push. Template error codes: "
+                "`make check`. "
+                + (
+                    "The durable repair record proves exact `make check` passed "
+                    f"on current head {make_check_evidence_sha}; use that safe "
+                    "SHA-bound summary as the evidence value. "
+                    if make_check_evidence_sha
+                    else "If that evidence is unavailable, route the work back "
+                    "to implementation instead of fabricating it. "
+                )
+                + "This is a PR-body-only remediation: do not change source, "
+                "push, merge, rebase, or force-push. Template error codes: "
                 f"{template_errors}."
             )
             result = run_beads(
@@ -3482,7 +3521,7 @@ def publication_handoff(payload: dict[str, Any]) -> dict[str, Any]:
                 == identity["head_sha"]
             ):
                 try:
-                    route_watch(target, watch_id, wake=True)
+                    wake_watch_session(target, watch_id)
                 except StateError as error:
                     if error.code in {"route-failed", "route-exec"}:
                         block_route_failure(
@@ -3616,7 +3655,7 @@ def publication_handoff(payload: dict[str, Any]) -> dict[str, Any]:
             raise
 
         try:
-            route_watch(target, watch_id, wake=True)
+            wake_watch_session(target, watch_id)
         except StateError as error:
             if error.code in {"route-failed", "route-exec"}:
                 block_route_failure(
@@ -3909,6 +3948,42 @@ def claim_action(payload: dict[str, Any]) -> dict[str, Any]:
         return _claim_action_locked(payload, watch_id)
 
 
+def rearm_watch_for_requested_repair(
+    watch_id: str,
+    issue: dict[str, Any],
+    metadata: dict[str, str],
+) -> dict[str, str]:
+    ensure_rearm_formula_roots_clear(watch_id, metadata)
+    normalize_watch_claim(
+        watch_id,
+        issue,
+        "Rearm watch for requested pull-request work.",
+    )
+    invalidate_action_claim(watch_id, metadata, "rearmed")
+    clean_rearm_dependencies(watch_id)
+    observed_at = iso_now()
+    updates = clear_claim_updates(
+        "watching",
+        generation_from_metadata(metadata) + 1,
+        head_sha=metadata.get("head_sha", ""),
+        observed_at=observed_at,
+        next_snapshot_at=observed_at,
+        active_since=observed_at,
+        last_pushed_sha=metadata.get("last_pushed_sha", ""),
+        backstop_at=format_time(
+            parse_time(observed_at, "observed_at") + BACKSTOP_BUDGET
+        ),
+    )
+    metadata_updates(
+        watch_id,
+        updates,
+        status="open",
+        assignee="",
+    )
+    _, rearmed_metadata = show_issue(watch_id)
+    return rearmed_metadata
+
+
 def _claim_action_locked(
     payload: dict[str, Any],
     watch_id: str,
@@ -3929,7 +4004,7 @@ def _claim_action_locked(
     expected_generation = integer_value(generation_raw, "generation")
     head_sha = sha_value(head_raw, "head_sha")
     attempt_key = action_attempt_key(action_kind, fingerprint, head_sha)
-    _, metadata = show_issue(watch_id)
+    issue, metadata = show_issue(watch_id)
     if metadata.get("record_kind") != "watch":
         fail("requested Beads record is not a watch", "identity-mismatch")
     require_watch_receipt(metadata, watch_id)
@@ -3955,15 +4030,31 @@ def _claim_action_locked(
     state = state_from_metadata(metadata)
     generation = generation_from_metadata(metadata)
     attempts = attempts_from_metadata(metadata)
+    if generation != expected_generation or metadata.get("head_sha") != head_sha:
+        fail("action claim is stale for the current watch head", "stale-claim")
+    if state in REARMABLE_STATES:
+        rearm = bool_value(
+            payload_value(payload, "rearm", "allow_rearm"),
+            "rearm",
+        )
+        if action_kind != "requested" or not rearm:
+            fail(f"cannot claim an action while watch is {state}", "not-claimable")
+        metadata = rearm_watch_for_requested_repair(
+            watch_id,
+            issue,
+            metadata,
+        )
+        state = state_from_metadata(metadata)
+        generation = generation_from_metadata(metadata)
+        attempts = attempts_from_metadata(metadata)
+        expected_generation = generation
     if state == "waiting":
         fail(
             "waiting watch must transition to watching before repair",
             "illegal-transition",
         )
-    if state in {"blocked", "exhausted", "merge-ready", "terminal"}:
+    if state == "terminal":
         fail(f"cannot claim an action while watch is {state}", "not-claimable")
-    if generation != expected_generation or metadata.get("head_sha") != head_sha:
-        fail("action claim is stale for the current watch head", "stale-claim")
     action_id = action_id_for(watch_id, generation, action_kind, fingerprint)
     current_claim = metadata.get("claim_status", "none")
     if current_claim in {"claimed", "result-recorded"}:
@@ -4158,13 +4249,18 @@ def repair_formula_vars(
         "action_kind": action_kind,
         "fingerprint": watch_metadata.get("action_fingerprint", ""),
         "addressed_thread_ids": addressed_thread_ids,
+        "work_bead_id": action_metadata_value.get("work_bead_id", ""),
     }
     if any(
         value == ""
         for key, value in required.items()
-        if key != "addressed_thread_ids"
+        if key not in {"addressed_thread_ids", "work_bead_id"}
     ):
         fail("repair formula provenance is incomplete", "corrupt-state")
+    if action_kind == "requested" and not required["work_bead_id"]:
+        fail("requested repair has no work bead", "corrupt-state")
+    if action_kind != "requested" and required["work_bead_id"]:
+        fail("non-requested repair has a work bead", "corrupt-state")
     validate_watch_id(required["watch_id"])
     validate_watch_id(required["action_id"])
     parse_url(
@@ -4267,6 +4363,16 @@ def block_repair_dispatch(
 def dispatch_repair(payload: dict[str, Any]) -> dict[str, Any]:
     require_repair_credentials()
     watch_id = validate_watch_id(payload_value(payload, "watch_id", "id"))
+    work_bead_id_raw = payload_value(
+        payload,
+        "work_bead_id",
+        "requested_work_bead_id",
+    )
+    work_bead_id = (
+        ""
+        if work_bead_id_raw is None or work_bead_id_raw == ""
+        else validate_bead_id(work_bead_id_raw, "work_bead_id")
+    )
     addressed_thread_ids = safe_identifier_list(
         payload_value(
             payload,
@@ -4296,6 +4402,49 @@ def dispatch_repair(payload: dict[str, Any]) -> dict[str, Any]:
                 "generation": claim_result["generation"],
             }
         )
+        if action_kind == "requested":
+            if not work_bead_id:
+                fail(
+                    "requested repair requires work_bead_id",
+                    "invalid-request",
+                )
+            work_issue = show_bead_record_if_present(
+                work_bead_id,
+                operation="requested work show",
+            )
+            if work_issue is None or work_issue.get("status") == "closed":
+                block_repair_dispatch(
+                    watch_id,
+                    action_id,
+                    "requested-work-unavailable",
+                )
+                fail(
+                    "requested work bead is missing or closed",
+                    "not-claimable",
+                )
+            recorded_work_bead_id = action_metadata_value.get(
+                "work_bead_id",
+                "",
+            )
+            if (
+                recorded_work_bead_id
+                and recorded_work_bead_id != work_bead_id
+            ):
+                fail(
+                    "requested work bead changed after claim",
+                    "identity-mismatch",
+                )
+            if not recorded_work_bead_id:
+                metadata_updates(
+                    action_id,
+                    {"work_bead_id": work_bead_id},
+                )
+                action_metadata_value["work_bead_id"] = work_bead_id
+        elif work_bead_id:
+            fail(
+                "work_bead_id is only valid for requested repair",
+                "invalid-request",
+            )
         formula_state = formula_attachment_state(
             action_metadata_value.get("formula_attached")
         )
@@ -4405,6 +4554,36 @@ def dispatch_repair(payload: dict[str, Any]) -> dict[str, Any]:
             "formula_root": formula_root,
             "addressed_thread_ids": addressed_thread_ids,
         }
+
+
+def dispatch_requested_repair(payload: dict[str, Any]) -> dict[str, Any]:
+    work_bead_id = validate_bead_id(
+        payload_value(payload, "work_bead_id", "requested_work_bead_id"),
+        "work_bead_id",
+    )
+    work_issue = show_bead_record_if_present(
+        work_bead_id,
+        operation="requested work preflight",
+    )
+    if work_issue is None or work_issue.get("status") == "closed":
+        fail(
+            "requested work bead is missing or closed",
+            "not-claimable",
+        )
+    result = dispatch_repair(
+        {
+            **payload,
+            "action_kind": "requested",
+            "fingerprint": work_bead_id,
+            "work_bead_id": work_bead_id,
+        }
+    )
+    return {
+        **result,
+        "action": "dispatch-requested-repair",
+        "action_kind": "requested",
+        "work_bead_id": work_bead_id,
+    }
 
 
 def action_context(
@@ -5386,6 +5565,7 @@ def _checkpoint_locked(
         "observed_head_sha": observed_head,
         "last_snapshot_at": observed_at,
         "next_snapshot_at": next_snapshot_at,
+        "wake_lease_until": "",
         "active_since": active_since,
         "backstop_at": backstop_at,
     }
@@ -5615,6 +5795,206 @@ def list_due(payload: dict[str, Any]) -> dict[str, Any]:
     return {"ok": True, "action": "list-due", "watches": due}
 
 
+def gc_sessions() -> list[dict[str, Any]]:
+    command = gc_command() + ["session", "list", "--json"]
+    try:
+        result = subprocess.run(
+            command,
+            cwd=beads_cwd(),
+            env=os.environ.copy(),
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=session_delivery_timeout_seconds(),
+        )
+    except subprocess.TimeoutExpired:
+        fail("Gas City session list timed out", "route-failed")
+    except OSError:
+        fail("could not execute Gas City executable", "route-exec")
+    if result.returncode:
+        fail("Gas City session list failed", "route-failed")
+    try:
+        payload = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        fail("Gas City session list returned invalid JSON", "route-failed")
+    sessions = payload.get("sessions") if isinstance(payload, dict) else None
+    if not isinstance(sessions, list):
+        fail("Gas City session list returned invalid JSON", "route-failed")
+    return [session for session in sessions if isinstance(session, dict)]
+
+
+def publisher_session_id(
+    sessions: list[dict[str, Any]],
+    target: str,
+) -> str:
+    matches: list[dict[str, Any]] = []
+    numbered_target = re.compile(rf"^{re.escape(target)}-[1-9][0-9]*$")
+    for session in sessions:
+        if session.get("closed") is True:
+            continue
+        if session.get("state") not in {"active", "creating"}:
+            continue
+        name = str(session.get("name") or "")
+        agent_name = str(session.get("agent_name") or "")
+        if name == target or agent_name == target or numbered_target.fullmatch(
+            agent_name
+        ):
+            matches.append(session)
+    if not matches:
+        return ""
+    latest = max(
+        matches,
+        key=lambda session: (
+            str(session.get("created_at") or ""),
+            str(session.get("id") or ""),
+        ),
+    )
+    return validate_bead_id(latest.get("id"), "session_id")
+
+
+def nudge_session(session_id: str, bead_id: str) -> None:
+    command = gc_command() + [
+        "session",
+        "nudge",
+        session_id,
+        f"Work is queued for Beads record {bead_id}. Run gc hook and claim it.",
+        "--delivery",
+        "queue",
+        "--json",
+    ]
+    try:
+        result = subprocess.run(
+            command,
+            cwd=beads_cwd(),
+            env=os.environ.copy(),
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=session_delivery_timeout_seconds(),
+        )
+    except subprocess.TimeoutExpired:
+        fail("Gas City session nudge timed out", "route-failed")
+    except OSError:
+        fail("could not execute Gas City executable", "route-exec")
+    if result.returncode:
+        fail("Gas City session nudge failed", "route-failed")
+
+
+def recover_template_remediation_delivery(
+    rig: str,
+    now: datetime,
+    limit: int,
+) -> int:
+    result = run_beads(
+        [
+            "list",
+            "--all",
+            "--status",
+            "open",
+            "--metadata-field",
+            "record_kind=template-remediation",
+            "--metadata-field",
+            f"rig={rig}",
+            "--json",
+        ]
+    )
+    records = require_beads(result, "template remediation list")
+    if isinstance(records, dict) and isinstance(records.get("issues"), list):
+        records = records["issues"]
+    if not isinstance(records, list):
+        fail(
+            "Beads template remediation list returned an invalid result",
+            "beads-invalid-response",
+        )
+    eligible: list[tuple[datetime, str]] = []
+    target = f"{rig}/gc.publisher"
+    for record in records:
+        if not isinstance(record, dict) or not record.get("id"):
+            continue
+        if record.get("status") != "open" or record.get("assignee"):
+            continue
+        metadata = raw_metadata_from_issue(record)
+        if (
+            metadata.get("record_kind") != "template-remediation"
+            or metadata.get("rig") != rig
+            or metadata.get("gc.routed_to") != target
+            or metadata.get("gc.claimed_at")
+        ):
+            continue
+        lease_until = metadata.get("wake_lease_until", "")
+        if lease_until and parse_time(
+            lease_until,
+            "wake_lease_until",
+        ) > now:
+            continue
+        created_at = record.get("created_at") or record.get("updated_at")
+        if not created_at:
+            continue
+        created_time = parse_time(created_at, "created_at")
+        if created_time > now - SWEEP_INTERVAL:
+            continue
+        eligible.append(
+            (
+                created_time,
+                validate_bead_id(record["id"]),
+            )
+        )
+    if not eligible:
+        return 0
+    sessions = gc_sessions()
+    session_id = publisher_session_id(sessions, target)
+    if not session_id:
+        return 0
+    eligible.sort(key=lambda item: (item[0], item[1]))
+    nudged = 0
+    for _, remediation_id in eligible[:limit]:
+        lease_until = format_time(now + DELIVERY_ACK_LEASE)
+        with watch_lock(remediation_id, blocking=False) as acquired:
+            if not acquired:
+                continue
+            issue = show_bead_record_if_present(
+                remediation_id,
+                operation="template remediation delivery",
+            )
+            if issue is None or issue.get("status") != "open":
+                continue
+            metadata = raw_metadata_from_issue(issue)
+            if (
+                metadata.get("gc.claimed_at")
+                or metadata.get("gc.routed_to") != target
+            ):
+                continue
+            recorded_lease = metadata.get("wake_lease_until", "")
+            if recorded_lease and parse_time(
+                recorded_lease,
+                "wake_lease_until",
+            ) > now:
+                continue
+            metadata_updates(
+                remediation_id,
+                {"wake_lease_until": lease_until},
+            )
+        try:
+            nudge_session(session_id, remediation_id)
+        except StateError:
+            with watch_lock(remediation_id, blocking=False) as acquired:
+                if acquired:
+                    issue = show_bead_record_if_present(
+                        remediation_id,
+                        operation="template remediation delivery cleanup",
+                    )
+                    if issue is not None:
+                        metadata = raw_metadata_from_issue(issue)
+                        if metadata.get("wake_lease_until") == lease_until:
+                            metadata_updates(
+                                remediation_id,
+                                {"wake_lease_until": ""},
+                            )
+            raise
+        nudged += 1
+    return nudged
+
+
 def sweep(payload: dict[str, Any]) -> dict[str, Any]:
     rig = text_value(payload_value(payload, "rig"), "rig")
     if rig not in RIGS:
@@ -5695,7 +6075,7 @@ def sweep(payload: dict[str, Any]) -> dict[str, Any]:
                 "wake_lease_until",
             ) > now:
                 continue
-            lease_until = format_time(now + WAKE_LEASE)
+            lease_until = format_time(now + DELIVERY_ACK_LEASE)
             metadata_updates(
                 watch_id,
                 {
@@ -5704,7 +6084,7 @@ def sweep(payload: dict[str, Any]) -> dict[str, Any]:
                 },
             )
         try:
-            route_watch(target, watch_id)
+            wake_watch_session(target, watch_id)
         except StateError as error:
             if lease_until is not None:
                 try:
@@ -5720,25 +6100,28 @@ def sweep(payload: dict[str, Any]) -> dict[str, Any]:
                     pass
             route_errors.append(error)
             continue
-        if lease_until is not None:
-            with watch_lock(watch_id, blocking=False) as acquired:
-                if acquired:
-                    _, current_metadata = show_issue(watch_id)
-                    if current_metadata.get("wake_lease_until") == lease_until:
-                        metadata_updates(
-                            watch_id,
-                            {"wake_lease_until": ""},
-                        )
-            routed += 1
+        routed += 1
 
+    remediation_error: StateError | None = None
+    try:
+        remediations_nudged = recover_template_remediation_delivery(
+            rig,
+            now,
+            limit,
+        )
+    except StateError as error:
+        remediations_nudged = 0
+        remediation_error = error
     if route_errors:
         raise route_errors[0]
-
+    if remediation_error is not None:
+        raise remediation_error
     return {
         "ok": True,
         "action": "sweep",
         "rig": rig,
         "routed": routed,
+        "remediations_nudged": remediations_nudged,
     }
 
 
@@ -5842,6 +6225,12 @@ def parse_cli_request(argv: list[str]) -> dict[str, Any]:
                 "head_sha",
                 "template_errors",
             ),
+            "dispatch-requested-repair": (
+                "watch_id",
+                "generation",
+                "head_sha",
+                "work_bead_id",
+            ),
             "record-candidate-head": (
                 "watch_id",
                 "action_id",
@@ -5927,6 +6316,8 @@ def dispatch(payload: dict[str, Any]) -> dict[str, Any]:
         return dispatch_repair(payload)
     if action == "dispatch-template-remediation":
         return dispatch_template_remediation(payload)
+    if action == "dispatch-requested-repair":
+        return dispatch_requested_repair(payload)
     if action == "record-candidate-head":
         return record_candidate_head(payload)
     if action == "record-worker-signoff":

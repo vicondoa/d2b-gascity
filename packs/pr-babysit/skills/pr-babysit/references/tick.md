@@ -75,10 +75,14 @@ watches with an open or unconfirmed child wait for the native
 dependency-close wake. A `waiting` watch with an open template remediation
 also waits for dependency closure; the routed wake takes a fresh snapshot and
 returns the watch to `watching` only after `template.valid=true`. The next
-fresh snapshot after a confirmed review action must match carried IDs to
-current content identities, run `pr-snapshot mark` for every match, and then
-call `acknowledge-dispositions`; missing or edited IDs remain actionable or
-block.
+cooldown sweep queues one leased nudge when that publisher remediation remains
+open and unclaimed for a full interval; it does not inspect or persist the PR
+body. A due watch receives one queued session nudge rather than a sling reminder
+plus a second message. Its five-minute delivery lease stays set until this
+checkpoint clears it. The next fresh snapshot after a confirmed review action
+must match carried IDs to current content identities, run `pr-snapshot mark`
+for every match, and then call `acknowledge-dispositions`; missing or edited
+IDs remain actionable or block.
 A confirmed action starts the next checkpoint from a fresh snapshot.
 
 `waiting` may settle to `merge-ready` or `blocked`, or return to `watching`.

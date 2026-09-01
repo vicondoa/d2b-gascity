@@ -215,8 +215,18 @@ gc core-city pr-babysit dispatch-template-remediation \
 ```
 
 The remediation bead blocks the watch and is slung to `<rig>/gc.publisher`.
-It may update only the PR body from truthful evidence. A missing successful
-`make check` must be routed back to implementation rather than fabricated.
+It may update only the PR body from truthful evidence. When its metadata has
+`make_check_evidence_sha` equal to the current head, the publisher may record
+`exact make check passed on <sha>`; the field exists only for a durable
+validated push. Without it, missing `make check` evidence must be routed back
+to implementation rather than fabricated.
+
+Operator-requested source work for an existing watched PR must use
+`gc core-city pr-babysit dispatch-requested-repair` with the exact current
+generation, head SHA, and requested-work bead ID. Never route that work through
+generic `do-work`: the requested command explicitly rearms stopped watches,
+creates one `requested` action claim, and reuses the exact-head implementation,
+Grok review, and one-push repair Formula.
 
 Only `watching` and `waiting` records without an action claim are eligible for
 the cooldown sweep; a confirmed review carryover may retain its action kind and
@@ -224,7 +234,12 @@ addressed IDs while remaining eligible. A `repairing` record with an open or
 unconfirmed child waits for native dependency closure. A `waiting` record with
 an open template remediation also waits for dependency closure; its routed
 wake takes a fresh snapshot and checkpoints back to `watching` only after the
-template is valid. A changed head invalidates stale claims and evidence.
+template is valid. When that remediation remains open and unclaimed for one
+cooldown interval, the same sweep queues one leased nudge to the active native
+publisher session. Watch wakes also use one queued session nudge, never a
+second sling reminder. The five-minute delivery lease remains until the next
+checkpoint acknowledges and clears it. A changed head invalidates stale claims
+and evidence.
 Confirmed repair actions resume from a fresh snapshot.
 
 ## Bounded repair dispatch

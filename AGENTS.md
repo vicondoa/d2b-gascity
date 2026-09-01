@@ -78,16 +78,27 @@ action child with `bd dep <action-id> --blocks <watch-id>`; native dependency
 closure wakes the watch. The `pr-babysit-sweep` cooldown order runs every
 `1m` and performs one short checkpoint, not a daemon or resident watcher.
 Under the watch lock it rechecks due time and a short `wake_lease_until`,
-advances the next snapshot, and settles the lease after routing so concurrent
-sweeps issue one nudge.
-Checkpoint order is snapshot, terminal, head, review, current-head CI, exact
-branch currency, then one state write.
+advances the next snapshot, and retains one five-minute delivery lease after
+queueing. The next checkpoint clears that lease; route failure clears it
+immediately. Concurrent or repeated sweeps therefore issue one queued nudge,
+not an accumulating sling-plus-session pair.
+The same order recovers stale unclaimed publisher remediations through the
+active native publisher session and restarts a drained named babysitter before
+retrying its queued nudge. It does not own either session lifecycle.
+Checkpoint order is snapshot, terminal, head, pull-request template, review,
+current-head CI, exact branch currency, then one state write.
 
 `mol-pr-babysit-repair` is Formula v2. It validates `make check`, pushes only
 the existing PR head, and records the resulting SHA. Budgets are three CI
 attempts and two review attempts per action kind, fingerprint, and head SHA,
 plus eight active hours and a three-day backstop. A new head starts a fresh
 attempt counter.
+Operator-requested source work on an already watched pull request must use
+`gc core-city pr-babysit dispatch-requested-repair`; never send it through
+generic `do-work`, which starts from the repository target rather than the
+current PR head. The requested action explicitly rearms a stopped watch, binds
+the work bead, and reuses the exact-head worktree, implementation worker, Grok
+reviewer, and one-push Formula fence.
 The first version does not use `update-branch`: repair is operator-attested
 with Contents write and Pull requests read only, while the agent cannot
 introspect fine-grained permissions. Pull requests write, merge/admin,
